@@ -20,6 +20,7 @@ Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoff
 `qcoffee --stats` writes instruction and remaining-fuel counters to stderr while preserving program stdout; it cannot be combined with `--check` or `--dump-bytecode`.
 
 `qcoffee --interactive` (or `-i`) keeps one Context across input lines; `:help` lists commands and `:quit`/`:exit` leave the session. Piped input receives no prompts.
+With `--stats`, each non-empty interactive line also writes its instruction and remaining-fuel counters to stderr.
 
 Arguments after `--` are exposed as the ordinary string array `argv`: `qcoffee program.qc -- first second` makes `len(argv)` evaluate to `2`. No host process or environment object is exposed.
 

@@ -25,6 +25,7 @@ qcoffee --dump-bytecode program.qc
 `qcoffee --stats` 将指令数与剩余 fuel 写入标准错误，同时保持程序标准输出不变；不可与 `--check` 或 `--dump-bytecode` 合用。
 
 `qcoffee --interactive`（或 `-i`）在输入行之间保持同一 Context；`:help` 列出命令，`:quit`/`:exit` 退出会话。管道输入不输出提示符。
+交互模式加 `--stats` 时，每个非空输入行也会把指令数与剩余 fuel 写入标准错误。
 
 `--` 之后的参数以普通字符串数组 `argv` 提供：`qcoffee program.qc -- first second` 中 `len(argv)` 为 `2`。引擎不会暴露宿主进程或环境对象。
 

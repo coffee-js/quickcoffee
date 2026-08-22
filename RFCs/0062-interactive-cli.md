@@ -21,6 +21,8 @@ qcoffee> :quit
 
 单行 Parse、Verify 或 Runtime 错误打印到 stderr，当前会话继续运行，已有全局绑定保持不变。`--fuel N` 为每一行执行建立同一上限，防止单行无限循环阻塞后续输入。交互模式不能与源文件、`-e`、`--check` 或 `--dump-bytecode` 合用。
 
+交互模式可与 RFC 0067 的 `--stats` 合用；每个非空源码行执行后输出一条指令数与剩余 fuel 统计，命令行和空行不执行字节码。
+
 ## 非目标
 
 本 RFC 不加入隐式调用、JavaScript REPL 对象、原型链或跨行自动恢复；需要多行程序时使用文件、标准输入或 qdocco。

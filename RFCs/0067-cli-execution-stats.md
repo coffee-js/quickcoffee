@@ -23,7 +23,7 @@ qcoffee stats: instructions=N fuel_remaining=M
 
 其中 `N` 与 `M` 直接来自 RFC 0066 的 `Context::last_execution()`。成功、运行时错误和 fuel 耗尽均输出统计；错误消息仍按原有 CLI 契约输出，退出码不变。`instructions` 是已尝试的指令数，`fuel_remaining` 是停止时剩余 fuel。
 
-`--stats` 只适用于实际执行模式（`-e SOURCE`、FILE 或 `-`）。与 `--check`、`--dump-bytecode` 同时使用是参数错误，退出码为 `2`；这两种模式不执行字节码，因而没有本次执行统计。
+`--stats` 适用于实际执行模式（`-e SOURCE`、FILE、`-` 或 `--interactive`）。交互模式为每个非空输入行输出一条统计；`:help`、`:quit` 和空行不执行字节码，因而不输出统计。与 `--check`、`--dump-bytecode` 同时使用是参数错误，退出码为 `2`；这两种模式不执行字节码，因而没有本次执行统计。
 
 ## 验收
 

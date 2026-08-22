@@ -9,6 +9,7 @@
 <p>qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改。</p>
 <p>qcoffee --check FILE 者，析编验其文而不行也。</p>
 <p>qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。</p>
+<p>qcoffee --interactive --stats 每一非空行皆书指令与余燃料一条。</p>
 <p>qtest --fuel N 者，为各可行文别限其指令之数。</p>
 <p>qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。</p>
 <p>宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。</p>
@@ -67,6 +68,8 @@ continued == 7
 message = &quot;hello
   world&quot;
 message == 'hello world'
+escaped = &quot;A\\x42\\u{43}&quot;
+escaped == 'ABC'
 folded = (1 + 2 * 3) == 7
 folded
 values = [

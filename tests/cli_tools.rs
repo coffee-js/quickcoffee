@@ -226,6 +226,24 @@ fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "40\n42\n42\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown name 'missing'"));
 
+    let mut stats_process = Command::new(bin("qcoffee"))
+        .args(["--interactive", "--stats"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    stats_process
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"1 + 2\n:quit\n")
+        .unwrap();
+    let stats_output = stats_process.wait_with_output().unwrap();
+    assert!(stats_output.status.success());
+    assert_eq!(String::from_utf8_lossy(&stats_output.stdout), "3\n");
+    assert!(String::from_utf8_lossy(&stats_output.stderr).contains("qcoffee stats: instructions="));
+
     let conflict = Command::new(bin("qcoffee"))
         .args(["--interactive", "-e", "1 + 1"])
         .output()

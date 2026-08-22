@@ -7,7 +7,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [-e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -17,7 +17,7 @@ fn read_source(path: &str) -> Result<String, String> {
         fs::read_to_string(path).map_err(|error| format!("read error: {error}"))
     }
 }
-fn repl(fuel: u64, script_args: Vec<String>) -> ExitCode {
+fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
     let stdin = io::stdin();
     let show_prompt = stdin.is_terminal() && io::stdout().is_terminal();
     let mut context = Context::new().with_fuel(fuel);
@@ -55,11 +55,21 @@ fn repl(fuel: u64, script_args: Vec<String>) -> ExitCode {
                 println!(":help  show this help\n:quit  exit the session");
             }
             "" => {}
-            source => match context.eval(source) {
-                Ok(value) if !matches!(value, Value::Nil) => println!("{value}"),
-                Ok(_) => {}
-                Err(error) => eprintln!("{error}"),
-            },
+            source => {
+                let result = context.eval(source);
+                if stats {
+                    let execution = context.last_execution();
+                    eprintln!(
+                        "qcoffee stats: instructions={} fuel_remaining={}",
+                        execution.instructions, execution.fuel_remaining
+                    );
+                }
+                match result {
+                    Ok(value) if !matches!(value, Value::Nil) => println!("{value}"),
+                    Ok(_) => {}
+                    Err(error) => eprintln!("{error}"),
+                }
+            }
         }
     }
     ExitCode::SUCCESS
@@ -71,6 +81,7 @@ fn main() -> ExitCode {
     let mut dump = false;
     let mut check = false;
     let mut stats = false;
+    let mut interactive = false;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -173,7 +184,7 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(2);
         }
-        return repl(fuel, script_args);
+        return repl(fuel, script_args, stats);
     }
     let Some(source) = source else {
         usage();
