@@ -21,6 +21,7 @@
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
 ## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.
 ## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
+## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.

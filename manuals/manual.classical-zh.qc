@@ -29,6 +29,7 @@
 ## qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 ## 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失。
 ## cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
+## 宿主可用 Value::kind() 别其类，Value::is_nil() 验 nil，不窥其内容器。
 ## Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。
 ## Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 ## -- 后之参，以常字符串数组 argv 见于文中。

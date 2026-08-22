@@ -25,6 +25,7 @@
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
 ## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis.
 ## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
+## Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
 ## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.

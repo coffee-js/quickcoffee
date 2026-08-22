@@ -22,6 +22,7 @@
 ## qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
 ## 嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值。
 ## cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
+## 宿主可用 Value::kind() 分流类型，用 Value::is_nil() 判断 nil，无须检查内部容器。
 ## Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
 ## -- 后的参数以普通字符串数组 argv 暴露给程序。
