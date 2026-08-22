@@ -1306,20 +1306,26 @@ fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Val
             Ok(Value::Array(Rc::new(values[start..end].to_vec())))
         }
         Value::String(text) => {
-            let values: Vec<char> = text.chars().collect();
-            let start = slice_bound(start, values.len(), "slice start")?;
-            let mut end = slice_bound(end, values.len(), "slice end")?;
+            let scalar_len = text.chars().count();
+            let start = slice_bound(start, scalar_len, "slice start")?;
+            let mut end = slice_bound(end, scalar_len, "slice end")?;
             if inclusive {
                 end = end
                     .checked_add(1)
                     .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
             }
-            if start > end || end > values.len() {
+            if start > end || end > scalar_len {
                 return Err(Error::runtime("slice bounds out of range"));
             }
-            Ok(Value::String(Rc::from(
-                values[start..end].iter().collect::<String>(),
-            )))
+            let start_byte = text
+                .char_indices()
+                .nth(start)
+                .map_or(text.len(), |(offset, _)| offset);
+            let end_byte = text
+                .char_indices()
+                .nth(end)
+                .map_or(text.len(), |(offset, _)| offset);
+            Ok(Value::String(Rc::from(&text[start_byte..end_byte])))
         }
         _ => Err(Error::runtime("slice expects an array or string")),
     }
