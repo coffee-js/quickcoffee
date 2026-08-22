@@ -11,7 +11,7 @@
 
 ## 字节码与验证
 
-`IterStartArray` 消耗栈顶的步长和其下的数组，建立 `{ values, position, step }` 帧私有迭代器；`IterStartMap` 仍只消耗映射。验证器相应要求数组开始指令有两个栈值，并继续追踪迭代器在 `IterNext`、`IterEnd` 与 `Return` 的平衡。VM 以饱和加法更新位置，防止极大合法步长造成整数回绕。
+`IterStartEnumerable` 消耗栈顶的步长和其下的数组或字符串，建立帧私有迭代器；数组按步长前进，字符串仅接受步长 1（字符串语义详见 RFC 0070）。`IterStartMap` 仍只消耗映射。验证器相应要求 enumerable 开始指令有两个栈值，并继续追踪迭代器在 `IterNext`、`IterEnd` 与 `Return` 的平衡。VM 以饱和加法更新数组位置，防止极大合法步长造成整数回绕。
 
 ## 验收
 
