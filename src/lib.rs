@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! CoffeeScript-inspired parser, compiler, bytecode VM, and embedding API.
 //! The public API intentionally exposes values and native functions, never JS-like objects.
 

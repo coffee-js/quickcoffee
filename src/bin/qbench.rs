@@ -1,3 +1,5 @@
+//! Release benchmark runner with semantic guards and machine-readable timing output.
+
 use quickcoffee::{Context, Engine};
 use std::{env, process::ExitCode, time::Instant};
 

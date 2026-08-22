@@ -1,3 +1,5 @@
+//! Literate-programming renderer and checker for QuickCoffee sources.
+
 use quickcoffee::{Context, Engine};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 

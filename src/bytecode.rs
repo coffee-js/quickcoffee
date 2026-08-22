@@ -8,6 +8,7 @@ use std::{
 };
 
 /// A strict, recursively shaped binding pattern used by destructuring assignment.
+#[allow(missing_docs)]
 #[derive(Clone, Debug)]
 pub enum Pattern {
     Ignore,
@@ -25,11 +26,16 @@ pub enum Pattern {
     },
 }
 
+/// Verified bytecode consisting of a constant pool and instruction stream.
 #[derive(Clone, Debug, Default)]
 pub struct Chunk {
+    /// Values and nested functions referenced by instructions.
     pub constants: Vec<Constant>,
+    /// Instructions executed by the VM.
     pub code: Vec<Instruction>,
 }
+/// A value or nested function stored in a [`Chunk`] constant pool.
+#[allow(missing_docs)]
 #[derive(Clone, Debug)]
 pub enum Constant {
     Value(Value),
@@ -40,6 +46,8 @@ pub enum Constant {
         chunk: Rc<Chunk>,
     },
 }
+/// The public low-level instruction set accepted by [`Chunk::verify`].
+#[allow(missing_docs)]
 #[derive(Clone, Debug)]
 pub enum Instruction {
     Constant(usize),
@@ -112,6 +120,7 @@ pub enum Instruction {
 }
 
 impl Chunk {
+    /// Returns a human-readable instruction listing with stable program counters.
     pub fn disassemble(&self) -> String {
         self.code
             .iter()
@@ -129,6 +138,7 @@ impl Chunk {
         encoder.chunk(self);
         encoder.finish()
     }
+    /// Verifies stack/control-flow safety before execution.
     pub fn verify(&self) -> Result<(), Error> {
         if self.code.is_empty() {
             return Err(Error::verify("chunk is empty"));
