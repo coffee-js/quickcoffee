@@ -122,3 +122,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 多行数组和映射可按行省略逗号；调用参数与普通括号内表达式仍须显式分隔。
 
 单独赋值行（`record =`）后可缩进书写映射；嵌套的 `key: value` 条目会成为无原型映射，普通赋值续行不受影响。
+
+同一逻辑行的调用可省略括号：`implicit_answer = implicit_add 20, 22`；比较或跨布局边界时仍可使用显式括号。

@@ -416,7 +416,8 @@ impl Parser {
                 left = Expr::Call(Box::new(left), args);
                 continue;
             }
-            if self.eat(&Token::LBracket) {
+            if matches!(self.peek(), Token::LBracket) && !self.bracket_is_collection_literal() {
+                self.next();
                 let start = self.expr(0)?;
                 let inclusive = if self.eat(&Token::RangeInclusive) {
                     Some(true)
@@ -527,6 +528,17 @@ impl Parser {
             }
             if min == 0 && self.eat(&Token::For) {
                 left = self.for_tail(left)?;
+                continue;
+            }
+            if self.can_be_called(&left)
+                && self.implicit_argument_starts(self.at)
+                && !matches!(
+                    (self.peek(), self.tokens.get(self.at + 1)),
+                    (Token::Not, Some(Token::In | Token::Of))
+                )
+            {
+                let args = self.implicit_arguments()?;
+                left = Expr::Call(Box::new(left), args);
                 continue;
             }
             let negated_membership = match (self.peek(), self.tokens.get(self.at + 1)) {
@@ -643,6 +655,84 @@ impl Parser {
                     | Token::LBrace
             )
         )
+    }
+    fn bracket_is_collection_literal(&self) -> bool {
+        if !matches!(self.peek(), Token::LBracket) {
+            return false;
+        }
+        let mut depth = 0usize;
+        for token in self.tokens.iter().skip(self.at) {
+            match token {
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Comma | Token::Semi if depth == 1 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+    fn implicit_argument_starts(&self, index: usize) -> bool {
+        matches!(
+            self.tokens.get(index),
+            Some(
+                Token::Number(_)
+                    | Token::String(_, _)
+                    | Token::Ident(_)
+                    | Token::True
+                    | Token::False
+                    | Token::Nil
+                    | Token::Not
+                    | Token::LParen
+                    | Token::Arrow
+                    | Token::FatArrow
+                    | Token::LBracket
+                    | Token::LBrace
+                    | Token::Do
+            )
+        )
+    }
+    fn can_be_called(&self, expression: &Expr) -> bool {
+        matches!(
+            expression,
+            Expr::Name(_)
+                | Expr::Member(_, _)
+                | Expr::Call(_, _)
+                | Expr::SoakCall(_, _)
+                | Expr::SoakMember(_, _)
+                | Expr::Function(_, _, _)
+                | Expr::Class(_, _, _)
+                | Expr::Do(_)
+        )
+    }
+    fn implicit_arguments(&mut self) -> Result<Vec<Item>, Error> {
+        let mut args = vec![];
+        loop {
+            let item = self.expr(0)?;
+            args.push(if self.eat(&Token::Ellipsis) {
+                Item::Splat(item)
+            } else {
+                Item::Expr(item)
+            });
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+            if matches!(
+                (self.tokens.get(self.at), self.tokens.get(self.at + 1)),
+                (Some(Token::Ident(_)), Some(Token::Colon))
+            ) {
+                self.at -= 1;
+                break;
+            }
+            if !self.implicit_argument_starts(self.at) {
+                return Err(self.parse_error("expected implicit call argument after comma"));
+            }
+        }
+        Ok(args)
     }
     fn prefix(&mut self) -> Result<Expr, Error> {
         match self.next() {

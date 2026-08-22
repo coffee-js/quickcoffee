@@ -77,3 +77,5 @@ Ad iterandum programmatum compilatum, `Engine::compile_program` dat `Program` co
 In seriebus et mapis per plures lineas, commata omitti possunt; argumenta functionum et parenteses ordinariae separationem apertam servant.
 
 Post assignationem solam (`record =`) mapa per indentationem scribi potest; claves interiores sine prototypo fiunt, nec continuatio ordinaria confunditur.
+
+In una linea logica, functio sine parenthesibus vocari potest: `implicit_answer = implicit_add 20, 22`; apud comparationes vel limites ordinis parenthesibus uti licet.

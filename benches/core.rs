@@ -78,6 +78,12 @@ fn main() {
             expected: "3",
         },
         Workload {
+            name: "implicit-calls",
+            source: "add = (left, right) -> left + right\nanswer = add 20, 22\nanswer",
+            iterations: 20_000,
+            expected: "42",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,

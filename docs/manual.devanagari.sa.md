@@ -79,3 +79,5 @@ host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Par
 बहु-पङ्क्ति array तथा map मध्ये comma त्यक्तुं शक्यते; call-argument तथा सामान्य parenthesis मध्ये स्पष्ट-विभागः आवश्यकः।
 
 एकाकी assignment (`record =`) अनन्तरं indentation द्वारा map लिखितुं शक्यते; nested `key: value` prototype-विहीनं भवति, सामान्य continuation न विपर्यस्यते।
+
+एकस्यां logical-line मध्ये call-parenthesis विना अपि शक्यते: `implicit_answer = implicit_add 20, 22`; comparison अथवा layout-boundary मध्ये explicit parenthesis प्रयोजनीया।

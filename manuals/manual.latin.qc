@@ -79,6 +79,9 @@ indented_record =
   nested:
     second: 22
 indented_record.nested.second == 22
+implicit_add = (left, right) -> left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
 3 not in [1, 2] and 'absens' not of {praesens: 1}
 numerus_circuli = 0
 loop

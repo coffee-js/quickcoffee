@@ -17,6 +17,24 @@ fn arithmetic_precedence_and_arrays() {
     assert!(Context::new().eval("1.5 & 1").is_err());
 }
 #[test]
+fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
+    assert_eq!(
+        eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("increment = (value) -> value + 1\nincrement 2 * 3").as_number(),
+        Some(7.)
+    );
+    assert_eq!(
+        eval("increment = (value) -> value + 1\ndouble = (value) -> value * 2\ndouble increment 2")
+            .as_number(),
+        Some(6.)
+    );
+    assert_eq!(eval("len [1, 2, 3]").as_number(), Some(3.));
+    assert!(Context::new().eval("add(20 22)").is_err());
+}
+#[test]
 fn explicit_operator_line_continuation_preserves_expression_and_layout() {
     assert_eq!(eval("value = 1 +\n  2 * 3\nvalue").as_number(), Some(7.));
     assert_eq!(

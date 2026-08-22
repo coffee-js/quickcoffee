@@ -101,3 +101,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 Multiline arrays and maps may omit commas at line boundaries; calls and ordinary parentheses still require explicit separators.
 
 An indented map may follow a standalone assignment (`record =`); nested `key: value` entries become a prototype-free map without changing ordinary assignment continuations.
+
+Calls may omit parentheses on one logical line: `implicit_answer = implicit_add 20, 22`; explicit parentheses remain available for unambiguous comparisons and layout boundaries.
