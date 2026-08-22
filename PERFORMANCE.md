@@ -130,6 +130,14 @@ for n in [1...100] by 3 then sum = sum + n
 sum
 ```
 
+stepped-string-iteration（20,000 次）：
+
+```coffee
+sum = 0
+for character, index in 'a☕中x' by 2 then sum += index
+sum
+```
+
 for-collection（10,000 次）：
 
 ```coffee
@@ -250,6 +258,7 @@ sum
 | closures-and-ranges | 50.954 ms | 196,255 programs/s | 368.589 ms | 27,130 programs/s |
 | bare-lambda | 49.829 ms | 200,686 programs/s | 367.051 ms | 27,244 programs/s |
 | stepped-iteration | 31.895 ms | 313,529 programs/s | 123.921 ms | 80,697 programs/s |
+| stepped-string-iteration | 69.630 ms | 287,232 programs/s | 49.288 ms | 405,780 programs/s |
 | for-collection | 36.532 ms | 273,733 programs/s | 310.488 ms | 32,207 programs/s |
 | postfix-comprehension | 43.229 ms | 231,326 programs/s | 542.345 ms | 18,438 programs/s |
 | for-pattern-bindings | 57.605 ms | 173,596 programs/s | 946.521 ms | 10,565 programs/s |
@@ -460,6 +469,7 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 | closures-and-ranges | 50.707 / 52.681 / 50.954 | 386.383 / 368.550 / 368.589 |
 | bare-lambda | 49.267 / 51.139 / 49.829 | 367.051 / 366.815 / 367.863 |
 | stepped-iteration | 31.774 / 32.983 / 31.895 | 123.424 / 123.921 / 125.822 |
+| stepped-string-iteration | 69.630 / 68.868 / 72.102 | 49.175 / 50.030 / 49.288 |
 | for-collection | 35.892 / 37.276 / 36.532 | 310.488 / 310.415 / 320.711 |
 | postfix-comprehension | 42.830 / 45.106 / 43.229 | 542.345 / 541.648 / 555.071 |
 | for-pattern-bindings | 57.142 / 59.312 / 57.605 | 943.416 / 946.521 / 965.377 |

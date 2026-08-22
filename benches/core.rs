@@ -72,6 +72,12 @@ fn main() {
             expected: "3",
         },
         Workload {
+            name: "stepped-string-iteration",
+            source: "sum = 0\nfor character, index in 'a☕中x' by 2 then sum += index\nsum",
+            iterations: 20_000,
+            expected: "2",
+        },
+        Workload {
             name: "string-escapes",
             source: "message = \"A\\x42\\u{43}\"\nlen(message) + (if message == 'ABC' then 1 else 0)",
             iterations: 20_000,

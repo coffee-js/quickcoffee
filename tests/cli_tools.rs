@@ -352,7 +352,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(json.status.success());
     let stdout = String::from_utf8_lossy(&json.stdout);
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines.len(), 5);
+    assert!(stdout.contains("\"name\":\"stepped-string-iteration\""));
     for line in lines {
         assert!(line.starts_with('{') && line.ends_with('}'));
         for field in [
