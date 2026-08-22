@@ -304,6 +304,26 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 
     let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.qc", std::process::id()));
     fs::write(&temp, "1 + 2\n").unwrap();
+    let conflicting_source = Command::new(bin("qcoffee"))
+        .args(["-e", "1", "--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(conflicting_source.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&conflicting_source.stderr).contains("execution-mode alternatives")
+    );
+
+    let repeated_dump = Command::new(bin("qcoffee"))
+        .args([
+            "--dump-bytecode",
+            temp.to_str().unwrap(),
+            "--dump-bytecode",
+            temp.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(repeated_dump.status.code(), Some(2));
+
     let dump = Command::new(bin("qcoffee"))
         .args(["--dump-bytecode", temp.to_str().unwrap()])
         .output()
