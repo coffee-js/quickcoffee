@@ -153,6 +153,19 @@ fn qtest_reports_success_and_failure() {
         .output()
         .unwrap();
     assert!(directory.status.success());
+    let directory_stdout = String::from_utf8_lossy(&directory.stdout);
+    for fixture in [
+        "tests/scripts/arithmetic.qc",
+        "tests/scripts/collections.qc",
+        "tests/scripts/comprehension.qc",
+        "tests/scripts/control-flow.qc",
+        "tests/scripts/function.qc",
+    ] {
+        assert!(
+            directory_stdout.contains(fixture),
+            "qtest skipped {fixture}"
+        );
+    }
     let bad = Command::new(bin("qtest"))
         .arg("tests/fixtures/failure.qc")
         .output()
