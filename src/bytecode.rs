@@ -19,6 +19,10 @@ pub enum Pattern {
     },
     Array(Vec<Pattern>),
     Map(Vec<(String, Pattern)>),
+    MapRest {
+        fields: Vec<(String, Pattern)>,
+        rest: String,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -397,6 +401,14 @@ fn validate_pattern_at(pattern: &Pattern, allow_rest: bool) -> Result<(), Error>
         Pattern::Map(fields) => fields
             .iter()
             .try_for_each(|(_, pattern)| validate_pattern_at(pattern, false)),
+        Pattern::MapRest { fields, rest } => {
+            if rest.is_empty() || rest == "_" {
+                return Err(Error::verify("map rest pattern must be named"));
+            }
+            fields
+                .iter()
+                .try_for_each(|(_, pattern)| validate_pattern_at(pattern, false))
+        }
     }
 }
 
@@ -661,6 +673,13 @@ impl Compiler {
                     .map(|(key, p)| Ok((key.clone(), self.compile_pattern(p)?)))
                     .collect::<Result<_, Error>>()?,
             ),
+            AstPattern::MapRest(fields, rest) => Pattern::MapRest {
+                fields: fields
+                    .iter()
+                    .map(|(key, p)| Ok((key.clone(), self.compile_pattern(p)?)))
+                    .collect::<Result<_, Error>>()?,
+                rest: rest.clone(),
+            },
             AstPattern::Default(inner, expr) => {
                 let mut compiler = Compiler::default();
                 compiler.expr(expr)?;

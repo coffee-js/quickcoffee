@@ -1,6 +1,7 @@
 ## Manuale QuickCoffee
 ##
 ## Tabulae mappae segmenta expandere possunt; claves posteriores priores superant.
+## In forma mappae ...metadata claves omissas immutabiliter capit.
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
 ## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet.

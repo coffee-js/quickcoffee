@@ -46,6 +46,28 @@ fn map_literals_support_checked_left_to_right_spread() {
     assert!(compile("{...{a: 1}, b: 2}").unwrap().verify().is_ok());
 }
 #[test]
+fn map_destructuring_rest_captures_unlisted_keys_atomically() {
+    assert_eq!(
+        eval("{id, ...metadata} = {id: 7, role: 'admin', active: true}\nmetadata.role").to_string(),
+        "admin"
+    );
+    assert_eq!(
+        eval("{id, ...metadata} = {id: 7}\nlen(keys(metadata))").as_number(),
+        Some(0.)
+    );
+    assert!(
+        Context::new()
+            .eval("{id, ...metadata} = {role: 'admin'}")
+            .is_err()
+    );
+    assert!(
+        compile("{id, ...metadata} = {id: 7, role: 'admin'}")
+            .unwrap()
+            .verify()
+            .is_ok()
+    );
+}
+#[test]
 fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert_eq!(
         eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),

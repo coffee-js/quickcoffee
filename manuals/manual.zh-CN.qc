@@ -22,6 +22,7 @@
 ## 严格或数值比较可成链，保留中间值且前段失败会短路。
 ## 标准库皆为普通函数：print、len、type、range、str、keys、values、join、split 与 assert。
 ## 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
+## 映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
 ##
 ## 函数捕获词法环境；末尾参数可写作 y = 2，缺省或 nil 时在函数内取默认值；末位 rest 参数写作 tail...。
 ## 普通名称参数可省略括号：left, right -> left + right；默认、rest 与解构参数仍须括号。

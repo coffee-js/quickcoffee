@@ -1,5 +1,7 @@
 # QuickCoffee 0.1 syntax scope
 
+Map destructuring may capture unlisted keys with a final named rest pattern (`{id, ...metadata} = record`); explicit fields remain strict and the captured map is immutable.
+
 Map literals support left-to-right spread (`config = {...defaults, theme: 'dark'}`); each spread must evaluate to a map and later entries override earlier keys.
 
 Destructuring array and map members may use dynamic defaults (`[first = 1, second = first + 1] = [nil]`); missing or `nil` values evaluate defaults in the current lexical environment, with strict atomic matching.

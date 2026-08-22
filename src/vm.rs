@@ -1376,6 +1376,32 @@ fn bind_pattern(
             }
             Ok(())
         }
+        Pattern::MapRest { fields, rest } => {
+            let Some(Value::Map(map)) = value else {
+                return Err(Error::runtime("map destructuring expects a map"));
+            };
+            for (key, pattern) in fields {
+                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
+            }
+            let mut remaining = BTreeMap::new();
+            for (key, item) in map.iter() {
+                if !fields.iter().any(|(field, _)| field == key) {
+                    remaining.insert(key.clone(), item.clone());
+                }
+            }
+            let rest_value = Value::Map(Rc::new(remaining));
+            bindings.push((rest.clone(), rest_value.clone()));
+            if rest != "_" {
+                env.borrow_mut().values.insert(rest.clone(), rest_value);
+            }
+            Ok(())
+        }
     }
 }
 fn index(target: Value, key: Value) -> Result<Value, Error> {

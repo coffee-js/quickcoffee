@@ -64,6 +64,7 @@ pub(crate) enum Pattern {
     Default(Box<Pattern>, Box<Expr>),
     Array(Vec<Pattern>),
     Map(Vec<(String, Pattern)>),
+    MapRest(Vec<(String, Pattern)>, String),
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Item {
@@ -307,8 +308,21 @@ impl Parser {
             }
             Token::LBrace => {
                 let mut fields = vec![];
+                let mut rest = None;
                 if !self.eat(&Token::RBrace) {
                     loop {
+                        if self.eat(&Token::Ellipsis) {
+                            let Token::Ident(name) = self.next() else {
+                                self.at = saved;
+                                return None;
+                            };
+                            rest = Some(name);
+                            if !self.eat(&Token::RBrace) {
+                                self.at = saved;
+                                return None;
+                            }
+                            break;
+                        }
                         let key = match self.next() {
                             Token::Ident(key) => key,
                             _ => {
@@ -337,7 +351,9 @@ impl Parser {
                         }
                     }
                 }
-                Pattern::Map(fields)
+                rest.map_or(Pattern::Map(fields.clone()), |name| {
+                    Pattern::MapRest(fields, name)
+                })
             }
             _ => {
                 self.at = saved;
