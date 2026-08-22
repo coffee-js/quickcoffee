@@ -560,6 +560,10 @@ fn qbench_json_is_guarded_and_machine_readable() {
     let lines: Vec<_> = stdout.lines().collect();
     let expected_names = [
         "loop-core",
+        "stdlib-abs",
+        "stdlib-sum",
+        "stdlib-min-max",
+        "stdlib-range-sum",
         "closures-and-ranges",
         "map-spread",
         "negative-indexing",
