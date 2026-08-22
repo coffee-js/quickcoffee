@@ -66,6 +66,12 @@ fn main() {
             expected: "10",
         },
         Workload {
+            name: "string-escapes",
+            source: "message = \"A\\x42\\u{43}\"\nlen(message) + (if message == 'ABC' then 1 else 0)",
+            iterations: 20_000,
+            expected: "4",
+        },
+        Workload {
             name: "multiline-collections",
             source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
             iterations: 10_000,

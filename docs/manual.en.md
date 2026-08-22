@@ -8,6 +8,8 @@ Triple-quoted heredocs preserve newlines: `"""…"""` interpolates `#{expression
 
 Identifiers use Unicode XID rules: XID start or `_` first, then XID continue or `_`. Combining marks may therefore continue a name; the engine does not normalize Unicode.
 
+Quoted strings decode common control escapes plus `\\xNN`, `\\uNNNN`, and `\\u{...}` Unicode escapes. Invalid escapes and non-scalar Unicode values are parse errors.
+
 CoffeeScript-style spellings are available without changing runtime types: `yes`/`on` mean `true`, `no`/`off` mean `false`, and `is`/`isnt` mean strict `==`/`!=`.
 
 Adjacent strict or numeric comparisons may chain: `1 < middle() < 3` evaluates `middle()` once and stops before later operands when an earlier comparison is false.

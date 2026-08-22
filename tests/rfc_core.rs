@@ -104,6 +104,26 @@ fn ordinary_quoted_strings_join_physical_lines_without_leaking_layout() {
     assert_eq!(error.position().map(|position| position.line), Some(1));
 }
 #[test]
+fn quoted_strings_decode_common_hex_and_unicode_escapes() {
+    assert_eq!(
+        eval(r#""\0\b\f\n\r\t\v\x41\u0042\u{1F600}""#).as_str(),
+        Some("\0\u{0008}\u{000c}\n\r\t\u{000b}AB😀")
+    );
+    assert_eq!(eval("'\\n\\u0041'").as_str(), Some("\nA"));
+    for source in [
+        r#""\x4""#,
+        r#""\u12""#,
+        r#""\u{}""#,
+        r#""\u{110000}""#,
+        r#""\q""#,
+    ] {
+        let error = Context::new().eval(source).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Parse);
+    }
+    let error = Context::new().eval("value = 1\n\"\\q\"").unwrap_err();
+    assert_eq!(error.position().map(|position| position.line), Some(2));
+}
+#[test]
 fn multiline_arrays_and_maps_accept_line_separators_without_commas() {
     assert_eq!(
         eval("values = [\n  1\n  2\n  3\n]\nvalues").to_string(),

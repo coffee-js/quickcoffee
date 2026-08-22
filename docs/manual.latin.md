@@ -8,6 +8,8 @@ Heredoc trium signorum lineas servat: `"""…"""` `#{expression}` interpolat, `'
 
 Nomina regulas Unicode XID sequuntur: XID start vel `_` primum, XID continue vel `_` postea. Signa combinantia nomen continuare possunt; machina Unicode non normalizat.
 
+Chorda citata evadit notas communes et formas Unicode `\\xNN`, `\\uNNNN`, `\\u{...}`; evaditiones invalidae vel valores non scalarii errorem analysi pariunt.
+
 Voces CoffeeScript sine mutatione generum valent: `yes`/`on` sunt `true`, `no`/`off` sunt `false`, atque `is`/`isnt` sunt stricta `==`/`!=`.
 
 Comparationes strictae vel numericae conecti possunt: `1 < middle() < 3` medium semel aestimat et, priore falso, posteriora non aestimat.

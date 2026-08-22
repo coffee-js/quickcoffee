@@ -72,6 +72,8 @@ continued == 7
 message = "hello
   world"
 message == 'hello world'
+escaped = "A\\x42\\u{43}"
+escaped == 'ABC'
 folded = (1 + 2 * 3) == 7
 folded
 values = [

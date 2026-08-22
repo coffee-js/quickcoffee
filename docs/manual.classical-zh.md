@@ -8,6 +8,8 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 
 名从 Unicode XID 之法：首用 XID start 或 `_`，续用 XID continue 或 `_`；合附之记可续名，而机不正其 Unicode。
 
+常字符串可解控制字符之转义，亦可用 `\\xNN`、`\\uNNNN`、`\\u{...}` 表 Unicode；转义非法或非标量者，析法报误。
+
 又从 CoffeeScript 之便称：`yes`、`on` 同 `true`；`no`、`off` 同 `false`；`is`、`isnt` 同严等之 `==`、`!=`，不易其类。
 
 严等与数之比较，相连可书 `1 < middle() < 3`；中项惟求一遍，前较既否，后项不求。

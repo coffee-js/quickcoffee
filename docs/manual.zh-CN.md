@@ -6,6 +6,8 @@ QuickCoffee 是一个 Rust 字节码引擎，不是 JavaScript 运行时。源�
 
 标识符使用 Unicode XID 规则：首字符为 XID start 或 `_`，后续可为 XID continue 或 `_`，因此组合附标可出现在名称中；引擎不做 Unicode 规范化。
 
+普通字符串支持常用控制字符转义以及 `\\xNN`、`\\uNNNN`、`\\u{...}` Unicode 转义；非法转义和非 Unicode 标量值会报告解析错误。
+
 可使用 CoffeeScript 风格别名而不改变运行时类型：`yes`/`on` 等同 `true`，`no`/`off` 等同 `false`，`is`/`isnt` 等同严格的 `==`/`!=`。
 
 相邻的严格或数值比较可写成链：`1 < middle() < 3` 只会计算一次 `middle()`；较早比较为假时，不会计算后续操作数。

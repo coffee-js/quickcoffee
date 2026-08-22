@@ -8,6 +8,8 @@ triple-quote heredoc newline रक्षति: `"""…"""` `#{expression}` int
 
 नामानि Unicode XID नियमं अनुसरन्ति: प्रथमं XID start अथवा `_`, पश्चात् XID continue अथवा `_`। संयोजक-चिह्नानि नाम निरन्तरयन्ति; engine Unicode-normalization न करोति।
 
+Quoted-string सामान्य-control-escape तथा `\\xNN`, `\\uNNNN`, `\\u{...}` Unicode-escape गृह्णाति; अवैध अथवा non-scalar escape parse-error जनयति।
+
 CoffeeScript-नामानि type न परिवर्तयन्ति: `yes`/`on` = `true`, `no`/`off` = `false`, `is`/`isnt` strict `==`/`!=` स्तः।
 
 strict अथवा numeric-comparison श्रृङ्खला भवति: `1 < middle() < 3` मध्ये middle एकवारं मूल्यते, पूर्वं false चेत् परं न मूल्यते।
