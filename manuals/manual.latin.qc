@@ -39,6 +39,7 @@
 ## return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.
 ## Parametri patterna stricta seriei/map habere possunt; default et rest nomina manent.
 ## Spatium integrorum `[1..3]` finem includit; `[1...3]` finem excludit.
+## Spatia descendere quoque possunt: `[3..1]` `[3, 2, 1]` reddit, `[3...1]` `[3, 2]` reddit.
 ## Sectio seriei a[start..end] finem includit, a[start...end] excludit; termini integri finiti intra limites sunt, negativi ab extremo numerantur, et sectio nil-tuta terminos nil recipiente omittit.
 ## Recessus nil-specialis left ? right scribitur; false et zero servantur.
 ## Suffixum value? non-nil tantum probat: nil? false est, false? et 0? true sunt, nomen non ligatum errorem manet.

@@ -44,7 +44,7 @@ Arrays (including `range` results) can be iterated with `for item in items then 
 
 The same collector has CoffeeScript's postfix comprehension form: `value * 2 for value in items`, or `[value * 2 for value in items]`. The brackets delimit the comprehension and do not create an extra nested array; `by`, `when`, map iteration, patterns, `break`, and `continue` retain their prefix-form semantics.
 
-Integer range literals are arrays built directly by the bytecode VM: `[1..3]` includes its end (`[1, 2, 3]`), while `[1...3]` excludes it (`[1, 2]`). Their bounds must be finite integers.
+Integer range literals are arrays built directly by the bytecode VM: `[1..3]` includes its end (`[1, 2, 3]`), while `[1...3]` excludes it (`[1, 2]`); descending forms work too, so `[3..1]` is `[3, 2, 1]`. Their bounds must be finite integers.
 
 Array slices use `items[start..end]` for an inclusive end and `items[start...end]` for an exclusive end: `[0..4][1..3]` is `[1, 2, 3]`. Bounds evaluate once from left to right and must be finite in-range integers; negative bounds count from the end, so `-1` is the last item. Slices are arrays only and never clip implicitly. `items?[start..end]` returns `nil` without evaluating bounds when its receiver is `nil`.
 

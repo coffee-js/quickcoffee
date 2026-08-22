@@ -1130,8 +1130,11 @@ fn maps_ranges_and_indexing() {
     );
     assert!(Context::new().eval("{'name'}").is_err());
     assert_eq!(eval("range(2, 5)[1]").as_number(), Some(3.));
+    assert_eq!(eval("range(5, 2)").to_string(), "[5, 4, 3]");
     assert_eq!(eval("[2..4]").to_string(), "[2, 3, 4]");
     assert_eq!(eval("[2...4]").to_string(), "[2, 3]");
+    assert_eq!(eval("[4..2]").to_string(), "[4, 3, 2]");
+    assert_eq!(eval("[4...2]").to_string(), "[4, 3]");
     assert!(Context::new().eval("[1.5..3]").is_err());
     assert!(Context::new().eval("[0...1000001]").is_err());
     let mut cx = Context::new();
