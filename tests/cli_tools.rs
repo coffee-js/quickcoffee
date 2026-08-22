@@ -194,6 +194,24 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
             temp.display()
         )
     );
+    let reversed = Command::new(bin("qtest"))
+        .args([
+            "--tap",
+            temp.join("b-pass.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!reversed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&reversed.stdout),
+        format!(
+            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
+            temp.display(),
+            temp.display()
+        )
+    );
     let conflict = Command::new(bin("qtest"))
         .args(["--json", "--tap", temp.to_str().unwrap()])
         .output()

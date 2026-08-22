@@ -112,6 +112,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     }
+    files.sort();
+    files.dedup();
     if files.is_empty() {
         if tap {
             println!("TAP version 13");
