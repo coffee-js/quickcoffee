@@ -103,6 +103,29 @@ fn qdocco_renders_escaped_source_and_checks() {
     );
     let block_markdown_document = fs::read_to_string(&block_markdown).unwrap();
     assert!(block_markdown_document.contains("````quickcoffee\n### hidden code ###\ntrue\n````"));
+    let multiline_block_input = temp.join("multiline-block.qc");
+    let multiline_block_output = temp.join("multiline-block.html");
+    fs::write(
+        &multiline_block_input,
+        "###\n## hidden prose-looking code\n## closing ###\ntrue\n",
+    )
+    .unwrap();
+    assert!(
+        Command::new(bin("qdocco"))
+            .args([
+                multiline_block_input.to_str().unwrap(),
+                "-o",
+                multiline_block_output.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let multiline_document = fs::read_to_string(&multiline_block_output).unwrap();
+    assert!(
+        multiline_document.contains("###\n## hidden prose-looking code\n## closing ###\ntrue\n")
+    );
+    assert!(!multiline_document.contains("<p>hidden prose-looking code</p>"));
     let overwrite = Command::new(bin("qdocco"))
         .args([input.to_str().unwrap(), "-o", input.to_str().unwrap()])
         .output()
