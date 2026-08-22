@@ -10,3 +10,4 @@
 ## 验收
 
 CLI 集成测试须验证 `qcoffee -e "len(argv)" -- one two` 输出 `2`，且原有 `-e`、标准输入与反汇编模式不变。
+交互式会话见 RFC 0062；`qcoffee --interactive` 在同一 Context 中逐行执行，并沿用 argv 与 fuel 规则。

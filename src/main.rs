@@ -1,9 +1,13 @@
 use quickcoffee::{Context, Engine, Value};
-use std::{env, fs, io, process::ExitCode};
+use std::{
+    env, fs,
+    io::{self, BufRead, IsTerminal, Write},
+    process::ExitCode,
+};
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [-e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -13,12 +17,60 @@ fn read_source(path: &str) -> Result<String, String> {
         fs::read_to_string(path).map_err(|error| format!("read error: {error}"))
     }
 }
+fn repl(fuel: u64, script_args: Vec<String>) -> ExitCode {
+    let stdin = io::stdin();
+    let show_prompt = stdin.is_terminal() && io::stdout().is_terminal();
+    let mut context = Context::new().with_fuel(fuel);
+    context.set_global(
+        "argv",
+        Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
+    );
+    if show_prompt {
+        println!(
+            "QuickCoffee {} — :help for commands, :quit to exit",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+    let mut lines = stdin.lock().lines();
+    loop {
+        if show_prompt {
+            print!("qcoffee> ");
+            if io::stdout().flush().is_err() {
+                return ExitCode::from(1);
+            }
+        }
+        let Some(line) = (match lines.next() {
+            Some(Ok(line)) => Some(line),
+            Some(Err(error)) => {
+                eprintln!("read error: {error}");
+                return ExitCode::from(1);
+            }
+            None => None,
+        }) else {
+            break;
+        };
+        match line.trim() {
+            ":quit" | ":exit" => break,
+            ":help" => {
+                println!(":help  show this help\n:quit  exit the session");
+            }
+            "" => {}
+            source => match context.eval(source) {
+                Ok(value) if !matches!(value, Value::Nil) => println!("{value}"),
+                Ok(_) => {}
+                Err(error) => eprintln!("{error}"),
+            },
+        }
+    }
+    ExitCode::SUCCESS
+}
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let mut fuel = 1_000_000u64;
     let mut source = None;
     let mut dump = false;
     let mut check = false;
+    let mut interactive = false;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -34,6 +86,7 @@ fn main() -> ExitCode {
                 usage();
                 return ExitCode::SUCCESS;
             }
+            "--interactive" | "-i" => interactive = true,
             "--fuel" => match args.next().and_then(|s| s.parse().ok()) {
                 Some(n) => fuel = n,
                 None => {
@@ -107,6 +160,15 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         }
+    }
+    if interactive {
+        if source.is_some() || check || dump {
+            eprintln!(
+                "--interactive cannot be combined with a source, --check, or --dump-bytecode"
+            );
+            return ExitCode::from(2);
+        }
+        return repl(fuel, script_args);
     }
     let Some(source) = source else {
         usage();

@@ -3,6 +3,7 @@
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
 ## qcoffee --check FILE fontem verificat sine cursu.
+## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
 ## Engine::compile_program et Context::run_program bytecode verificatum communicant ad iteratum cursum.

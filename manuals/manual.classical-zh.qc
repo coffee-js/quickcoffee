@@ -7,6 +7,7 @@
 ## 严等与数较可相连，中项惟求一遍，前否则后不求。
 ## qcoffee - 者，自标准输入读其文也。
 ## qcoffee --check FILE 者，析编验其文而不行也。
+## qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
 ## qtest --fuel N 者，为各可行文别限其指令之数。
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
 ## Engine::compile_program 与 Context::run_program 共用已验之字节码，可屡行之。

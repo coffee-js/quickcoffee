@@ -21,6 +21,8 @@ qcoffee --dump-bytecode program.qc
 
 `qcoffee -` 从标准输入读取源码，便于接入管道；`qcoffee --check FILE`（FILE 可为 `-`）只解析、编译和验证而不执行；`qcoffee --dump-bytecode -` 则反汇编标准输入而不执行。
 
+`qcoffee --interactive`（或 `-i`）在输入行之间保持同一 Context；`:help` 列出命令，`:quit`/`:exit` 退出会话。管道输入不输出提示符。
+
 `--` 之后的参数以普通字符串数组 `argv` 提供：`qcoffee program.qc -- first second` 中 `len(argv)` 为 `2`。引擎不会暴露宿主进程或环境对象。
 
 `--fuel` 是每次执行的指令上限，耗尽会安全失败。标准库包括 `print`、`len`、`type`、`range`、`str`、`keys`、`values`、`join`、`split` 与 `assert`；`range(a, b)` 生成 `[a, b)`。

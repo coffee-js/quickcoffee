@@ -3,6 +3,7 @@
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有原型链、`this`、`eval` 或嵌入 JavaScript。
 
 当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0060-literal-constant-folding.md](RFCs/0060-literal-constant-folding.md)。
+交互式命令行遵循 [RFCs/0062-interactive-cli.md](RFCs/0062-interactive-cli.md)。
 
 ```coffee
 square = (x) -> x * x
@@ -20,12 +21,15 @@ double = (x) ->
 ```sh
 cargo run -- -e "print(range(1, 4))"
 cargo run -- - < program.qc
+cargo run -- --interactive
 cargo run -- example.qc -- first second
 cargo run -- --check example.qc
 cargo run -- --dump-bytecode example.qc
 cargo run --bin qdocco -- example.qc -o example.html
 cargo run --bin qtest -- tests/scripts
 ```
+
+`qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动。
 
 ## 验收
 

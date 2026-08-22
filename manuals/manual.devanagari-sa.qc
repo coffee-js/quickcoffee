@@ -3,6 +3,7 @@
 ## स्रोतः पठ्यते, सत्यापित-bytecode मध्ये संकल्यते, fuel-सीमया चालयते।
 ## qcoffee - मानक-input तः QuickCoffee-program पठति।
 ## qcoffee --check FILE स्रोतं verify करोति, न चालयति।
+## qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
 ## Engine::compile_program तथा Context::run_program सत्यापित-bytecode पुनःप्रयोगाय साझीकुरुतः।
