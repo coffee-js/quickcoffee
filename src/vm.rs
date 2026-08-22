@@ -1290,6 +1290,14 @@ fn bind_pattern(
             }
             Ok(())
         }
+        Pattern::Rest(name) => {
+            let value = value.ok_or_else(|| Error::runtime("missing value for rest pattern"))?;
+            bindings.push((name.clone(), value.clone()));
+            if name != "_" {
+                env.borrow_mut().values.insert(name.clone(), value.clone());
+            }
+            Ok(())
+        }
         Pattern::Default { pattern, default } => {
             let value = match value {
                 Some(value) if !matches!(value, Value::Nil) => value.clone(),
@@ -1301,14 +1309,39 @@ fn bind_pattern(
             let Some(Value::Array(values)) = value else {
                 return Err(Error::runtime("array destructuring expects an array"));
             };
-            if values.len() > patterns.len() {
+            let rest_index = patterns
+                .iter()
+                .position(|pattern| matches!(pattern, Pattern::Rest(_)));
+            let required_len = patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, pattern)| {
+                    !matches!(pattern, Pattern::Default { .. } | Pattern::Rest(_))
+                })
+                .map(|(index, _)| index + 1)
+                .max()
+                .unwrap_or(0);
+            let fixed_len = rest_index.unwrap_or(required_len);
+            if values.len() < fixed_len || (rest_index.is_none() && values.len() > patterns.len()) {
                 return Err(Error::runtime(format!(
                     "array destructuring expected {} values, got {}",
-                    patterns.len(),
+                    if rest_index.is_some() {
+                        format!("at least {fixed_len}")
+                    } else {
+                        patterns.len().to_string()
+                    },
                     values.len()
                 )));
             }
             for (index, pattern) in patterns.iter().enumerate() {
+                if let Pattern::Rest(name) = pattern {
+                    let rest = Value::Array(Rc::new(values[index..].to_vec()));
+                    bindings.push((name.clone(), rest.clone()));
+                    if name != "_" {
+                        env.borrow_mut().values.insert(name.clone(), rest);
+                    }
+                    break;
+                }
                 bind_pattern(vm, pattern, values.get(index), bindings, env)?;
             }
             Ok(())

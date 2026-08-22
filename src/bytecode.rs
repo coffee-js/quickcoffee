@@ -12,6 +12,7 @@ use std::{
 pub enum Pattern {
     Ignore,
     Bind(String),
+    Rest(String),
     Default {
         pattern: Box<Pattern>,
         default: Rc<Chunk>,
@@ -370,16 +371,30 @@ fn jump_target(pc: usize, offset: i32) -> usize {
 }
 
 fn validate_pattern(pattern: &Pattern) -> Result<(), Error> {
+    validate_pattern_at(pattern, false)
+}
+
+fn validate_pattern_at(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
     match pattern {
         Pattern::Ignore | Pattern::Bind(_) => Ok(()),
+        Pattern::Rest(name) if allow_rest && !name.is_empty() && name != "_" => Ok(()),
+        Pattern::Rest(_) => Err(Error::verify("array rest pattern must be final and named")),
         Pattern::Default { pattern, default } => {
-            validate_pattern(pattern)?;
+            validate_pattern_at(pattern, allow_rest)?;
             default.verify()
         }
-        Pattern::Array(items) => items.iter().try_for_each(validate_pattern),
+        Pattern::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                if matches!(item, Pattern::Rest(_)) && index + 1 != items.len() {
+                    return Err(Error::verify("array rest pattern must be final"));
+                }
+                validate_pattern_at(item, true)?;
+            }
+            Ok(())
+        }
         Pattern::Map(fields) => fields
             .iter()
-            .try_for_each(|(_, pattern)| validate_pattern(pattern)),
+            .try_for_each(|(_, pattern)| validate_pattern_at(pattern, false)),
     }
 }
 
@@ -628,6 +643,7 @@ impl Compiler {
         Ok(match pattern {
             AstPattern::Ignore => Pattern::Ignore,
             AstPattern::Bind(name) => Pattern::Bind(name.clone()),
+            AstPattern::Rest(name) => Pattern::Rest(name.clone()),
             AstPattern::Array(items) => Pattern::Array(
                 items
                     .iter()
