@@ -99,6 +99,8 @@ fn qtest_json_output_is_one_stable_record_per_file() {
         .unwrap();
     assert!(ok.status.success());
     let stdout = String::from_utf8_lossy(&ok.stdout);
+    assert_eq!(stdout.lines().count(), 1);
+    assert!(stdout.ends_with("}\n"));
     assert!(stdout.contains("\"ok\":true"));
     assert!(stdout.contains("\"file\":\"tests/scripts/arithmetic.qc\""));
     let bad = Command::new(bin("qtest"))
@@ -107,6 +109,9 @@ fn qtest_json_output_is_one_stable_record_per_file() {
         .unwrap();
     assert!(!bad.status.success());
     let bad_stdout = String::from_utf8_lossy(&bad.stdout);
+    assert_eq!(bad_stdout.lines().count(), 1);
+    let bad_line = bad_stdout.trim_end_matches('\n');
+    assert!(bad_line.starts_with('{') && bad_line.ends_with('}'));
     assert!(bad_stdout.contains("\"ok\":false"));
     assert!(bad_stdout.contains("\"error\":\""));
 }
