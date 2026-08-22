@@ -185,7 +185,9 @@ const WORKLOADS: &[Workload] = &[
 ];
 
 fn usage() {
-    eprintln!("Usage: qbench [--iterations N] [--repeat N] [--json]\n       qbench --version");
+    eprintln!(
+        "Usage: qbench [--iterations N] [--repeat N] [--only NAME] [--json]\n       qbench --list\n       qbench --version"
+    );
 }
 
 fn json_escape(value: &str) -> String {
@@ -201,6 +203,8 @@ fn main() -> ExitCode {
     let mut iterations = 100;
     let mut repeat = 1;
     let mut json = false;
+    let mut only = None;
+    let mut list = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -212,7 +216,15 @@ fn main() -> ExitCode {
                 usage();
                 return ExitCode::SUCCESS;
             }
+            "--list" => list = true,
             "--json" => json = true,
+            "--only" => match args.next() {
+                Some(value) if !value.is_empty() => only = Some(value),
+                _ => {
+                    eprintln!("--only requires a workload name");
+                    return ExitCode::from(2);
+                }
+            },
             "--iterations" => match args.next().and_then(|value| value.parse().ok()) {
                 Some(value) if value > 0 => iterations = value,
                 _ => {
@@ -233,8 +245,28 @@ fn main() -> ExitCode {
             }
         }
     }
+    if list {
+        if only.is_some() {
+            eprintln!("--list cannot be combined with --only");
+            return ExitCode::from(2);
+        }
+        for workload in WORKLOADS {
+            println!("{}", workload.name);
+        }
+        return ExitCode::SUCCESS;
+    }
+    let workloads: Vec<&Workload> = match only.as_deref() {
+        Some(name) => match WORKLOADS.iter().find(|workload| workload.name == name) {
+            Some(workload) => vec![workload],
+            None => {
+                eprintln!("unknown workload '{name}'; use --list to see available workloads");
+                return ExitCode::from(2);
+            }
+        },
+        None => WORKLOADS.iter().collect(),
+    };
     let engine = Engine::new();
-    for workload in WORKLOADS {
+    for workload in workloads {
         let mut compile_samples = Vec::with_capacity(repeat);
         let mut verify_samples = Vec::with_capacity(repeat);
         let mut execute_samples = Vec::with_capacity(repeat);
