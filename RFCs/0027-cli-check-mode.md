@@ -1,5 +1,7 @@
 # RFC 0027：CLI 编译检查模式
 
+- 状态：已采纳
+
 ## 决议
 
 `qcoffee --check FILE`（FILE 可为 `-`）读取源码，执行词法、解析、编译与 `Chunk::verify`，但绝不创建执行 Context 或运行字节码。成功时无标准输出并以零退出；读取、语法、编译或验证错误以非零退出。它不能与 `--dump-bytecode` 组合。
