@@ -1,5 +1,7 @@
 # QuickCoffee 0.1 syntax scope
 
+Array and Unicode string indexing accepts negative finite integers (`items[-1]`, `'a☕中'[-2]`); out-of-range indices remain errors.
+
 Map destructuring may capture unlisted keys with a final named rest pattern (`{id, ...metadata} = record`); explicit fields remain strict and the captured map is immutable.
 
 Map literals support left-to-right spread (`config = {...defaults, theme: 'dark'}`); each spread must evaluate to a map and later entries override earlier keys.

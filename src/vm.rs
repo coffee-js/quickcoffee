@@ -1406,13 +1406,13 @@ fn bind_pattern(
 }
 fn index(target: Value, key: Value) -> Result<Value, Error> {
     match (target, key) {
-        (Value::Array(xs), Value::Number(i)) if i >= 0. && i.fract() == 0. => xs
-            .get(i as usize)
+        (Value::Array(xs), Value::Number(i)) if i.is_finite() && i.fract() == 0. => xs
+            .get(sequence_index(i, xs.len(), "array")?)
             .cloned()
             .ok_or_else(|| Error::runtime("array index out of range")),
-        (Value::String(text), Value::Number(i)) if i >= 0. && i.fract() == 0. => text
+        (Value::String(text), Value::Number(i)) if i.is_finite() && i.fract() == 0. => text
             .chars()
-            .nth(i as usize)
+            .nth(sequence_index(i, text.chars().count(), "string")?)
             .map(|character| Value::String(Rc::from(character.to_string())))
             .ok_or_else(|| Error::runtime("string index out of range")),
         (Value::Map(m), Value::String(k)) => m
@@ -1421,6 +1421,15 @@ fn index(target: Value, key: Value) -> Result<Value, Error> {
             .ok_or_else(|| Error::runtime("map key not found")),
         _ => Err(Error::runtime("invalid index operation")),
     }
+}
+fn sequence_index(index: f64, len: usize, kind: &str) -> Result<usize, Error> {
+    let index = index as i128;
+    let len = len as i128;
+    let resolved = if index < 0 { len + index } else { index };
+    if resolved < 0 || resolved >= len {
+        return Err(Error::runtime(format!("{kind} index out of range")));
+    }
+    Ok(resolved as usize)
 }
 fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
     match target {

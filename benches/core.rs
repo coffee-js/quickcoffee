@@ -90,6 +90,12 @@ fn main() {
             expected: "8",
         },
         Workload {
+            name: "negative-indexing",
+            source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
+            iterations: 20_000,
+            expected: "31",
+        },
+        Workload {
             name: "multiline-collections",
             source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
             iterations: 10_000,
