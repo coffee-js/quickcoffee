@@ -1144,7 +1144,7 @@ impl Parser {
         let iterable = self.expr(0)?;
         let step = if self.eat(&Token::By) {
             if map {
-                return Err(self.parse_error("by is supported only for array iteration"));
+                return Err(self.parse_error("by is supported only for enumerable iteration"));
             }
             Some(Box::new(self.expr(0)?))
         } else {

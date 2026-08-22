@@ -26,7 +26,9 @@ Array comprehensions may bind an optional zero-based index: `for value, index in
 
 Comprehensions may also use CoffeeScript's postfix form: `value * 2 for value in items`, optionally wrapped as `[value * 2 for value in items]`. The postfix form has the same `by`, `when`, map, pattern, `break`, and `continue` semantics as the prefix form; the brackets are a comprehension delimiter and do not add a nested array.
 
-String indexing and strict slices use Unicode scalar boundaries: `'a☕中'[1]` is `'☕'`, and `'a☕中'[1..2]` is `'☕中'`. String `by` iteration remains unsupported.
+String indexing and strict slices use Unicode scalar boundaries: `'a☕中'[1]` is `'☕'`, and `'a☕中'[1..2]` is `'☕中'`. String `for` iteration also accepts a positive finite `by` step over Unicode scalar positions: `for character, index in 'a☕中x' by 2 then index` yields `[0, 2]`.
+
+Array and string `by step` expressions are evaluated once and must be positive finite integers; map iteration excludes `by`.
 
 Names support arithmetic compound assignment (`+=`, `-=`, `*=`, `/=`, `%=` and `**=`). Compound assignment is intentionally name-only; members, indexes, and destructuring remain immutable API boundaries.
 
