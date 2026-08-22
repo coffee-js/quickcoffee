@@ -325,6 +325,11 @@ impl Parser {
                         }
                         let key = match self.next() {
                             Token::Ident(key) => key,
+                            Token::String(key, interpolate)
+                                if !interpolate || !key.contains("#{") =>
+                            {
+                                key
+                            }
                             _ => {
                                 self.at = saved;
                                 return None;

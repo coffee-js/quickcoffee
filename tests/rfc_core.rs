@@ -1302,6 +1302,27 @@ fn map_destructuring_supports_renaming_and_is_atomic() {
     assert!(cx.eval("absent").is_err());
 }
 #[test]
+fn map_destructuring_accepts_literal_string_keys() {
+    assert_eq!(
+        eval("{\"first-name\": first} = {\"first-name\": 'Ada'}\nfirst").as_str(),
+        Some("Ada")
+    );
+    assert_eq!(
+        eval("{'answer': value} = {answer: 42}\nvalue").as_number(),
+        Some(42.)
+    );
+    assert!(
+        Context::new()
+            .eval("{\"missing-key\": value} = {other: 1}")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("{\"#{missing}\": value} = {other: 1}")
+            .is_err()
+    );
+}
+#[test]
 fn nested_destructuring_is_strict_and_atomic() {
     assert_eq!(
         eval("[first, [middle, last]] = [1, [2, 39]]\nfirst + middle + last").as_number(),
