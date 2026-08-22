@@ -64,6 +64,8 @@ message = "hello
 message == 'hello world'
 folded = (1 + 2 * 3) == 7
 folded
+effugium = "A\\x42\\u{43}"
+effugium == 'ABC'
 3 not in [1, 2] and 'absens' not of {praesens: 1}
 numerus_circuli = 0
 loop

@@ -1,4 +1,5 @@
 use crate::vm::Error;
+use std::{iter::Peekable, str::Chars};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -413,19 +414,7 @@ fn lex_line(
                         let escaped = chars.next().ok_or_else(|| {
                             Error::parse("unterminated string").at_line(line_number)
                         })?;
-                        value.push(match escaped {
-                            'n' => '\n',
-                            'r' => '\r',
-                            't' => '\t',
-                            '\\' => '\\',
-                            '\'' => '\'',
-                            '"' => '"',
-                            _ => {
-                                return Err(
-                                    Error::parse("unknown string escape").at_line(line_number)
-                                );
-                            }
-                        });
+                        value.push(decode_string_escape(&mut chars, escaped, line_number)?);
                     } else {
                         value.push(current);
                     }
@@ -680,6 +669,82 @@ fn lex_line(
         }
     }
     Ok(())
+}
+
+fn decode_string_escape(
+    chars: &mut Peekable<Chars<'_>>,
+    escaped: char,
+    line_number: usize,
+) -> Result<char, Error> {
+    let simple = match escaped {
+        '0' => Some('\0'),
+        'b' => Some('\u{0008}'),
+        'f' => Some('\u{000c}'),
+        'n' => Some('\n'),
+        'r' => Some('\r'),
+        't' => Some('\t'),
+        'v' => Some('\u{000b}'),
+        '\\' => Some('\\'),
+        '\'' => Some('\''),
+        '"' => Some('"'),
+        _ => None,
+    };
+    if let Some(character) = simple {
+        return Ok(character);
+    }
+    let (digits, radix, kind) = match escaped {
+        'x' => (2, 16, "hexadecimal"),
+        'u' => {
+            if chars.peek() == Some(&'{') {
+                chars.next();
+                let mut digits = String::new();
+                let mut closed = false;
+                while let Some(&next) = chars.peek() {
+                    if next == '}' {
+                        chars.next();
+                        closed = true;
+                        break;
+                    }
+                    if !next.is_ascii_hexdigit() || digits.len() >= 6 {
+                        return Err(Error::parse("invalid Unicode escape").at_line(line_number));
+                    }
+                    digits.push(next);
+                    chars.next();
+                }
+                if digits.is_empty() || !closed {
+                    return Err(Error::parse("invalid Unicode escape").at_line(line_number));
+                }
+                let value = u32::from_str_radix(&digits, 16)
+                    .map_err(|_| Error::parse("invalid Unicode escape").at_line(line_number))?;
+                return char::from_u32(value).ok_or_else(|| {
+                    Error::parse("Unicode escape is not a valid scalar value").at_line(line_number)
+                });
+            }
+            (4, 16, "Unicode")
+        }
+        _ => {
+            return Err(Error::parse("unknown string escape").at_line(line_number));
+        }
+    };
+    let mut value = String::new();
+    for _ in 0..digits {
+        let digit = chars.next().ok_or_else(|| {
+            Error::parse(format!("incomplete {kind} escape")).at_line(line_number)
+        })?;
+        if !digit.is_ascii_hexdigit() {
+            return Err(Error::parse(format!("invalid {kind} escape")).at_line(line_number));
+        }
+        value.push(digit);
+    }
+    let scalar = u32::from_str_radix(&value, radix)
+        .map_err(|_| Error::parse(format!("invalid {kind} escape")).at_line(line_number))?;
+    if escaped == 'u' {
+        char::from_u32(scalar).ok_or_else(|| {
+            Error::parse("Unicode escape is not a valid scalar value").at_line(line_number)
+        })
+    } else {
+        Ok(char::from_u32(scalar).expect("two hexadecimal digits form a scalar"))
+    }
 }
 
 /// A trailing operator keeps the following physical line in the same expression.

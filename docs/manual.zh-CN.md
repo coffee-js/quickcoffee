@@ -118,3 +118,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 `qdocco demo.qc -o demo.html` 生成并校验可执行文档；用 `qdocco --check demo.qc` 只校验。`qtest cases` 会递归运行目录中的 `.qc` 文件，要求每个脚本的最后值严格为 `true`。
 
 `qtest --fuel N cases` 会为每个发现的测试文件分别设置指令预算，因此一个受限循环不会耗尽其他测试的预算。
+
+引号字符串支持常用控制字符转义，以及 `\\xNN`、`\\uNNNN`、`\\u{...}` Unicode 转义；非法转义与非 Unicode 标量值会报告解析错误。

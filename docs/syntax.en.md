@@ -2,7 +2,7 @@
 
 This is the English index of RFC 0001. An omitted CoffeeScript 2016 feature is deliberately unsupported, not silently compatible.
 
-Ordinary single- and double-quoted strings may span physical lines; a normal newline becomes one space and indentation inside the string is ignored. A single unescaped backslash at the line end removes both the backslash and the newline. Double-quoted multiline strings retain `#{expression}` interpolation, while single-quoted strings remain literal. Triple-quoted heredocs preserve newlines: `"""…"""` interpolates and `'''…'''` is literal; an unclosed delimiter is a lexical error.
+Ordinary single- and double-quoted strings decode `\\0`, `\\b`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, quote/backslash escapes, two-digit `\\xNN`, four-digit `\\uNNNN`, and one-to-six-digit `\\u{...}` Unicode escapes. They may span physical lines; a normal newline becomes one space and indentation inside the string is ignored. A single unescaped backslash at the line end removes both the backslash and the newline. Double-quoted multiline strings retain `#{expression}` interpolation, while single-quoted strings remain literal. Triple-quoted heredocs preserve newlines: `"""…"""` interpolates and `'''…'''` is literal; an unclosed delimiter or invalid escape is a lexical error.
 
 `for` uses strict recursive patterns for its bindings: `for [left, right] in pairs then left + right` and `for own _, value of record then value` are supported. A pattern mismatch is a runtime error and never partially updates that iteration's bindings.
 

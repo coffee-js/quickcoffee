@@ -63,6 +63,8 @@ message = "hello
 message == 'hello world'
 folded = (1 + 2 * 3) == 7
 folded
+转义 = "A\\x42\\u{43}"
+转义 == 'ABC'
 3 not in [1, 2] and '缺' not of {在: 1}
 循环数 = 0
 loop

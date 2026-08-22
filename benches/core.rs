@@ -66,6 +66,12 @@ fn main() {
             expected: "10",
         },
         Workload {
+            name: "string-escapes",
+            source: "message = \"A\\x42\\u{43}\"\nlen(message) + (if message == 'ABC' then 1 else 0)",
+            iterations: 20_000,
+            expected: "4",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,

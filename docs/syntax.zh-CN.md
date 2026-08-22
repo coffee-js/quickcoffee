@@ -10,7 +10,7 @@
 | 赋值/函数 | `a, b = array`、`[a, {point: [b, c]}] = array`、`{key, from: to} = map` 的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、`=>` 同义箭头、`do` 立即调用 | 无括号默认/rest/解构参数、生成器 |
 | OO/模块 | 无原型工厂类 `class Name(args) -> expression` | 继承、`this`、`new`、import/export |
 
-普通单引号与双引号字符串可以跨物理行；普通换行合并为一个空格，字符串内缩进被忽略。行末单个未转义反斜杠会同时去除反斜杠与换行。双引号多行字符串仍支持 `#{expression}` 插值，单引号仍是字面文本；三引号 heredoc 继续保留换行。
+普通单引号与双引号字符串支持 `\\0`、`\\b`、`\\f`、`\\n`、`\\r`、`\\t`、`\\v`、引号/反斜杠、两位 `\\xNN`、四位 `\\uNNNN` 及一至六位 `\\u{...}` Unicode 转义。字符串可以跨物理行；普通换行合并为一个空格，字符串内缩进被忽略。行末单个未转义反斜杠会同时去除反斜杠与换行。双引号多行字符串仍支持 `#{expression}` 插值，单引号仍是字面文本；三引号 heredoc 继续保留换行。非法转义或非 Unicode 标量转义是词法错误。
 
 标识符采用 Unicode XID：首字符为 XID start 或 `_`，后续为 XID continue 或 `_`，不做规范化；组合附标可作为续字符。`#` 是行注释；`### … ###` 是不嵌套的块注释，块内容不影响布局。`for value in array` 遍历数组（包括 `range` 的结果）；可写 `by step`，步长只求值一次且必须为正有限整数。`for own key, value of map` 遍历映射且不支持 `by`。`for` 收集每轮体值为新数组；`when` 跳过的项与 `continue` 不收集，`break` 返回既得前缀；`while`、`until` 与 `loop` 的值仍为 `nil`。`return expression` 只可在函数体中使用，立即返回表达式值；裸 `return` 返回 `nil`，并在离开循环或 `try` 时完成清理与 finally。`if`、循环和函数可在换行后用空格缩进多个语句，且缩进必须一致；语句也可用 `;` 分隔。调用必须写作 `f(a, b)`。条件必须是布尔值，名称必须先赋值或由宿主注册。完整规范见 RFC。
 

@@ -75,3 +75,5 @@ host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Par
 पुनःचालनाय `Engine::compile_program` साझा `Program` निर्माति, `Context::run_program` तं चालयति; handle-स्य प्रतिलिपिः bytecode न प्रतिलिपयति।
 
 > 注：此文件按“天成文”近似“天城文（Devanagari）”的解释提供；若所指为其他语言或文字，可替换为经审订译本。
+
+उद्धृत-string सामान्य control-escape तथा `\\xNN`, `\\uNNNN`, `\\u{...}` Unicode escape विकसति; अमान्य escape अथवा non-scalar Unicode parse-error भवति।

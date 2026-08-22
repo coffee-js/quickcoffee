@@ -64,6 +64,8 @@ message = "hello
 message == 'hello world'
 folded = (1 + 2 * 3) == 7
 folded
+escapum = "A\\x42\\u{43}"
+escapum == 'ABC'
 स्थित = 40
 स्थित + 2 == 42
 3 not in [1, 2] and 'missing' not of {present: 1}
