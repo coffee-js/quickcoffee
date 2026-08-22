@@ -49,3 +49,14 @@ fn rfc_numbers_and_index_references_are_consistent() {
         "scope RFC must mention the latest RFC"
     );
 }
+
+#[test]
+fn package_manifest_declares_the_documented_msrv() {
+    let manifest = fs::read_to_string("Cargo.toml").expect("Cargo manifest exists");
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line.trim() == "rust-version = \"1.85\""),
+        "Cargo.toml must declare the RFC 0110 MSRV"
+    );
+}
