@@ -1284,6 +1284,48 @@ fn nested_destructuring_is_strict_and_atomic() {
         ],
     };
     assert!(bad_destructure.verify().is_err());
+    let bad_rest_pattern = Chunk {
+        constants: vec![Constant::Value(Value::array(vec![]))],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::Destructure(Pattern::Rest("tail".into())),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_rest_pattern.verify().is_err());
+    let bad_rest_position = Chunk {
+        constants: vec![Constant::Value(Value::array(vec![]))],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::Destructure(Pattern::Array(vec![
+                Pattern::Rest("tail".into()),
+                Pattern::Bind("next".into()),
+            ])),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_rest_position.verify().is_err());
+}
+#[test]
+fn array_destructuring_rest_binds_an_immutable_tail() {
+    assert_eq!(
+        eval("[head, tail...] = [1, 2, 3]\nlen(tail) + head").as_number(),
+        Some(3.)
+    );
+    assert_eq!(eval("[head, tail...] = [1]\ntail").to_string(), "[]");
+    assert_eq!(
+        eval("collect = ([head, tail...]) -> [head, tail]\ncollect([1, 2, 3])").to_string(),
+        "[1, [2, 3]]"
+    );
+    assert_eq!(
+        eval("for [head, tail...] in [[1, 2, 3], [4]] then len(tail) + head").to_string(),
+        "[3, 4]"
+    );
+    assert!(Context::new().eval("[head, tail...] = []").is_err());
+    assert!(Context::new().eval("[head..., tail] = [1, 2]").is_err());
+    assert!(Context::new().eval("[head..., tail...] = [1, 2]").is_err());
+    let chunk = compile("[head, tail...] = [1, 2, 3]").unwrap();
+    assert!(chunk.verify().is_ok());
 }
 #[test]
 fn rejects_js_and_unknown_names() {
@@ -1379,4 +1421,23 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
     };
     assert!(bad_nested_function.verify().is_err());
+
+    let mut deeply_nested = Pattern::Ignore;
+    for _ in 0..300 {
+        deeply_nested = Pattern::Array(vec![deeply_nested]);
+    }
+    let bad_deep_pattern = Chunk {
+        constants: vec![],
+        code: vec![Instruction::Destructure(deeply_nested), Instruction::Return],
+    };
+    assert!(bad_deep_pattern.verify().is_err());
+
+    let bad_ignored_rest = Chunk {
+        constants: vec![],
+        code: vec![
+            Instruction::Destructure(Pattern::Array(vec![Pattern::Rest("_".into())])),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_ignored_rest.verify().is_err());
 }

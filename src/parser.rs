@@ -60,6 +60,7 @@ pub(crate) enum MapItem {
 pub(crate) enum Pattern {
     Ignore,
     Bind(String),
+    Rest(String),
     Default(Box<Pattern>, Box<Expr>),
     Array(Vec<Pattern>),
     Map(Vec<(String, Pattern)>),
@@ -280,6 +281,18 @@ impl Parser {
                             self.at = saved;
                             return None;
                         };
+                        if self.eat(&Token::Ellipsis) {
+                            let Pattern::Bind(name) = pattern else {
+                                self.at = saved;
+                                return None;
+                            };
+                            items.push(Pattern::Rest(name));
+                            if !self.eat(&Token::RBracket) {
+                                self.at = saved;
+                                return None;
+                            }
+                            break;
+                        }
                         items.push(self.pattern_default(pattern).ok()?);
                         if self.eat(&Token::RBracket) {
                             break;
