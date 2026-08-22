@@ -17,6 +17,25 @@ fn arithmetic_precedence_and_arrays() {
     assert!(Context::new().eval("1.5 & 1").is_err());
 }
 #[test]
+fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
+    assert_eq!(
+        eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),
+        Some(2.)
+    );
+    assert_eq!(
+        eval("{name = 'coffee', count = len(name)} = {}\ncount").as_number(),
+        Some(6.)
+    );
+    assert_eq!(
+        eval("f = ([first = 10, second = first + 1]) -> second\nf([nil])").as_number(),
+        Some(11.)
+    );
+    assert!(Context::new().eval("[x = 1, y] = []").is_err());
+    assert!(Context::new().eval("[x = 1] = [2, 3]").is_err());
+    let chunk = compile("[x = 1] = []\nx").unwrap();
+    assert!(chunk.verify().is_ok());
+}
+#[test]
 fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert_eq!(
         eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),
@@ -1057,6 +1076,36 @@ fn maps_ranges_and_indexing() {
         Ok(Value::Array(Rc::new(vec![Value::Number(99.)])))
     });
     assert_eq!(cx.eval("[2..4]").unwrap().to_string(), "[2, 3, 4]");
+}
+#[test]
+fn string_indexing_and_slices_use_unicode_scalar_boundaries() {
+    assert_eq!(eval("len('a☕中')").as_number(), Some(3.));
+    assert_eq!(eval("'a☕中'[0]").as_str(), Some("a"));
+    assert_eq!(eval("'a☕中'[1]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[1..2]").as_str(), Some("☕中"));
+    assert_eq!(eval("'a☕中'[1...2]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[-2..-1]").as_str(), Some("☕中"));
+    assert_eq!(eval("text = 'a☕中'\ntext[2]").as_str(), Some("中"));
+    assert!(Context::new().eval("'a☕中'[3]").is_err());
+    assert!(Context::new().eval("'a☕中'[0.5]").is_err());
+    assert!(Context::new().eval("'a☕中'[0..3]").is_err());
+    assert!(Context::new().eval("{text: 'abc'}[0..1]").is_err());
+    assert!(matches!(eval("none = nil\nnone?[missing..1]"), Value::Nil));
+    let calls = Rc::new(Cell::new(0));
+    let counter = calls.clone();
+    let mut cx = Context::new();
+    cx.add_native("bound", move |_| {
+        let call = counter.get() + 1;
+        counter.set(call);
+        Ok(Value::Number(if call == 1 { 1. } else { 2. }))
+    });
+    assert_eq!(
+        cx.eval("'a☕中'[bound()..bound()]").unwrap().as_str(),
+        Some("☕中")
+    );
+    assert_eq!(calls.get(), 2);
+    let chunk = compile("'a☕中'[1..2]").unwrap();
+    assert!(chunk.verify().is_ok());
 }
 #[test]
 fn array_slices_use_strict_once_evaluated_bounds_and_nil_safe_suffixes() {

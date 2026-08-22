@@ -6,6 +6,7 @@
 ## qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 ## qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 ## qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
+## 'a☕中'[1] 为 '☕'，'a☕中'[1..2] 为 '☕中'；字符串索引按 Unicode 标量。
 ## for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，不可用 by。
 ## [head, tail...] = [1, 2, 3] 将 tail 绑定为 [2, 3]；数组模式 rest 必须居末。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。

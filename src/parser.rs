@@ -1,5 +1,4 @@
 use crate::{
-    bytecode::Pattern,
     lexer::{Token, lex_spanned},
     vm::Error,
 };
@@ -52,6 +51,15 @@ pub(crate) enum Expr {
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
     Throw(Box<Expr>),
     Do(Box<Expr>),
+}
+#[derive(Clone, Debug)]
+pub(crate) enum Pattern {
+    Ignore,
+    Bind(String),
+    Rest(String),
+    Default(Box<Pattern>, Box<Expr>),
+    Array(Vec<Pattern>),
+    Map(Vec<(String, Pattern)>),
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Item {
@@ -265,7 +273,7 @@ impl Parser {
                 let mut items = vec![];
                 if !self.eat(&Token::RBracket) {
                     loop {
-                        let Some(mut pattern) = self.pattern() else {
+                        let Some(pattern) = self.pattern() else {
                             self.at = saved;
                             return None;
                         };
@@ -274,15 +282,14 @@ impl Parser {
                                 self.at = saved;
                                 return None;
                             };
-                            pattern = Pattern::Rest(name);
-                            items.push(pattern);
+                            items.push(Pattern::Rest(name));
                             if !self.eat(&Token::RBracket) {
                                 self.at = saved;
                                 return None;
                             }
                             break;
                         }
-                        items.push(pattern);
+                        items.push(self.pattern_default(pattern).ok()?);
                         if self.eat(&Token::RBracket) {
                             break;
                         }
@@ -310,11 +317,11 @@ impl Parser {
                                 self.at = saved;
                                 return None;
                             };
-                            pattern
+                            self.pattern_default(pattern).ok()?
                         } else if key == "_" {
-                            Pattern::Ignore
+                            self.pattern_default(Pattern::Ignore).ok()?
                         } else {
-                            Pattern::Bind(key.clone())
+                            self.pattern_default(Pattern::Bind(key.clone())).ok()?
                         };
                         fields.push((key, value));
                         if self.eat(&Token::RBrace) {
@@ -334,6 +341,14 @@ impl Parser {
             }
         };
         Some(pattern)
+    }
+    fn pattern_default(&mut self, pattern: Pattern) -> Result<Pattern, Error> {
+        if self.eat(&Token::Assign) {
+            let default = self.expr(0)?;
+            Ok(Pattern::Default(Box::new(pattern), Box::new(default)))
+        } else {
+            Ok(pattern)
+        }
     }
     fn body(&mut self) -> Result<Expr, Error> {
         self.eat(&Token::Then);

@@ -26,6 +26,7 @@ qcoffee --dump-bytecode program.qc
 
 `qcoffee --interactive`（或 `-i`）在输入行之间保持同一 Context；`:help` 列出命令，`:quit`/`:exit` 退出会话。管道输入不输出提示符。
 交互模式加 `--stats` 时，仅实际执行或运行时失败的非空输入行把指令数与剩余 fuel 写入标准错误；解析、验证错误不生成新记录。
+`'a☕中'[1]` 为 `'☕'`，`'a☕中'[1..2]` 为 `'☕中'`；字符串索引按 Unicode 标量。
 `for character, index in 'a☕中' then index` 得到 `[0, 1, 2]`；字符串按 Unicode 标量遍历，不接受 `by`。
 `[head, tail...] = [1, 2, 3]` 将 tail 绑定为 `[2, 3]`；数组模式 rest 必须居末。
 

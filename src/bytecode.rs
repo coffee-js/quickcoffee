@@ -1,5 +1,5 @@
 use crate::{
-    parser::{Binary, Expr, Item, Param, Stmt, Unary, Update},
+    parser::{Binary, Expr, Item, Param, Pattern as AstPattern, Stmt, Unary, Update},
     vm::{Error, Value},
 };
 use std::{
@@ -7,15 +7,16 @@ use std::{
     rc::Rc,
 };
 
-const MAX_PATTERN_DEPTH: usize = 256;
-
 /// A strict, recursively shaped binding pattern used by destructuring assignment.
 #[derive(Clone, Debug)]
 pub enum Pattern {
     Ignore,
     Bind(String),
-    /// Binds the remaining values of an enclosing array pattern.
     Rest(String),
+    Default {
+        pattern: Box<Pattern>,
+        default: Rc<Chunk>,
+    },
     Array(Vec<Pattern>),
     Map(Vec<(String, Pattern)>),
 }
@@ -136,10 +137,8 @@ impl Chunk {
                     }
                 },
                 Instruction::MakeFunction(i) => match self.constants.get(*i) {
-                    Some(Constant::Function { params, chunk, .. }) => {
-                        for pattern in params {
-                            validate_pattern(pattern, false)?;
-                        }
+                    Some(Constant::Function { chunk, params, .. }) => {
+                        params.iter().try_for_each(validate_pattern)?;
                         chunk.verify()?
                     }
                     Some(_) => {
@@ -153,10 +152,14 @@ impl Chunk {
                         )));
                     }
                 },
+                Instruction::Destructure(pattern) => validate_pattern(pattern)?,
                 Instruction::Jump(offset)
                 | Instruction::JumpIfFalse(offset)
                 | Instruction::JumpIfNil(offset)
                 | Instruction::IterNext { end: offset, .. } => {
+                    if let Instruction::IterNext { patterns, .. } = op {
+                        patterns.iter().try_for_each(validate_pattern)?;
+                    }
                     let target = pc as i64 + 1 + *offset as i64;
                     if target < 0 || target >= self.code.len() as i64 {
                         return Err(Error::verify(format!(
@@ -228,17 +231,13 @@ impl Chunk {
                     next(fallthrough, state)?;
                 }
                 Instruction::Store(_)
+                | Instruction::Destructure(_)
                 | Instruction::Neg
                 | Instruction::Not
                 | Instruction::BitNot
                 | Instruction::Exists
                 | Instruction::Stringify
                 | Instruction::Member(_) => {
-                    require(1)?;
-                    next(fallthrough, state)?;
-                }
-                Instruction::Destructure(pattern) => {
-                    validate_pattern(pattern, false)?;
                     require(1)?;
                     next(fallthrough, state)?;
                 }
@@ -331,10 +330,7 @@ impl Chunk {
                     require(1)?;
                     next(fallthrough, (state.0 - 1, state.1 + 1, state.2))?;
                 }
-                Instruction::IterNext { patterns, end } => {
-                    for pattern in patterns {
-                        validate_pattern(pattern, false)?;
-                    }
+                Instruction::IterNext { end, .. } => {
                     if state.1 == 0 {
                         return Err(Error::verify(format!(
                             "iterator stack underflow at instruction {pc}"
@@ -370,44 +366,36 @@ impl Chunk {
     }
 }
 
-fn validate_pattern(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
-    validate_pattern_at(pattern, allow_rest, 0)
+fn jump_target(pc: usize, offset: i32) -> usize {
+    (pc as i64 + 1 + offset as i64) as usize
 }
 
-fn validate_pattern_at(pattern: &Pattern, allow_rest: bool, depth: usize) -> Result<(), Error> {
-    if depth > MAX_PATTERN_DEPTH {
-        return Err(Error::verify("destructuring pattern is too deeply nested"));
-    }
+fn validate_pattern(pattern: &Pattern) -> Result<(), Error> {
+    validate_pattern_at(pattern, false)
+}
+
+fn validate_pattern_at(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
     match pattern {
         Pattern::Ignore | Pattern::Bind(_) => Ok(()),
         Pattern::Rest(name) if allow_rest && !name.is_empty() && name != "_" => Ok(()),
-        Pattern::Rest(_) => Err(Error::verify(
-            "array rest pattern must be inside an array and be named",
-        )),
-        Pattern::Array(patterns) => {
-            let mut rest_seen = false;
-            for (index, pattern) in patterns.iter().enumerate() {
-                if matches!(pattern, Pattern::Rest(_)) {
-                    if rest_seen || index + 1 != patterns.len() {
-                        return Err(Error::verify("array rest pattern must be the final item"));
-                    }
-                    rest_seen = true;
+        Pattern::Rest(_) => Err(Error::verify("array rest pattern must be final and named")),
+        Pattern::Default { pattern, default } => {
+            validate_pattern_at(pattern, allow_rest)?;
+            default.verify()
+        }
+        Pattern::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                if matches!(item, Pattern::Rest(_)) && index + 1 != items.len() {
+                    return Err(Error::verify("array rest pattern must be final"));
                 }
-                validate_pattern_at(pattern, true, depth + 1)?;
+                validate_pattern_at(item, true)?;
             }
             Ok(())
         }
-        Pattern::Map(fields) => {
-            for (_, pattern) in fields {
-                validate_pattern_at(pattern, false, depth + 1)?;
-            }
-            Ok(())
-        }
+        Pattern::Map(fields) => fields
+            .iter()
+            .try_for_each(|(_, pattern)| validate_pattern_at(pattern, false)),
     }
-}
-
-fn jump_target(pc: usize, offset: i32) -> usize {
-    (pc as i64 + 1 + offset as i64) as usize
 }
 
 pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
@@ -651,6 +639,34 @@ struct ReturnCleanup {
     finalizer: Option<Expr>,
 }
 impl Compiler {
+    fn compile_pattern(&mut self, pattern: &AstPattern) -> Result<Pattern, Error> {
+        Ok(match pattern {
+            AstPattern::Ignore => Pattern::Ignore,
+            AstPattern::Bind(name) => Pattern::Bind(name.clone()),
+            AstPattern::Rest(name) => Pattern::Rest(name.clone()),
+            AstPattern::Array(items) => Pattern::Array(
+                items
+                    .iter()
+                    .map(|p| self.compile_pattern(p))
+                    .collect::<Result<_, _>>()?,
+            ),
+            AstPattern::Map(fields) => Pattern::Map(
+                fields
+                    .iter()
+                    .map(|(key, p)| Ok((key.clone(), self.compile_pattern(p)?)))
+                    .collect::<Result<_, Error>>()?,
+            ),
+            AstPattern::Default(inner, expr) => {
+                let mut compiler = Compiler::default();
+                compiler.expr(expr)?;
+                compiler.emit(Instruction::Return);
+                Pattern::Default {
+                    pattern: Box::new(self.compile_pattern(inner)?),
+                    default: Rc::new(compiler.chunk),
+                }
+            }
+        })
+    }
     fn emit(&mut self, op: Instruction) -> usize {
         let i = self.chunk.code.len();
         self.chunk.code.push(op);
@@ -698,7 +714,8 @@ impl Compiler {
             }
             Stmt::Destructure(pattern, e) => {
                 self.expr(e)?;
-                self.emit(Instruction::Destructure(pattern.clone()));
+                let compiled = self.compile_pattern(pattern)?;
+                self.emit(Instruction::Destructure(compiled));
             }
             Stmt::Expr(e) => self.expr(e)?,
         }
@@ -706,7 +723,7 @@ impl Compiler {
     }
     fn for_discard(
         &mut self,
-        patterns: &[Pattern],
+        patterns: &[AstPattern],
         map: bool,
         iterable: &Expr,
         step: Option<&Expr>,
@@ -725,8 +742,12 @@ impl Compiler {
             self.emit(Instruction::IterStartEnumerable);
         }
         let start = self.chunk.code.len();
+        let compiled_patterns = patterns
+            .iter()
+            .map(|p| self.compile_pattern(p))
+            .collect::<Result<_, _>>()?;
         let exit = self.emit(Instruction::IterNext {
-            patterns: patterns.to_vec(),
+            patterns: compiled_patterns,
             end: 0,
         });
         self.loops.push(LoopContext {
@@ -813,7 +834,8 @@ impl Compiler {
             }
             Expr::Destructure(pattern, value) => {
                 self.expr(value)?;
-                self.emit(Instruction::Destructure(pattern.clone()));
+                let compiled = self.compile_pattern(pattern)?;
+                self.emit(Instruction::Destructure(compiled));
             }
             Expr::Array(items) => {
                 self.items(items, true)?;
@@ -1005,8 +1027,12 @@ impl Compiler {
                     self.emit(Instruction::IterStartEnumerable);
                 }
                 let start = self.chunk.code.len();
+                let compiled_patterns = patterns
+                    .iter()
+                    .map(|p| self.compile_pattern(p))
+                    .collect::<Result<_, _>>()?;
                 let exit = self.emit(Instruction::IterNext {
-                    patterns: patterns.clone(),
+                    patterns: compiled_patterns,
                     end: 0,
                 });
                 self.loops.push(LoopContext {
@@ -1257,7 +1283,7 @@ impl Compiler {
             let Some(default) = &param.default else {
                 continue;
             };
-            let Pattern::Bind(name) = &param.pattern else {
+            let AstPattern::Bind(name) = &param.pattern else {
                 return Err(Error::parse("default parameter must be a name"));
             };
             inner.emit(Instruction::Load(name.clone()));
@@ -1274,8 +1300,12 @@ impl Compiler {
         inner.expr(body)?;
         inner.emit(Instruction::Return);
         let idx = self.chunk.constants.len();
+        let compiled_params = params
+            .iter()
+            .map(|param| self.compile_pattern(&param.pattern))
+            .collect::<Result<_, _>>()?;
         self.chunk.constants.push(Constant::Function {
-            params: params.iter().map(|param| param.pattern.clone()).collect(),
+            params: compiled_params,
             required: params
                 .iter()
                 .take_while(|param| param.default.is_none())
