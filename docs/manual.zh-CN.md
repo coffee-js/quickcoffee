@@ -1,140 +1,147 @@
-# QuickCoffee 用户手册（简体中文）
+# QuickCoffee document
 
-QuickCoffee 是一个 Rust 字节码引擎，不是 JavaScript 运行时。源码被解析、编译、验证后才执行；不存在原型链、`this`、`eval` 或内嵌 JavaScript。
+## Notes
 
-`#` 开始行注释。非嵌套块注释用 `### … ###` 包围，内容在布局与解析前被忽略；未闭合会报告词法错误。
+QuickCoffee 用户手册
+QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
+qcoffee - 可从标准输入读取 QuickCoffee 程序。
+qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
+qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
+qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
+qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
+'a☕中'[1] 为 '☕'，'a☕中'[1..2] 为 '☕中'；字符串索引按 Unicode 标量。
+for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，by 可用非零有符号整数，负步从末项起。
+do (name, other) -> ... 即刻调用，并按名转发外层值；do -> ... 仍为零参。
+[head, tail...] = [1, 2, 3] 将 tail 绑定为 [2, 3]；数组模式 rest 必须居末。
+qtest --fuel N 为每份可执行文档设置独立指令预算。
+qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
+qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写标准错误。
+qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
+Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
+Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
+Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
+qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
+qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
+指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
+qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
+嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。
+cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
+宿主可用 Value::kind() 分流类型，用 Value::is_nil() 判断 nil，无须检查内部容器。
+Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
+Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
+-- 后的参数以普通字符串数组 argv 暴露给程序。
+它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。
+# 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
+标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。
+yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
+! 是严格 Bool 的 not 别名；!= 仍为严格不等。
+严格或数值比较可成链，保留中间值且前段失败会短路。
+标准库皆为普通函数：print、len、type、range、str、abs、sum、min、max、keys、values、join、split 与 assert；数值聚合只收严格有限数数组。
+映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
+映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
+数组与 Unicode 字符串支持负索引，-1 取末项。
+函数捕获词法环境；末尾参数可写作 y = 2，缺省或 nil 时在函数内取默认值；末位 rest 参数写作 tail...。
+普通名称参数可省略括号：left, right -> left + right；默认、rest 与解构参数仍须括号。
+return expression 只在函数内结束当前调用；裸 return 得 nil，并清理循环且执行沿途 finally。
+形参可使用严格嵌套数组/映射模式，默认值和 rest 仍只用于名称。
+整数区间 `[1..3]` 包含上界，`[1...3]` 不包含上界。
+区间也可降序：`[3..1]` 得到 `[3, 2, 1]`，`[3...1]` 得到 `[3, 2]`。
+三引号 heredoc 保留换行："""...""" 插值，'''...''' 为字面量。
+数组切片 a[start..end] 包含末端，a[start...end] 不包含末端；端点须为界内有限整数，负数自末计，nil 安全切片在接收者 nil 时不求端点。
+空值回退写作 left ? right，仅 nil 触发，false 与 0 保留。
+后缀 value? 仅检验非 nil；nil? 为 false，false? 与 0? 为 true，且不隐藏未绑定名称错误。
+name ?= value 只在名称未绑定或为 nil 时求值并写入；已有非 nil 值时右侧短路，成员、索引与解构不适用。
+value in array 检查数组成员；key of map 只检查映射自身的字符串键。
+value not in array 与 key not of map 分别是否定的严格数组成员和映射自有键检查。
+映射字面量中的 {name} 是 {name: name} 的简写。
+赋值模式可嵌套数组和映射，VM 先完整验证，失败不留下部分绑定。
+名称可作严格算术复合赋值：total += amount、power **= 2；成员与索引不可作之。
+名称亦支持严格前后置更新：next = ++counter 得新值，previous = counter-- 先得旧值。
+算术亦有整除 // 与向下取模 %%：-7 // 5 为 -2，-7 %% 5 为 3。
+数组和调用中的 items... 会展开数组，不使用 JavaScript apply。
+nil 安全后缀 a?.name、a?[i]、f?(args) 只在接收者为 nil 时短路。
+until condition then body 重复执行，直至布尔条件为真。
+语句位置可后置 while/until：重复整个赋值或严格解构，不能嵌入普通子表达式。
+loop body 是 while true 的无限形式，以 break 退出，仍受 fuel 限制。
+for 是收集表达式：每轮体值成新数组，when 与 continue 不收集，break 保留既得前缀。
+for 绑定可用严格模式：for [left, right] in pairs 会原子地绑定每个 pair。
+数组循环可写 by step；步长只求一次，须为非零有限整数，负步从末项起，映射循环不用 by。
+数组循环亦可绑定从零开始的下标：for value, index in items then value + index。
+后置推导沿用严格收集：value * 2 for value in items，亦可写作 [value * 2 for value in items]。
 
-标识符使用 Unicode XID 规则：首字符为 XID start 或 `_`，后续可为 XID continue 或 `_`，因此组合附标可出现在名称中；引擎不做 Unicode 规范化。
+## Code
 
-普通字符串支持常用控制字符转义以及 `\\xNN`、`\\uNNNN`、`\\u{...}` Unicode 转义；非法转义和非 Unicode 标量值会报告解析错误。
-
-可使用 CoffeeScript 风格别名而不改变运行时类型：`yes`/`on` 等同 `true`，`no`/`off` 等同 `false`，`is`/`isnt` 等同严格的 `==`/`!=`。
-
-相邻的严格或数值比较可写成链：`1 < middle() < 3` 只会计算一次 `middle()`；较早比较为假时，不会计算后续操作数。
-
-## 起步
-
-```sh
-qcoffee -e "print(range(1, 4))"
-qcoffee --fuel 10000 program.qc
-qcoffee --check program.qc
-qcoffee --dump-bytecode program.qc
-```
-
-`qcoffee -` 从标准输入读取源码，便于接入管道；`qcoffee --check FILE`（FILE 可为 `-`）只解析、编译和验证而不执行；`qcoffee --dump-bytecode -` 则反汇编标准输入而不执行。
-`qcoffee --stats` 将指令数与剩余 fuel 写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
-
-`qcoffee --interactive`（或 `-i`）在输入行之间保持同一 Context；`:help` 列出命令，`:quit`/`:exit` 退出会话。管道输入不输出提示符。
-交互模式加 `--stats` 时，仅实际执行或运行时失败的非空输入行把指令数与剩余 fuel 写入标准错误；解析、验证错误不生成新记录。
-`'a☕中'[1]` 为 `'☕'`，`'a☕中'[1..2]` 为 `'☕中'`；字符串索引按 Unicode 标量。
-`for character, index in 'a☕中' then index` 得到 `[0, 1, 2]`；字符串按 Unicode 标量遍历，不接受 `by`。
-`[head, tail...] = [1, 2, 3]` 将 tail 绑定为 `[2, 3]`；数组模式 rest 必须居末。
-
-`--` 之后的参数以普通字符串数组 `argv` 提供：`qcoffee program.qc -- first second` 中 `len(argv)` 为 `2`。引擎不会暴露宿主进程或环境对象。
-
-`--fuel` 是每次执行的指令上限，耗尽会安全失败。标准库包括 `print`、`len`、`type`、`range`、`str`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`；数值聚合只接受严格有限数数组，`range(a, b)` 生成 `[a, b)`。
-
-## 语法示例
-
-```coffee
-factor = 6
+````quickcoffee
+base = 21
 double = (x) -> x * 2
-if double(factor) == 12 then print('ok') else print('bad')
-```
+shorthand = 'yes'
+[first, {point: [x, y]}] = [0, {point: [20, 22]}]
+scale = ([left, right], {factor}) -> (left + right) * factor
+double(base) == 42 and "答案 #{double(base)}" == '答案 42' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((head, y = 2) -> head + y)(40) == 42 and ((head, tail...) -> head + len(tail))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+步和 = 0
+for n in [1..9] by 3 then 步和 = 步和 + n
+步和 == 12
+len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+后置倍数 = value * 2 for value in [1..3]
+后置倍数 == [2, 4, 6]
+计数器 = 2
+前置更新 = ++计数器
+后置更新 = 计数器--
+[前置更新, 后置更新, 计数器] == [3, 3, 3]
+[-7 // 5, -7 %% 5] == [-2, 3]
+[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+continued = 1 +
+  2 * 3
+continued == 7
+message = "hello
+  world"
+message == 'hello world'
+escaped = "A\\x42\\u{43}"
+escaped == 'ABC'
+folded = (1 + 2 * 3) == 7
+folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
+indented_record =
+  first: 20
+  nested:
+    second: 22
+indented_record.nested.second == 22
+implicit_add = (left, right) -> left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
+3 not in [1, 2] and 'missing' not of {present: 1}
+循环数 = 0
+loop
+  循环数 = 循环数 + 1
+  break if 循环数 == 3
+循环数 == 3
+裸加 = left, right -> left + right
+裸加(20, 22) == 42
+后置数 = 0
+后置数 = 后置数 + 1 while 后置数 < 3
+后置数 == 3
+切片数 = [0..4][1..3]
+len(切片数) == 3 and 切片数[0] == 1 and [0..4][-3...-1][0] == 2
+nil? == false and false? == true and 0? == true
+默认数 ?= 42
+默认数 == 42
+多行 = """答案 #{double(base)}
+次行"""
+多行 == '答案 42\n次行'
+### 这段含无效 ` 源文，却不会参与执行
+###
+42 == 42
+````
 
-函数捕获创建处的词法环境。普通名称形参可省略括号，如 `left, right -> left + right`；默认值、rest 和解构形参仍必须使用括号。尾部形参可设默认值，如 `(head, separator = '-') -> expression`；缺省或显式传入 `nil` 时，默认表达式在被调函数内计算，因此可引用较早形参与闭包变量。必选形参必须在默认形参之前。末位可变参数写作 `(head, tail...) -> expression`，其余实参会以数组绑定给 `tail`。映射键使用字符串索引：`{name: 'coffee'}['name']`。
+## Final value
 
-`return expression` 只可用于函数体，立即结束当前函数；裸 `return` 返回 `nil`。它不会跨越嵌套函数。位于循环时会清理循环状态；穿过 `try` 或 `catch` 时会由内向外执行 `finally`。`finally` 中的 return 会覆盖先前的返回值。条件返回请写作 `if condition then return value`。
-
-形参也可使用严格递归模式：`([left, right], {factor}) -> (left + right) * factor`。函数开始前，每个实参必须匹配对应模式；默认值仍只允许命名形参，rest 仍只能是末位名称。
-
-映射字面量中的 `{name}` 是 `{name: name}` 的简写；字符串键仍必须显式给出值，如 `{'name': value}`。
-
-赋值模式可嵌套数组与映射：`[first, {point: [x, y]}] = [1, {point: [20, 22]}]`。数组每层都要求长度精确相同，映射要求列出的标识符键存在。VM 会先验证整个模式再写任何绑定，故深层不匹配同样是原子的。
-
-数组项或调用实参末尾的 `...` 会展开数组：`[1, values..., 4]` 拼入其元素，`fn(values...)` 将它们逐个传参。展开目标必须是数组，不会调用 JavaScript 风格的 `apply` 方法。
-
-nil 安全后缀采用 CoffeeScript 风格写法：`record?.name`、`values?[index]` 与 `fn?(args)`。接收者为 `nil` 时结果为 `nil`，索引或实参也不会求值；接收者非 `nil` 时沿用普通访问的严格规则，因此映射缺键仍会报错。
-
-数组循环写作 `for item in range(1, 4) then print(item)`；可在数组之后写 `by step`，如 `for item in [1..9] by 3 then print(item)` 或用负步长从末项反向遍历。第二个绑定可取得从零开始的实际下标，如 `for item, index in items then item + index`，步进时仍取数组位置。绑定位置可用严格递归模式，例如 `for [left, right] in pairs then left + right` 或 `for {point: {x, y}} in values then x + y`；每个项的全部绑定只会在模式完整匹配后写入。`for` 是收集表达式：每次循环体值组成新数组，`when` 拒绝的项不收集，`break` 返回已收集前缀。步长只求值一次，且必须是非零的有限整数。`break` 和 `continue` 控制最内层循环；`while`/`until`/`loop` 的结果仍为 `nil`；映射循环不支持 `by`。
-
-同一收集器也支持 CoffeeScript 风格后置推导：`value * 2 for value in items`，或写作 `[value * 2 for value in items]`。方括号只是推导界标，不产生额外嵌套数组；`by`、`when`、映射、模式、`break`、`continue` 仍遵循前置形式。
-
-整数区间字面量由 VM 的专用字节码直接构造：`[1..3]` 包含上界，结果为 `[1, 2, 3]`；`[1...3]` 不包含上界，结果为 `[1, 2]`；降序同样支持，`[3..1]` 为 `[3, 2, 1]`。边界必须是有限整数。
-
-数组切片写作 `items[start..end]`（含末端）或 `items[start...end]`（不含末端），例如 `[0..4][1..3]` 为 `[1, 2, 3]`。端点从左到右各求值一次，必须是界内有限整数；负数从末尾计，`-1` 是最后一项。切片只用于数组且不隐式截断。nil 安全形式 `items?[start..end]` 在接收者为 `nil` 时不求端点而产生 `nil`。
-
-`left ? right` 是仅针对 `nil` 的回退：只有左值为 `nil` 才会求值右侧。它不会把 `false`、`0`、空字符串或空容器视为空值。
-
-后缀 `value?` 只检测值是否不是 `nil`：`nil?` 为 `false`，而 `false?`、`0?` 都为 `true`。它不隐藏未绑定名称错误，也不同于 `left ? right` 的回退。
-
-`name ?= value` 仅在名称还未绑定或当前为 `nil` 时求值并写入 `value`；已有非 nil 值时右侧不会执行。名称还支持严格算术复合赋值，如 `total += amount`、`power **= 2`。这些形式只适用于名称，不能用于成员、索引或解构；普通未绑定名称读取仍是错误。
-
-名称还支持严格数值前后置更新：`next = ++counter` 产生新值，`previous = counter--` 先产生旧值再减一。更新只接受名称，成员、索引和解构形式均拒绝。
-
-CoffeeScript 算术还提供整除 `a // b` 与向下取模 `a %% b`；例如 `-7 // 5` 为 `-2`，`-7 %% 5` 为 `3`。普通 `%` 仍是随被除数取符号的余数。
-
-位运算采用严格有符号 32 位数：`&`、`|`、`^`、`~`、`<<`、`>>`、`>>>`；移位计数限于 0 至 31，复合形式只接受名称。
-
-物理行末的显式运算符可使表达式续至下一行；续行期间的缩进只作排版，不改变布局块。
-
-普通引号字符串可以跨行；换行合为一个空格，行末反斜杠则去除换行。
-
-诸如 `(1 + 2 * 3) == 7` 的纯字面量算术会在编译时折叠为经验证的常量。
-
-`value in array` 按 QuickCoffee 相等性检查数组成员，`value not in array` 取其相反值。`key of map` 只检查映射自身的字符串键，`key not of map` 取其相反值；映射没有可查询的原型键。
-
-`until condition then body` 是反向循环形式：它重复执行直到布尔条件为真，`break`、`continue`、缩进和 fuel 规则均与 `while` 相同。
-
-语句位置还可写后置循环：`n = n + 1 while n < 3` 与前置 while 等价，重复整个赋值；`until` 同理。严格解构也可作为体。后置循环不能嵌入普通子表达式。
-
-`loop body` 是无限的 `while true` 形式；使用 `break` 退出，仍受 fuel 限制。例如 `n = 0; loop then if n == 3 then break else n = n + 1`。
-
-在 `for` 的可迭代对象与 `then` 之间放置 `when condition` 可过滤循环，不为被拒绝的绑定执行循环体：`for n in [1..5] when n > 2 then print(n)`。
-
-无原型的数据工厂写作 `class Point(x, y = 0) -> {x: x, y: y}`，其默认参数规则与函数相同；调用后得到普通映射，可用 `Point(3).x` 读取成员。没有 `this`、`new` 或继承。
-
-双引号可插入 QuickCoffee 表达式：`"答案 #{double(21)}"`。单引号没有插值；其中不会运行任何 JavaScript。
-
-多分支表达式使用 `switch value` 与缩进的 `when pattern`；只会选择一个严格相等分支，且没有贯穿。
-
-异常使用 `try`、`catch error`、可选 `finally` 与 `throw value`。catch 得到稳定的错误字符串，而非 JavaScript Error 对象；函数 return 也会经过适用的 finally。
-
-## 嵌入 Rust
-
-```rust
-let mut cx = quickcoffee::Context::new().with_fuel(100_000);
-cx.set_global(
-    "host_values",
-    quickcoffee::Value::array(vec![
-        quickcoffee::Value::from(40_i64),
-        quickcoffee::Value::from(2_i64),
-    ]),
-);
-let value = cx.eval("host_values[0] + host_values[1]")?;
-```
-
-`Value::from`、`Value::string`、`Value::array` 与 `Value::map` 可以直接构造宿主值，无需接触 VM 的引用计数内部表示。宿主回调可返回 `Error::runtime("message")`，脚本可用 `catch` 捕获。
-
-若需重复执行，使用 `Engine::compile_program` 编译并验证一次，再将共享 `Program` 传给 `run_program`；克隆该句柄不会复制字节码或重复验证。
-
-`Context::last_execution()` 可读最近一次成功或运行时失败的 `ExecutionStats`，其中有执行指令数 `instructions` 与余下燃料 `fuel_remaining`；编译或验证错误不会改写上一条记录。
-
-`cx.get_global("host_values")` 可在不执行脚本的情况下读取脚本或宿主设置的全局值；未知名称返回 `None`。它只返回公开 `Value` 的副本，不泄漏环境或调用帧。
-
-嵌入错误具有结构：`error.kind()` 返回 `ErrorKind::Parse`、`ErrorKind::Verify` 或 `ErrorKind::Runtime`，`error.message()` 返回详情，`error.position()` 可返回从 1 开始的源码行号。宿主无需解析展示文本；`Display` 输出仍适合 CLI 与 QuickCoffee 的 `catch` 错误字符串。
-
-## 文档与测试
-
-`qdocco demo.qc -o demo.html` 生成并校验可执行文档；用 `qdocco --check demo.qc` 只校验。`qtest cases` 会递归运行目录中的 `.qc` 文件，要求每个脚本的最后值严格为 `true`。
-
-`qtest --fuel N cases` 会为每个发现的测试文件分别设置指令预算，因此一个受限循环不会耗尽其他测试的预算。
-`qtest --stats` 还会把每个文件的指令数与剩余 fuel 写入标准错误，不改变 `ok` 输出。
-
-多行数组和映射可按行省略逗号；调用参数与普通括号内表达式仍须显式分隔。
-
-单独赋值行（`record =`）后可缩进书写映射；嵌套的 `key: value` 条目会成为无原型映射，普通赋值续行不受影响。
-
-同一逻辑行的调用可省略括号：`implicit_answer = implicit_add 20, 22`；比较或跨布局边界时仍可使用显式括号。
-
-`qtest --json` 为每个测试文件输出稳定 JSON，`qtest --tap` 输出 TAP 13；`qcoffee --fingerprint FILE` 在不执行文件时输出规范化字节码缓存键；`qbench --json` 输出带语义护栏的编译、验证、执行计时；`qdocco --markdown` 生成可审阅的文学编程 Markdown。嵌入方可用 `Context::set_fuel` 调整复用上下文，用 `Value::kind()` 与 `Value::is_nil()` 做稳定类型判断，并运行 `cargo run --example embed` 查看完整宿主示例。
+`true`

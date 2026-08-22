@@ -1,96 +1,144 @@
-# QuickCoffee मार्गदर्शिका (देवनागरी, संस्कृत)
+# QuickCoffee document
 
-`QuickCoffee` Rust-निर्मितः bytecode-यन्त्रः अस्ति, JavaScript-runtime न। स्रोतः पठ्यते, संकल्यते, परीक्ष्यते, ततः चालयते। prototype-chain, `this`, `eval`, अन्तःस्थ-JavaScript च न सन्ति।
+## Notes
 
-triple-quote heredoc newline रक्षति: `"""…"""` `#{expression}` interpolates, `'''…'''` literal भवति; indentation न छिद्यते, unclosed delimiter lexical-error भवति।
-
-`#` एक-पङ्क्ति-comment आरभते। `### … ###` अनन्तर्निहित block-comment अस्ति; layout तथा parse पूर्वं त्यज्यते, अयुक्त-closure lexical-error भवति।
-
-नामानि Unicode XID नियमं अनुसरन्ति: प्रथमं XID start अथवा `_`, पश्चात् XID continue अथवा `_`। संयोजक-चिह्नानि नाम निरन्तरयन्ति; engine Unicode-normalization न करोति।
-
-Quoted-string सामान्य-control-escape तथा `\\xNN`, `\\uNNNN`, `\\u{...}` Unicode-escape गृह्णाति; अवैध अथवा non-scalar escape parse-error जनयति।
-
-CoffeeScript-नामानि type न परिवर्तयन्ति: `yes`/`on` = `true`, `no`/`off` = `false`, `is`/`isnt` strict `==`/`!=` स्तः।
-
-strict अथवा numeric-comparison श्रृङ्खला भवति: `1 < middle() < 3` मध्ये middle एकवारं मूल्यते, पूर्वं false चेत् परं न मूल्यते।
-
-`qcoffee -e "print(range(1, 4))"` प्रयुञ्जीत। `qcoffee --check FILE` स्रोतं compile-verify करोति, न चालयति; `--fuel N` निर्देश-संख्यां सीमयति। `print`, `len`, `type`, `range`, `str`, `abs`, `sum`, `min`, `max`, `keys`, `values`, `join`, `split`, `assert` मानक-सहायकाः; संख्या-संग्रहाः केवलं finite-संख्याः गृह्णन्ति; `range(a, b)` मध्ये `b` न गृह्यते।
-
-`qcoffee -` मानक-input तः स्रोतः पठति; `qcoffee --dump-bytecode -` तमेव स्रोतं चालनं विना विच्छिनत्ति।
-`qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
-
-`qcoffee --interactive` (वा `-i`) पङ्क्तिषु एकं Context धारयति; `:help` आदेशान् दर्शयति, `:quit`/`:exit` सत्रं समापयतः। pipe-input मध्ये prompt न भवति।
-`for character, index in 'a☕中' then index` `[0, 1, 2]` ददाति; string Unicode-scalar-क्रमेण चलति, `by` न स्वीकरोति।
+QuickCoffee मार्गदर्शिका
+मानचित्र-विस्तारः पश्चात् लिखिता कुञ्जी पूर्वलिखितां जयति।
+मानचित्र-विन्यासे ...metadata अनुक्तानि कुञ्जीनि गृह्णाति।
+ऋण-सूचकाङ्केन क्रमस्य अन्तिमं पदं लभ्यते।
+स्रोतः पठ्यते, सत्यापित-bytecode मध्ये संकल्यते, fuel-सीमया चालयते।
+qcoffee - मानक-input तः QuickCoffee-program पठति।
+qcoffee --stats instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
+qcoffee --check FILE स्रोतं verify करोति, न चालयति।
+qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
+qcoffee --interactive --stats केवलं कार्यितायै वा runtime-दोषयुक्तायै non-empty पङ्क्त्यै instruction तथा fuel लेखं लिखति; parse अथवा verify-दोषे नूतनं लेखं न लिखति।
+'a☕中'[1] '☕' अस्ति, 'a☕中'[1..2] '☕中' अस्ति; string-index Unicode-scalar-अनुसारी अस्ति।
+for character, index in 'a☕中' then index Unicode-scalar-अङ्कान् [0, 1, 2] ददाति; string-iteration मध्ये शून्य-वर्जित signed by-क्रमः अस्ति।
+do (name, other) -> ... तत्क्षणं आह्वयति, बहिः समाननाम-मूल्यानि ददाति; do -> ... निरवयवम् अस्ति।
 [head, tail...] = [1, 2, 3] tail-नाम्नि [2, 3] बध्नाति; array-pattern rest अन्तिमः भवति।
-`--stats` सहिते प्रत्येक non-empty पङ्क्तिः instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति।
+qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
+qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
+qtest --json प्रत्येकस्य लेखस्य स्थिरं JSON फलम् एकस्मिन् पङ्क्तौ लिखति; --stats stderr मध्ये एव।
+qtest --tap TAP 13 तथा नियत-सङ्ख्याङ्कितानि फलानि लिखति; --json च --tap च परस्परं निषिद्धे।
+host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
+Engine::compile_program एकवारं verify करोति; Context::run_program पुनःचालने अपरिवर्तनीय-सत्यापित-bytecode पुनरुपयुङ्क्ते।
+Program::fingerprint होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
+qcoffee --fingerprint FILE सत्यापित-bytecode-कुञ्जीं षोडश लघु-षोडशाधारीय-अङ्कैः दर्शयति, लेखं न चालयति।
+qbench --json प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; --iterations नमूना-सङ्ख्यां नियच्छति।
+बीजाङ्काः Rust-debug-रूपं विना स्पष्ट-नियत-bytecode-संकेतेन निर्मीयन्ते, अतः साधन-रूपपरिवर्तनं सञ्चय-कुञ्जीं न परिवर्तयति।
+qdocco --markdown टिप्पणीन्, सीमितं QuickCoffee-कोडं, अन्तिम-मूल्यं च पठनीय Markdown-फलके लिखति।
+अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति; with_global तथा with_native क्रमिक-संयोजनाय स्तः।
+`cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
+Host `Value::kind()` द्वारा प्रकारं विभजति, `Value::is_nil()` द्वारा nil परीक्षते, आन्तरिक-container न पश्यति।
+Cargo-वस्तु-विवरणानि अन्तःस्थापकान् repository, docs.rs-API, README, licence च प्रति नयन्ति।
+Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
+-- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।
+JavaScript नास्ति: prototype-chain, this, eval, अन्तःस्थ-JavaScript च न सन्ति।
+# line-comment अस्ति; ### … ### non-nesting block-comment layout तथा parse पूर्वं त्यज्यते।
+Unicode XID-नामानि संयोजक-चिह्नानि गृह्णन्ति, अतः स्थित इत्यादि नाम executable अस्ति।
+yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
+! strict-Bool not-पर्यायः अस्ति; != strict-असाम्यमेव तिष्ठति।
+chained-comparison मध्ये मध्य-मूल्य एकवारं, पूर्व-false चेत् short-circuit भवति।
+सामान्य-library साधारण-function रूपेण print, len, type, range, str, abs, sum, min, max, keys, values, join, split, assert ददाति; संख्या-संग्रहाः केवलं finite-संख्याः गृह्णन्ति।
+कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।
+bare-name lambda left, right -> left + right भवति; default, rest, pattern तु parentheses गृह्णन्ति।
+return expression केवलं वर्तमान-कार्यं समाप्तं करोति; केवलः return nil फलति, loop शुद्धीकरोति, finally च चलयति।
+parameter strict array/map-pattern गृह्णाति; default तथा rest केवलं name भवतः।
+पूर्णाङ्क-range `[1..3]` अन्तं गृह्णाति; `[1...3]` अन्तं न गृह्णाति।
+Range अधोमुखोऽपि भवति: `[3..1]` `[3, 2, 1]` ददाति, `[3...1]` `[3, 2]` ददाति।
+array-slice a[start..end] अन्तं गृह्णाति, a[start...end] अन्तं न गृह्णाति; सीमा finite integer array-अन्तर्गतौ, negative अन्तात्, nil-safe slice nil-receiver मध्ये सीमौ न मूल्यते।
+nil-विशेष-fallback left ? right इति; false तथा zero न परिवर्तेते।
+postfix value? non-nil एव परीक्षते: nil? false, false? तथा 0? true; unbound-name-error न गोप्यते।
+name ?= value unbound अथवा nil नाम्नि एव लिखति; non-nil right-side त्यजति, member/index/pattern न।
+नाम्नि strict prefix/postfix update अपि स्तः: next = ++counter नूतनं, previous = counter-- पूर्व-मूल्यं ददाति; केवलं name मान्यः।
+arithmetic मध्ये floor-division // तथा dividend-dependent modulo %% अपि स्तः: -7 // 5 = -2, -7 %% 5 = 3।
+value in array array-सदस्यं परीक्षते; key of map map-स्वकीय-string-key परीक्षते।
+value not in array तथा key not of map तयोः strict निषेधौ स्तः, prototype विना।
+map-literal मध्ये {name} इति {name: name} संक्षेपः अस्ति।
+assignment-pattern array-map nested भवति; VM सर्वं परीक्ष्य पश्चात् एव binding परिवर्तयति।
+array तथा call मध्ये items... array-विस्तारः, JavaScript apply विना।
+nil-सुरक्षित suffix a?.name, a?[i], f?(args) केवलम् nil-receiver मध्ये short-circuit करोति।
+until condition then body पुनः पुनः, यावत् Boolean-condition सत्यम् भवति।
+वाक्य-स्थाने postfix while/until पूर्ण-assignment अथवा strict-destructuring पुनरावर्तयति, सामान्य-subexpression न।
+loop body अनन्तः while true; break निर्गमं करोति, fuel सीमा तिष्ठति।
+for-expression शरीर-मूल्यानि नूतने array मध्ये सञ्चिनोति; when तथा continue त्यजतः, break सञ्चित-पूर्वभागं रक्षति।
+for-binding strict-pattern भवति: for [left, right] in pairs प्रत्येक-pair पूर्णतया बध्नाति।
+array-for by step उपयुज्यते; non-zero finite integer step एकवारं मूल्यते, negative क्रमः अन्तिम-पदात् आरभते, map तु न।
+array-for शून्यात् गणितं index अपि बध्नाति: for value, index in items then value + index।
+postfix-comprehension समानं strict-collection वहति: value * 2 for value in items, अथवा [value * 2 for value in items]।
 
-`--` पश्चात् argumentाः साधारण-string-array `argv` रूपेण दीयन्ते: `qcoffee program.qc -- first second` मध्ये `len(argv)` `2` भवति। host-process अथवा environment-object न प्रकाश्यते।
+## Code
 
-कार्यं `(x) -> expression` अथवा bare-name `left, right -> left + right` इति लिख्यते; lexical-environment गृह्णाति। default, rest, pattern तु parentheses अपेक्षन्ते। अन्तिम-सामान्य-parameter default सहितः भवितुं शक्नोति, यथा `(head, separator = '-') -> expression`; argument अभावे अथवा `nil` दत्ते default-expression कार्यस्य अन्तरे मूल्यते, अतः पूर्व-parameter तथा captured-environment पश्यति। आवश्यक-parameter default-parameter पूर्वं स्थापनीयः। अन्तिमः rest-parameter `(head, tail...) -> expression` शेषान् argumentान् array मध्ये बध्नाति। `qdocco FILE -o FILE.html` साहित्य-दस्तावेजं जनयति; `qtest FILE...` सफलं भवति यदा सर्वेषां अन्तिम-मूल्यं `true` भवति।
+````quickcoffee
+base = 40
+add = (x) -> x + base
+shorthand = 'yes'
+[first, {point: [x, y]}] = [0, {point: [20, 22]}]
+scale = ([left, right], {factor}) -> (left + right) * factor
+add(2) == 42 and "फलम् #{add(2)}" == 'फलम् 42' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((mukha, y = 2) -> mukha + y)(40) == 42 and ((mukha, puchcha...) -> mukha + len(puchcha))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+पदयोग = 0
+for n in [1..9] by 3 then पदयोग = पदयोग + n
+पदयोग == 12
+len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+postfix_doubles = value * 2 for value in [1..3]
+postfix_doubles == [2, 4, 6]
+counter_update = 2
+prefix_update = ++counter_update
+postfix_update = counter_update--
+[prefix_update, postfix_update, counter_update] == [3, 3, 3]
+[-7 // 5, -7 %% 5] == [-2, 3]
+[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+continued = 1 +
+  2 * 3
+continued == 7
+message = "hello
+  world"
+message == 'hello world'
+escaped = "A\\x42\\u{43}"
+escaped == 'ABC'
+folded = (1 + 2 * 3) == 7
+folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
+indented_record =
+  first: 20
+  nested:
+    second: 22
+indented_record.nested.second == 22
+implicit_add = (left, right) -> left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
+स्थित = 40
+स्थित + 2 == 42
+3 not in [1, 2] and 'missing' not of {present: 1}
+loop_count = 0
+loop
+  loop_count = loop_count + 1
+  break if loop_count == 3
+loop_count == 3
+bare_add = left, right -> left + right
+bare_add(20, 22) == 42
+postfix_count = 0
+postfix_count = postfix_count + 1 while postfix_count < 3
+postfix_count == 3
+slice_values = [0..4][1..3]
+len(slice_values) == 3 and slice_values[0] == 1 and [0..4][-3...-1][0] == 2
+nil? == false and false? == true and 0? == true
+default_value ?= 42
+default_value == 42
+### invalid ` source अत्र उपेक्षितः
+###
+42 == 42
+````
 
-`return expression` केवलं कार्यस्य अन्तरे मान्यः, तत् कार्यं शीघ्रं समाप्तं करोति; केवलः `return` `nil` फलति। अन्तःस्थ-कार्यं न अतिक्रामति। सक्रिय-loop शुद्धीकरोति तथा अन्तःतः बहिः `finally` चलयति; `finally` मध्ये return पूर्वफलम् परिवर्तयति। सशर्त-return `if condition then return value` इति लिख्यते।
+## Final value
 
-parameter strict-pattern अपि भवति: `([left, right], {factor}) -> (left + right) * factor`। प्रत्येक argument pattern अनुरूपः भवेत्; default केवलं name-parameter, rest केवलं अन्तिम-name भवति।
-
-map-literal मध्ये `{name}` इति `{name: name}` संक्षिप्त-रूपम्; string-key स्पष्ट-मूल्यम् अपेक्षते।
-
-assignment-pattern array तथा map मध्ये nested भवितुं शक्नोति: `[first, {point: [x, y]}] = [1, {point: [20, 22]}]`। array प्रत्येकस्तरे exact-length अपेक्षते, map निर्दिष्ट-key अपेक्षते; VM सर्व-pattern परीक्ष्य पश्चात् एव binding परिवर्तयति।
-
-array-item अथवा call-argument पश्चात् `...` array-विस्तारं करोति: `[1, values..., 4]` तत्त्वानि योजयति, `fn(values...)` पृथक् argument ददाति। विस्तृत-वस्तु array भवेत्।
-
-nil-सुरक्षित suffix CoffeeScript-रीत्या `record?.name`, `values?[index]`, `fn?(args)` इति। receiver `nil` चेत् फलम् `nil` भवति, index अथवा argument न मूल्यते; non-nil receiver सामान्य-strict नियमम् अनुसरति।
-
-`qtest --fuel N FILE...` प्रत्येक-document पृथक् instruction-budget ददाति; एकस्य सीमित-loop अन्यस्य budget न क्षिणोति।
-`qtest --stats` प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, `ok`-निर्गमं न परिवर्तयति।
-
-क्रमः `for item in items then expression` इति लिख्यते; binding strict-pattern अपि भवति, यथा `for [left, right] in pairs then left + right`, तथा प्रत्येक-item-स्य सर्व-binding पूर्ण-match पश्चात् एव परिवर्तते। body-मूल्यानि नूतन-array मध्ये संगृह्णाति, `when`-अस्वीकृतानि न संगृह्णाति, `break` संगृहीत-prefix ददाति। `by step`, यथा `for item in [1..9] by 3 then expression`, एकवारं-मूल्यितं non-zero finite integer पदं ददाति; negative क्रमः अन्तिम-पदात् आरभते। map-क्रमे `by` नास्ति; `break` तथा `continue` अन्तःस्थितं क्रमं नियच्छतः; while, until, loop nil फलन्ति।
-
-स एव collector CoffeeScript-postfix-comprehension अपि स्वीकरोति: `value * 2 for value in items`, अथवा `[value * 2 for value in items]`। brackets केवलं comprehension-सीमा, अतिरिक्त nested-array न; `by`, `when`, map, pattern, `break`, `continue` prefix-रूपस्य नियमैः चलन्ति।
-
-पूर्णाङ्क-range `[1..3]` अन्तं गृह्णाति, अतः `[1, 2, 3]` भवति; `[1...3]` अन्तं न गृह्णाति, अतः `[1, 2]` भवति; अधोमुख-range `[3..1]` `[3, 2, 1]` भवति। सीमा finite integer भवेत्।
-
-postfix `value?` केवलं non-nil परीक्षते: `nil?` false, `false?` तथा `0?` true; unbound-name-error न गोपयति, `left ? right` fallback अपि न।
-
-`name ?= value` केवलं name unbound अथवा nil चेत् value मूल्ययित्वा बध्नाति; non-nil चेत् right side न चलति। केवलं name, member/index/destructuring न; साधारण unbound-name-read error एव।
-
-नाम्नि strict numeric update अपि अस्ति: `next = ++counter` नूतनं मूल्यं ददाति, `previous = counter--` decrement पूर्वं पुरातनं मूल्यं ददाति। केवलं साधारण-name मान्यः।
-
-CoffeeScript-arithmetic मध्ये floor-division `a // b` तथा modulo `a %% b` अपि स्तः; `-7 // 5` `-2`, `-7 %% 5` `3` भवति, सामान्य `%` तु dividend-संकेतं रक्षति।
-
-बिट्-क्रियाः कठोरैः signed 32-bit अङ्कैः भवन्ति: `&`, `|`, `^`, `~`, `<<`, `>>`, `>>>`; स्थानान्तरण-सङ्ख्या 0 तः 31 पर्यन्तं, संयुक्तरूपाणि केवलं नाम्नि।
-
-पङ्क्तेः अन्ते स्पष्टः operatorः चेत् अभिव्यक्तिः अग्रिम-पङ्क्तौ निरन्तरं भवति; निरन्तर-पङ्क्तेः indentation केवलं विन्यासः, layout न परिवर्तयति।
-
-सामान्य-उद्धृत-पाठः पङ्क्त्यन्तरं गन्तुं शक्नोति; नूतन-पङ्क्तिः एकं space भवति, अन्त्यः backslash तु तां निवारयति।
-
-`(1 + 2 * 3) == 7` इव शुद्धं literal-अङ्कगणितं compilation-काले परीक्षित-constant रूपेण सङ्कुच्यते।
-
-array-slice `items[start..end]` अन्तं गृह्णाति, `items[start...end]` अन्तं न गृह्णाति। सीमौ वामतः दक्षिणं एकवारं मूल्येते, finite integer तथा array-सीमा अन्तर्गतौ भवेताम्। negative-index अन्तात् गणयति, `-1` अन्तिमः; array एव छेद्यः, implicit truncation न। receiver nil चेत् `items?[start..end]` nil फलति, सीमौ न मूल्येते।
-
-`left ? right` nil-विशेष-fallback अस्ति: `left` nil भवति चेत् एव `right` मूल्यते। `false`, zero, रिक्त-string, रिक्त-array च रक्षिताः भवन्ति।
-
-`value in array` QuickCoffee-साम्येन array-सदस्यं परीक्षते, `value not in array` तस्य निषेधः। `key of map` map-स्वकीय-string-key परीक्षते, `key not of map` तस्य निषेधः; map मध्ये prototype-key न सन्ति।
-
-`until condition then body` प्रतिलोम-loop अस्ति: यावत् Boolean-condition सत्यम् न भवति तावत् पुनरावर्तते; `break`, `continue`, indentation, fuel नियमाः `while` इव भवन्ति।
-
-वाक्य-स्थाने `n = n + 1 while n < 3` postfix-loop अस्ति, prefix while इव सम्पूर्ण-assignment पुनरावर्तयति; `until` अपि तथा। strict-destructuring body भवति, सामान्य-subexpression अन्तरे न।
-
-`loop body` अनन्तः `while true`-रूपः अस्ति; `break` तं समाप्तं करोति, fuel-सीमा तिष्ठति।
-
-`for`-iterable तथा `then` मध्ये `when condition` स्थापनेन filter भवति: `for n in [1..5] when n > 2 then print(n)` अस्वीकृत-मूल्येषु body न चलति।
-
-host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Parse`/`Verify`/`Runtime` ददाति, `error.message()` प्रदर्शन-पाठं न विश्लेष्य विवरणं ददाति, `error.position()` कदाचित् एकतः गणितं स्रोत-पङ्क्तिं ददाति।
-
-पुनःचालनाय `Engine::compile_program` एकवारं compile तथा verify कृत्वा साझा `Program` निर्माति, `Context::run_program` तं चालयति; handle-स्य प्रतिलिपिः bytecode न प्रतिलिपयति, पुनः verification अपि न करोति।
-
-`Context::last_execution()` अन्तिम-सफलतायाः वा runtime-विफलतायाः `ExecutionStats` ददाति; `instructions` तथा `fuel_remaining` तत्र स्तः, compilation अथवा verification-दोषः पूर्वलेखं न परिवर्तयति।
-
-> 注：此文件按“天成文”近似“天城文（Devanagari）”的解释提供；若所指为其他语言或文字，可替换为经审订译本。
-
-बहु-पङ्क्ति array तथा map मध्ये comma त्यक्तुं शक्यते; call-argument तथा सामान्य parenthesis मध्ये स्पष्ट-विभागः आवश्यकः।
-
-एकाकी assignment (`record =`) अनन्तरं indentation द्वारा map लिखितुं शक्यते; nested `key: value` prototype-विहीनं भवति, सामान्य continuation न विपर्यस्यते।
-
-एकस्यां logical-line मध्ये call-parenthesis विना अपि शक्यते: `implicit_answer = implicit_add 20, 22`; comparison अथवा layout-boundary मध्ये explicit parenthesis प्रयोजनीया।
-
-`qtest --json` प्रत्येक-परीक्षा-पत्राय स्थिरं JSON लिखति, `qtest --tap` TAP 13 ददाति; `qcoffee --fingerprint FILE` लेखं न चालयित्वा नियत-bytecode-कुञ्जीं दर्शयति; `qbench --json` semantic-रक्षणेन compile, verify, execute कालं मापयति; `qdocco --markdown` समीक्षायै literate Markdown जनयति। अन्तःस्थापकः Context::set_fuel द्वारा पुनःप्रयुक्त-सन्दर्भस्य सीमा परिवर्तयितुं शक्नोति, Value::kind() तथा Value::is_nil() द्वारा प्रकारं परीक्षते, तथा `cargo run --example embed` पूर्णं host-उदाहरणं चालयति।
+`true`

@@ -28,6 +28,26 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
 }
 
 #[test]
+fn builder_embedding_surface_chains_host_configuration() {
+    let program = Engine::new()
+        .compile_program("host(20, 22) * factor")
+        .unwrap();
+    let mut context = Context::new()
+        .with_global("factor", Value::from(2_i64))
+        .with_native("host", |args| {
+            let (Some(left), Some(right)) = (args[0].as_number(), args[1].as_number()) else {
+                return Err(Error::runtime("host expects two numbers"));
+            };
+            Ok(Value::from(left + right))
+        });
+    assert_eq!(
+        context.run_program(&program).unwrap().as_number(),
+        Some(84.)
+    );
+    assert_eq!(context.get_global("factor").unwrap().as_number(), Some(2.));
+}
+
+#[test]
 fn public_values_and_native_errors_are_structured() {
     let mut context = Context::new();
     context.set_global(

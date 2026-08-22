@@ -24,7 +24,7 @@
 ## qbench --json unam mensurae lineam pro unoquoque onere custodito emittit; --iterations numerum exemplorum regit.
 ## Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
-## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis.
+## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis; `with_global` et `with_native` configurationem concatenatam praebent.
 ## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
 ## Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
 ## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
