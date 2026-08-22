@@ -19,6 +19,8 @@ strict अथवा numeric-comparison श्रृङ्खला भवति:
 `qcoffee -` मानक-input तः स्रोतः पठति; `qcoffee --dump-bytecode -` तमेव स्रोतं चालनं विना विच्छिनत्ति।
 `qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; `--check` अथवा `--dump-bytecode` सह न योज्यम्।
 
+`qcoffee --interactive` (वा `-i`) पङ्क्तिषु एकं Context धारयति; `:help` आदेशान् दर्शयति, `:quit`/`:exit` सत्रं समापयतः। pipe-input मध्ये prompt न भवति।
+
 `--` पश्चात् argumentाः साधारण-string-array `argv` रूपेण दीयन्ते: `qcoffee program.qc -- first second` मध्ये `len(argv)` `2` भवति। host-process अथवा environment-object न प्रकाश्यते।
 
 कार्यं `(x) -> expression` अथवा bare-name `left, right -> left + right` इति लिख्यते; lexical-environment गृह्णाति। default, rest, pattern तु parentheses अपेक्षन्ते। अन्तिम-सामान्य-parameter default सहितः भवितुं शक्नोति, यथा `(head, separator = '-') -> expression`; argument अभावे अथवा `nil` दत्ते default-expression कार्यस्य अन्तरे मूल्यते, अतः पूर्व-parameter तथा captured-environment पश्यति। आवश्यक-parameter default-parameter पूर्वं स्थापनीयः। अन्तिमः rest-parameter `(head, tail...) -> expression` शेषान् argumentान् array मध्ये बध्नाति। `qdocco FILE -o FILE.html` साहित्य-दस्तावेजं जनयति; `qtest FILE...` सफलं भवति यदा सर्वेषां अन्तिम-मूल्यं `true` भवति।

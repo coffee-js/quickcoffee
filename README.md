@@ -20,12 +20,15 @@ double = (x) ->
 ```sh
 cargo run -- -e "print(range(1, 4))"
 cargo run -- - < program.qc
+cargo run -- --interactive
 cargo run -- example.qc -- first second
 cargo run -- --check example.qc
 cargo run -- --dump-bytecode example.qc
 cargo run --bin qdocco -- example.qc -o example.html
 cargo run --bin qtest -- tests/scripts
 ```
+
+`qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动。
 
 ## 验收
 

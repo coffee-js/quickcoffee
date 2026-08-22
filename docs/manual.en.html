@@ -4,6 +4,7 @@
 <p>qcoffee - reads a QuickCoffee program from standard input.</p>
 <p>qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout.</p>
 <p>qcoffee --check FILE parses, compiles, and verifies without executing FILE.</p>
+<p>qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.</p>
 <p>qtest --fuel N gives each executable documentation file its own instruction budget.</p>
 <p>qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.</p>
 <p>Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime(&quot;message&quot;), and error.position() may give a one-based source line.</p>

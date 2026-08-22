@@ -4,6 +4,7 @@
 ## qcoffee - मानक-input तः QuickCoffee-program पठति।
 ## qcoffee --stats instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति।
 ## qcoffee --check FILE स्रोतं verify करोति, न चालयति।
+## qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।

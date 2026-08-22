@@ -19,6 +19,8 @@ Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat 
 `qcoffee -` fontem ex initio normali legit; `qcoffee --dump-bytecode -` illum fontem sine cursu explicat.
 `qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; cum `--check` aut `--dump-bytecode` coniungi non potest.
 
+`qcoffee --interactive` (vel `-i`) unum Context inter lineas servat; `:help` imperia ostendit, `:quit`/`:exit` sessionem finiunt. Input per fistulam promptum non accipit.
+
 Argumenta post `--` ut series chordarum ordinaria `argv` praebentur: in `qcoffee program.qc -- first second`, `len(argv)` est `2`. Nulla res processus aut ambitus hospitis exponitur.
 
 Functio scribitur `(x) -> expressio` vel nominibus nudis, ut `sinister, dexter -> sinister + dexter`, ambitum lexicalem capit. Default, rest, et pattern parentheses poscunt. Parameter extremus valorem praedefinitum habere potest, ut `(caput, separator = '-') -> expressio`; argumento omisso vel `nil` dato, valor intra functionem aestimatur atque parametros priores ambitumque captum videre potest. Parametri necessari ante praedefinitos sunt. Ultimus rest, ut `(caput, cauda...) -> expressio`, reliqua argumenta in serie ligat. Ad documentum faciendum: `qdocco FILE -o FILE.html`. Ad probationes: `qtest FILE...`; omnis valor ultimus `true` esse debet.

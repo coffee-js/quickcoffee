@@ -19,6 +19,8 @@ Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoff
 `qcoffee -` reads source from standard input, which is convenient in pipelines; `qcoffee --dump-bytecode -` disassembles that same input instead of executing it.
 `qcoffee --stats` writes instruction and remaining-fuel counters to stderr while preserving program stdout; it cannot be combined with `--check` or `--dump-bytecode`.
 
+`qcoffee --interactive` (or `-i`) keeps one Context across input lines; `:help` lists commands and `:quit`/`:exit` leave the session. Piped input receives no prompts.
+
 Arguments after `--` are exposed as the ordinary string array `argv`: `qcoffee program.qc -- first second` makes `len(argv)` evaluate to `2`. No host process or environment object is exposed.
 
 Functions use `(x) -> expression` or bare names such as `left, right -> left + right`, and capture their lexical environment. Defaults, rest, and patterns still require parentheses. Calls may omit parentheses on one logical line, while explicit parentheses remain available for unambiguous grouping. A trailing parameter may have a default, as in `(head, separator = '-') -> expression`; an omitted or explicit `nil` argument evaluates that default inside the callee, so it may use earlier parameters and lexical captures. Required parameters must precede defaults. A final rest parameter (`(head, tail...) -> expression`) accepts remaining values, bound as an array. Maps are indexed by strings: `{name: 'coffee'}['name']`.

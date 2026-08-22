@@ -4,6 +4,7 @@
 ## qcoffee - programma QuickCoffee ex initio normali legit.
 ## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet.
 ## qcoffee --check FILE fontem verificat sine cursu.
+## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.

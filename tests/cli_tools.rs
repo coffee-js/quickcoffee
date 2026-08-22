@@ -206,3 +206,30 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(String::from_utf8_lossy(&invalid_check.stderr).contains("line 2"));
     let _ = fs::remove_file(temp);
 }
+#[test]
+fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
+    let mut process = Command::new(bin("qcoffee"))
+        .arg("--interactive")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    process
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"answer = 40\nanswer + 2\nmissing + 1\nanswer + 2\n:quit\n")
+        .unwrap();
+    let output = process.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "40\n42\n42\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown name 'missing'"));
+
+    let conflict = Command::new(bin("qcoffee"))
+        .args(["--interactive", "-e", "1 + 1"])
+        .output()
+        .unwrap();
+    assert_eq!(conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("cannot be combined"));
+}

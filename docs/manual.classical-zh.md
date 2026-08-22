@@ -19,6 +19,8 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 `qcoffee -` 自标准输入读其文，便于管道；`qcoffee --dump-bytecode -` 则析其指令而不行之。
 `qcoffee --stats` 则书所试指令与余燃料于标准错误，程序之标准输出不改；不可与 `--check`、`--dump-bytecode` 并用。
 
+`qcoffee --interactive`（或 `-i`）逐行共用一 Context；`:help` 示其命，`:quit`/`:exit` 出之。管道输入不见提示。
+
 `--` 后之参，以常字符串数组 `argv` 见：`qcoffee program.qc -- first second`，则 `len(argv)` 为 `2`。不暴宿主之进程与环境对象。
 
 函式书作 `(x) -> expression`，或省其括而曰 `left, right -> left + right`，取其所生之词法境；常值、余参与解构之参仍须括之。末之参可定其常值，如 `(head, sep = '-') -> expression`。参缺，或明传 `nil`，则于被调函中求其常值，故可引先参与所取之境；必参当先于定值之参。若末参为余参，则书 `(head, tail...) -> expression`，余实参合为数组。欲为可行之文，曰：`qdocco FILE -o FILE.html`；欲试诸例，曰：`qtest FILE...`，各篇终值皆须 `true`。
