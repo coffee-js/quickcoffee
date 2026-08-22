@@ -7,6 +7,8 @@ use std::{
     rc::Rc,
 };
 
+const MAX_PATTERN_DEPTH: usize = 256;
+
 /// A strict, recursively shaped binding pattern used by destructuring assignment.
 #[derive(Clone, Debug)]
 pub enum Pattern {
@@ -369,9 +371,16 @@ impl Chunk {
 }
 
 fn validate_pattern(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
+    validate_pattern_at(pattern, allow_rest, 0)
+}
+
+fn validate_pattern_at(pattern: &Pattern, allow_rest: bool, depth: usize) -> Result<(), Error> {
+    if depth > MAX_PATTERN_DEPTH {
+        return Err(Error::verify("destructuring pattern is too deeply nested"));
+    }
     match pattern {
         Pattern::Ignore | Pattern::Bind(_) => Ok(()),
-        Pattern::Rest(name) if allow_rest && !name.is_empty() => Ok(()),
+        Pattern::Rest(name) if allow_rest && !name.is_empty() && name != "_" => Ok(()),
         Pattern::Rest(_) => Err(Error::verify(
             "array rest pattern must be inside an array and be named",
         )),
@@ -384,13 +393,13 @@ fn validate_pattern(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
                     }
                     rest_seen = true;
                 }
-                validate_pattern(pattern, true)?;
+                validate_pattern_at(pattern, true, depth + 1)?;
             }
             Ok(())
         }
         Pattern::Map(fields) => {
             for (_, pattern) in fields {
-                validate_pattern(pattern, false)?;
+                validate_pattern_at(pattern, false, depth + 1)?;
             }
             Ok(())
         }

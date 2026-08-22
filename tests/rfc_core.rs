@@ -1362,4 +1362,23 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
     };
     assert!(bad_nested_function.verify().is_err());
+
+    let mut deeply_nested = Pattern::Ignore;
+    for _ in 0..300 {
+        deeply_nested = Pattern::Array(vec![deeply_nested]);
+    }
+    let bad_deep_pattern = Chunk {
+        constants: vec![],
+        code: vec![Instruction::Destructure(deeply_nested), Instruction::Return],
+    };
+    assert!(bad_deep_pattern.verify().is_err());
+
+    let bad_ignored_rest = Chunk {
+        constants: vec![],
+        code: vec![
+            Instruction::Destructure(Pattern::Array(vec![Pattern::Rest("_".into())])),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_ignored_rest.verify().is_err());
 }
