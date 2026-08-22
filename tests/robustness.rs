@@ -114,7 +114,7 @@ fn malformed_bytecode_verification_never_panics() {
                     name: "error".into(),
                 },
                 8 => Instruction::EndTry,
-                9 => Instruction::IterStartArray,
+                9 => Instruction::IterStartEnumerable,
                 10 => Instruction::IterNext {
                     patterns: vec![Pattern::Bind("item".into())],
                     end: offset,

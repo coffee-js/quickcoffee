@@ -71,12 +71,19 @@ pub enum Instruction {
     Jump(i32),
     JumpIfFalse(i32),
     JumpIfNil(i32),
-    Try { catch: i32, name: String },
+    Try {
+        catch: i32,
+        name: String,
+    },
     EndTry,
     Throw,
-    IterStartArray,
+    /// Starts an `in` iterator over an array or string, consuming iterable and step.
+    IterStartEnumerable,
     IterStartMap,
-    IterNext { patterns: Vec<Pattern>, end: i32 },
+    IterNext {
+        patterns: Vec<Pattern>,
+        end: i32,
+    },
     IterEnd,
     MakeArray(usize),
     Append,
@@ -303,7 +310,7 @@ impl Chunk {
                 Instruction::Throw => {
                     require(1)?;
                 }
-                Instruction::IterStartArray => {
+                Instruction::IterStartEnumerable => {
                     require(2)?;
                     next(fallthrough, (state.0 - 2, state.1 + 1, state.2))?;
                 }
@@ -663,7 +670,7 @@ impl Compiler {
             } else {
                 self.emit_const(Value::Number(1.));
             }
-            self.emit(Instruction::IterStartArray);
+            self.emit(Instruction::IterStartEnumerable);
         }
         let start = self.chunk.code.len();
         let exit = self.emit(Instruction::IterNext {
@@ -943,7 +950,7 @@ impl Compiler {
                     } else {
                         self.emit_const(Value::Number(1.));
                     }
-                    self.emit(Instruction::IterStartArray);
+                    self.emit(Instruction::IterStartEnumerable);
                 }
                 let start = self.chunk.code.len();
                 let exit = self.emit(Instruction::IterNext {
