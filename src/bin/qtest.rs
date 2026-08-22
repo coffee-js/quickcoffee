@@ -27,11 +27,29 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 fn usage() {
-    eprintln!("Usage: qtest [--fuel N] [--stats] FILE_OR_DIRECTORY...");
+    eprintln!("Usage: qtest [--fuel N] [--stats] [--json] FILE_OR_DIRECTORY...");
+}
+fn json_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            character if character.is_control() => {
+                out.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => out.push(character),
+        }
+    }
+    out
 }
 fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
     let mut stats = false;
+    let mut json = false;
     let mut inputs: Vec<String> = vec![];
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -48,6 +66,7 @@ fn main() -> ExitCode {
                 }
             },
             "--stats" => stats = true,
+            "--json" => json = true,
             value if !value.starts_with('-') => inputs.push(value.to_string()),
             _ => {
                 usage();
@@ -88,14 +107,41 @@ fn main() -> ExitCode {
                 result
             });
         match outcome {
-            Ok(Value::Bool(true)) => println!("ok {label}"),
+            Ok(Value::Bool(true)) => {
+                if json {
+                    println!(
+                        "{{\"ok\":true,\"file\":\"{}\"}}",
+                        json_escape(&label.to_string())
+                    );
+                } else {
+                    println!("ok {label}");
+                }
+            }
             Ok(value) => {
                 failed += 1;
-                eprintln!("not ok {label}: final value was {value}, expected true")
+                let detail = format!("final value was {value}, expected true");
+                if json {
+                    println!(
+                        "{{\"ok\":false,\"file\":\"{}\",\"error\":\"{}\"}}",
+                        json_escape(&label.to_string()),
+                        json_escape(&detail)
+                    );
+                } else {
+                    eprintln!("not ok {label}: {detail}");
+                }
             }
             Err(e) => {
                 failed += 1;
-                eprintln!("not ok {label}: {e}")
+                let detail = e.to_string();
+                if json {
+                    println!(
+                        "{{\"ok\":false,\"file\":\"{}\",\"error\":\"{}\"}}",
+                        json_escape(&label.to_string()),
+                        json_escape(&detail)
+                    );
+                } else {
+                    eprintln!("not ok {label}: {detail}");
+                }
             }
         }
     }

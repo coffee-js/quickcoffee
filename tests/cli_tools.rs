@@ -92,6 +92,25 @@ fn qtest_reports_success_and_failure() {
     let _ = fs::remove_file(temp);
 }
 #[test]
+fn qtest_json_output_is_one_stable_record_per_file() {
+    let ok = Command::new(bin("qtest"))
+        .args(["--json", "tests/scripts/arithmetic.qc"])
+        .output()
+        .unwrap();
+    assert!(ok.status.success());
+    let stdout = String::from_utf8_lossy(&ok.stdout);
+    assert!(stdout.contains("\"ok\":true"));
+    assert!(stdout.contains("\"file\":\"tests/scripts/arithmetic.qc\""));
+    let bad = Command::new(bin("qtest"))
+        .args(["--json", "tests/fixtures/failure.qc"])
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    let bad_stdout = String::from_utf8_lossy(&bad.stdout);
+    assert!(bad_stdout.contains("\"ok\":false"));
+    assert!(bad_stdout.contains("\"error\":\""));
+}
+#[test]
 fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     let version = Command::new(bin("qcoffee"))
         .arg("--version")
