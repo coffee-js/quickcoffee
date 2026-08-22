@@ -67,10 +67,10 @@ fn split_source(source: &str) -> (String, String) {
             if trimmed.contains("###") {
                 in_block_comment = false;
             }
-        } else if trimmed.starts_with("###") {
+        } else if let Some(after_marker) = trimmed.strip_prefix("###") {
             code.push_str(line);
             code.push('\n');
-            in_block_comment = !trimmed[3..].contains("###");
+            in_block_comment = !after_marker.contains("###");
         } else if let Some(text) = prose_text(line) {
             prose.push_str(text.trim());
             prose.push('\n');
