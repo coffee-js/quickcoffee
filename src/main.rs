@@ -1,3 +1,5 @@
+//! Command-line entry point for the `qcoffee` interpreter.
+
 use quickcoffee::{Context, Engine, Value};
 use std::{
     env, fs,
