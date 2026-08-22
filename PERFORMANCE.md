@@ -543,6 +543,34 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 ## 已知性能边界
 
+## RFC 0113/0116 数值标准库
+
+标准库数值路径由四个负载覆盖：`stdlib-abs` 测量单值绝对值，`stdlib-sum` 测量小数组聚合，`stdlib-min-max` 测量严格最小/最大值，`stdlib-range-sum` 测量 `range` 与 `sum` 的组合。四者同时存在于 `qbench --json` 与 `cargo bench --bench core`，并检查最终值 `42`、`10`、`4`、`4950`。
+
+复现机器可读记录：
+
+```sh
+cargo run --locked --release --bin qbench -- --json --only stdlib-sum --iterations 100 --repeat 3
+```
+
+复现完整 release 负载与持续门禁：
+
+```sh
+make qbench-check
+make bench
+```
+
+这些负载只用于同一实现、同一环境的回归跟踪；报告不设跨机器硬时间阈值，比较时应记录 `rustc -Vv`、机器、操作系统、迭代次数和重复次数。
+
+本轮 Apple arm64 release 基准样本（`cargo bench --locked --bench core`，单位 ms；仅作仓库内回归锚点）：
+
+| 工作负载 | 编译 | 验证 | 执行 |
+|---|---:|---:|---:|
+| stdlib-abs（20,000 次） | 23.700 | 1.428 | 32.712 |
+| stdlib-sum（20,000 次） | 34.830 | 1.457 | 33.823 |
+| stdlib-min-max（20,000 次） | 56.280 | 1.849 | 37.775 |
+| stdlib-range-sum（10,000 次） | 17.852 | 0.896 | 30.155 |
+
 ## RFC 0076 负索引
 
 负索引在数组上做一次长度归一化，在字符串上按 Unicode 标量计数后定位；两者均保持越界错误，不复制序列。`negative-indexing` workload（20,000 次）单次样本为：编译 75.609 ms，验证 2.750 ms，执行 33.463 ms。
