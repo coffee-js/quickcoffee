@@ -23,9 +23,17 @@ fn qdocco_renders_escaped_source_and_checks() {
     let page = fs::read_to_string(&output).unwrap();
     assert!(page.contains("&lt;Guide&gt;"));
     assert!(page.contains("Final value: <code>3</code>"));
+    let non_test_document = Command::new(bin("qdocco"))
+        .args(["--check", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(non_test_document.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&non_test_document.stderr).contains("expected true"));
+    let check_input = temp.join("check.qc");
+    fs::write(&check_input, "true\n").unwrap();
     assert!(
         Command::new(bin("qdocco"))
-            .args(["--check", input.to_str().unwrap()])
+            .args(["--check", check_input.to_str().unwrap()])
             .status()
             .unwrap()
             .success()
