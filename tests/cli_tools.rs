@@ -153,6 +153,19 @@ fn qtest_reports_success_and_failure() {
         .output()
         .unwrap();
     assert!(directory.status.success());
+    let directory_stdout = String::from_utf8_lossy(&directory.stdout);
+    for fixture in [
+        "tests/scripts/arithmetic.qc",
+        "tests/scripts/collections.qc",
+        "tests/scripts/comprehension.qc",
+        "tests/scripts/control-flow.qc",
+        "tests/scripts/function.qc",
+    ] {
+        assert!(
+            directory_stdout.contains(fixture),
+            "qtest skipped {fixture}"
+        );
+    }
     let bad = Command::new(bin("qtest"))
         .arg("tests/fixtures/failure.qc")
         .output()
@@ -490,9 +503,46 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(json.status.success());
     let stdout = String::from_utf8_lossy(&json.stdout);
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 6);
-    assert!(stdout.contains("\"name\":\"stepped-string-iteration\""));
-    assert!(stdout.contains("\"name\":\"signed-by-iteration\""));
+    let expected_names = [
+        "loop-core",
+        "closures-and-ranges",
+        "map-spread",
+        "negative-indexing",
+        "stepped-string-iteration",
+        "signed-by-iteration",
+        "postfix-loops",
+        "array-slices",
+        "existence-tests",
+        "existential-assignment",
+        "name-updates",
+        "floor-modulo",
+        "bitwise",
+        "multiline-strings",
+        "string-iteration",
+        "string-escapes",
+        "string-indexing",
+        "multiline-collections",
+        "indented-maps",
+        "implicit-calls",
+        "execution-stats",
+        "constant-folding",
+        "bare-lambda",
+        "stepped-iteration",
+        "for-collection",
+        "postfix-comprehension",
+        "for-pattern-bindings",
+        "maps-and-control",
+        "soak-access",
+        "nested-destructuring",
+        "destructuring-rest",
+        "chained-comparisons",
+        "destructuring-parameters",
+        "return-cleanup",
+    ];
+    assert_eq!(lines.len(), expected_names.len());
+    for name in expected_names {
+        assert_eq!(stdout.matches(&format!("\"name\":\"{name}\"")).count(), 1);
+    }
     for line in lines {
         assert!(line.starts_with('{') && line.ends_with('}'));
         for field in [
