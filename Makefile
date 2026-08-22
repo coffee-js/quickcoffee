@@ -42,7 +42,7 @@ docs: doc-check
 	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.classical-zh.qc -o docs/manual.classical-zh.md
 	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.en.qc -o docs/manual.en.md
 	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.latin.qc -o docs/manual.latin.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.qc -o docs/manual.devanagari.sa.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.md
 
 check: fmt test release-test examples package-metadata package qbench-check clippy api-doc doc-check
 
