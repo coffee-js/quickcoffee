@@ -2,7 +2,7 @@
 
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 
-The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; execution statistics remain on stderr with `--stats`.
+The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. Execution statistics remain on stderr with `--stats`.
 
 Array and Unicode string indexing accepts negative finite integers (`items[-1]`, `'a☕中'[-2]`); out-of-range indices remain errors.
 

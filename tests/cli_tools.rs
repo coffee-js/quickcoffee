@@ -116,6 +116,32 @@ fn qtest_json_output_is_one_stable_record_per_file() {
     assert!(bad_stdout.contains("\"error\":\""));
 }
 #[test]
+fn qtest_tap_output_is_deterministic_and_describes_failures() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-tap-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    fs::write(temp.join("a-fail.qc"), "1\n").unwrap();
+    fs::write(temp.join("b-pass.qc"), "true\n").unwrap();
+    let output = Command::new(bin("qtest"))
+        .args(["--tap", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!(
+            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
+            temp.display(),
+            temp.display()
+        )
+    );
+    let conflict = Command::new(bin("qtest"))
+        .args(["--json", "--tap", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(conflict.status.code(), Some(2));
+    let _ = fs::remove_dir_all(temp);
+}
+#[test]
 fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     let version = Command::new(bin("qcoffee"))
         .arg("--version")

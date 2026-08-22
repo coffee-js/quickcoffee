@@ -11,6 +11,7 @@
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
 ## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 ## qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.
+## qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
 ## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
