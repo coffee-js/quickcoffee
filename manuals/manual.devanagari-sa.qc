@@ -6,6 +6,7 @@
 ## qcoffee --check FILE स्रोतं verify करोति, न चालयति।
 ## qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
 ## qcoffee --interactive --stats केवलं कार्यितायै वा runtime-दोषयुक्तायै non-empty पङ्क्त्यै instruction तथा fuel लेखं लिखति; parse अथवा verify-दोषे नूतनं लेखं न लिखति।
+## [head, tail...] = [1, 2, 3] tail-नाम्नि [2, 3] बध्नाति; array-pattern rest अन्तिमः भवति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।

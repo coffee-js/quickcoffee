@@ -156,6 +156,12 @@ fn main() {
             expected: "600",
         },
         Workload {
+            name: "destructuring-rest",
+            source: "sum = 0\ni = 0\nwhile i < 100\n  [head, tail...] = [1, 2, 3, 4]\n  sum += head + len(tail)\n  i += 1\nsum",
+            iterations: 10_000,
+            expected: "400",
+        },
+        Workload {
             name: "chained-comparisons",
             source: "low = 0\nmiddle = 1\nhigh = 2\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + (if low < middle < high then 1 else 0)\n  i = i + 1\nsum",
             iterations: 10_000,

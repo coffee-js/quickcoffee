@@ -1201,19 +1201,35 @@ fn bind_pattern(
             bindings.push((name.clone(), value.clone()));
             Ok(())
         }
+        Pattern::Rest(name) => {
+            bindings.push((name.clone(), value.clone()));
+            Ok(())
+        }
         Pattern::Array(patterns) => {
             let Value::Array(values) = value else {
                 return Err(Error::runtime("array destructuring expects an array"));
             };
-            if values.len() != patterns.len() {
+            let rest = patterns
+                .iter()
+                .position(|pattern| matches!(pattern, Pattern::Rest(_)));
+            let fixed_len = rest.unwrap_or(patterns.len());
+            if values.len() < fixed_len || rest.is_none() && values.len() != patterns.len() {
+                let expectation = if rest.is_some() {
+                    format!("at least {fixed_len}")
+                } else {
+                    patterns.len().to_string()
+                };
                 return Err(Error::runtime(format!(
-                    "array destructuring expected {} values, got {}",
-                    patterns.len(),
+                    "array destructuring expected {expectation} values, got {}",
                     values.len()
                 )));
             }
-            for (pattern, value) in patterns.iter().zip(values.iter()) {
-                bind_pattern(pattern, value, bindings)?;
+            for (index, pattern) in patterns.iter().enumerate() {
+                if let Pattern::Rest(name) = pattern {
+                    bindings.push((name.clone(), Value::array(values[index..].to_vec())));
+                    break;
+                }
+                bind_pattern(pattern, &values[index], bindings)?;
             }
             Ok(())
         }

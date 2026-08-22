@@ -6,7 +6,7 @@ Ordinary single- and double-quoted strings decode `\\0`, `\\b`, `\\f`, `\\n`, `\
 
 `for` uses strict recursive patterns for its bindings: `for [left, right] in pairs then left + right` and `for own _, value of record then value` are supported. A pattern mismatch is a runtime error and never partially updates that iteration's bindings.
 
-Array comprehensions may bind an optional zero-based index: `for value, index in items then value + index`; with `by step`, the index is the actual stepped array position.
+Array comprehensions may bind an optional zero-based index: `for value, index in items then value + index`; with `by step`, the index is the actual stepped array position. Array patterns may bind a final rest name, such as `[head, tail...] = items`; the tail is a new immutable array and a rest pattern must be final.
 
 Comprehensions may also use CoffeeScript's postfix form: `value * 2 for value in items`, optionally wrapped as `[value * 2 for value in items]`. The postfix form has the same `by`, `when`, map, pattern, `break`, and `continue` semantics as the prefix form; the brackets are a comprehension delimiter and do not add a nested array.
 

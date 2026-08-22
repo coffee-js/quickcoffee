@@ -12,6 +12,8 @@ use std::{
 pub enum Pattern {
     Ignore,
     Bind(String),
+    /// Binds the remaining values of an enclosing array pattern.
+    Rest(String),
     Array(Vec<Pattern>),
     Map(Vec<(String, Pattern)>),
 }
@@ -125,7 +127,12 @@ impl Chunk {
                     }
                 },
                 Instruction::MakeFunction(i) => match self.constants.get(*i) {
-                    Some(Constant::Function { chunk, .. }) => chunk.verify()?,
+                    Some(Constant::Function { params, chunk, .. }) => {
+                        for pattern in params {
+                            validate_pattern(pattern, false)?;
+                        }
+                        chunk.verify()?
+                    }
                     Some(_) => {
                         return Err(Error::verify(format!(
                             "constant {i} at instruction {pc} is not a function"
@@ -212,13 +219,17 @@ impl Chunk {
                     next(fallthrough, state)?;
                 }
                 Instruction::Store(_)
-                | Instruction::Destructure(_)
                 | Instruction::Neg
                 | Instruction::Not
                 | Instruction::BitNot
                 | Instruction::Exists
                 | Instruction::Stringify
                 | Instruction::Member(_) => {
+                    require(1)?;
+                    next(fallthrough, state)?;
+                }
+                Instruction::Destructure(pattern) => {
+                    validate_pattern(pattern, false)?;
                     require(1)?;
                     next(fallthrough, state)?;
                 }
@@ -311,7 +322,10 @@ impl Chunk {
                     require(1)?;
                     next(fallthrough, (state.0 - 1, state.1 + 1, state.2))?;
                 }
-                Instruction::IterNext { end, .. } => {
+                Instruction::IterNext { patterns, end } => {
+                    for pattern in patterns {
+                        validate_pattern(pattern, false)?;
+                    }
                     if state.1 == 0 {
                         return Err(Error::verify(format!(
                             "iterator stack underflow at instruction {pc}"
@@ -344,6 +358,35 @@ impl Chunk {
             }
         }
         Ok(())
+    }
+}
+
+fn validate_pattern(pattern: &Pattern, allow_rest: bool) -> Result<(), Error> {
+    match pattern {
+        Pattern::Ignore | Pattern::Bind(_) => Ok(()),
+        Pattern::Rest(name) if allow_rest && !name.is_empty() => Ok(()),
+        Pattern::Rest(_) => Err(Error::verify(
+            "array rest pattern must be inside an array and be named",
+        )),
+        Pattern::Array(patterns) => {
+            let mut rest_seen = false;
+            for (index, pattern) in patterns.iter().enumerate() {
+                if matches!(pattern, Pattern::Rest(_)) {
+                    if rest_seen || index + 1 != patterns.len() {
+                        return Err(Error::verify("array rest pattern must be the final item"));
+                    }
+                    rest_seen = true;
+                }
+                validate_pattern(pattern, true)?;
+            }
+            Ok(())
+        }
+        Pattern::Map(fields) => {
+            for (_, pattern) in fields {
+                validate_pattern(pattern, false)?;
+            }
+            Ok(())
+        }
     }
 }
 

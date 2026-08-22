@@ -265,10 +265,23 @@ impl Parser {
                 let mut items = vec![];
                 if !self.eat(&Token::RBracket) {
                     loop {
-                        let Some(pattern) = self.pattern() else {
+                        let Some(mut pattern) = self.pattern() else {
                             self.at = saved;
                             return None;
                         };
+                        if self.eat(&Token::Ellipsis) {
+                            let Pattern::Bind(name) = pattern else {
+                                self.at = saved;
+                                return None;
+                            };
+                            pattern = Pattern::Rest(name);
+                            items.push(pattern);
+                            if !self.eat(&Token::RBracket) {
+                                self.at = saved;
+                                return None;
+                            }
+                            break;
+                        }
                         items.push(pattern);
                         if self.eat(&Token::RBracket) {
                             break;
