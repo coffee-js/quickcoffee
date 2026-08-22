@@ -2,7 +2,7 @@
 
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有原型链、`this`、`eval` 或嵌入 JavaScript。
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0083-qdocco-markdown.md](RFCs/0083-qdocco-markdown.md)。
+当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0084-context-fuel-control.md](RFCs/0084-context-fuel-control.md)。
 
 ```coffee
 square = (x) -> x * x

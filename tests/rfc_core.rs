@@ -124,6 +124,16 @@ fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
     assert_eq!(fuel.fuel_remaining, 0);
 }
 #[test]
+fn embedding_context_can_adjust_fuel_without_losing_globals() {
+    let mut context = Context::new().with_fuel(5);
+    context.set_global("answer", Value::from(42_i64));
+    assert_eq!(context.fuel(), 5);
+    assert!(context.eval("while true then answer").is_err());
+    context.set_fuel(100);
+    assert_eq!(context.fuel(), 100);
+    assert_eq!(context.eval("answer").unwrap().as_number(), Some(42.));
+}
+#[test]
 fn explicit_operator_line_continuation_preserves_expression_and_layout() {
     assert_eq!(eval("value = 1 +\n  2 * 3\nvalue").as_number(), Some(7.));
     assert_eq!(
