@@ -242,6 +242,18 @@ fn floor_division_and_dividend_dependent_modulo_are_strict_numeric_operators() {
     );
 }
 #[test]
+fn bang_is_a_strict_boolean_alias_for_not() {
+    assert_eq!(
+        eval("[!true, !false, not true, not false]").to_string(),
+        "[false, true, false, true]"
+    );
+    assert_eq!(eval("!!true").as_bool(), Some(true));
+    assert!(Context::new().eval("!1").is_err());
+    let chunk = compile("value = true\n!value").unwrap();
+    assert!(chunk.verify().is_ok());
+    assert!(chunk.disassemble().contains("Not"));
+}
+#[test]
 fn strict_bitwise_operators_use_signed_32_bit_numbers() {
     assert_eq!(
         eval("[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1]").to_string(),

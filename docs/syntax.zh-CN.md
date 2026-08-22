@@ -26,6 +26,8 @@
 
 `do` 可立即调用函数；`do (name, other) -> ...` 将同名外层值按序转发，默认、rest 与解构形参在 `do` 中拒绝，`do -> ...` 仍是零参 IIFE。
 
+`!` 是严格 Bool 的 `not` 别名；`!=` 仍是不等比较，`!1` 等非布尔操作数产生运行时错误。
+
 隐式调用只消费同一逻辑行的普通表达式：`print value`、`add 20, 22`、`double add 20, 22`、`len [1, 2, 3]` 均可；跨布局边界请使用显式括号调用。
 
 `for` 的绑定可用严格递归模式：`for [left, right] in pairs then left + right`、`for own _, value of record then value` 均可。模式不匹配是运行时错误，且本轮绑定绝不部分写入。

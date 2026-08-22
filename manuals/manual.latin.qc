@@ -34,6 +34,7 @@
 ## # commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
 ## Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.
 ## yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
+## ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 ## Comparationes conectae medium semel servant atque priore falso breviant.
 ## Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, keys, values, join, split, assert.
 ## Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
