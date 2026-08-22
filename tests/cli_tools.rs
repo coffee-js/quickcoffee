@@ -192,6 +192,16 @@ fn qtest_reports_success_and_failure() {
     assert!(filtered.status.success());
     assert_eq!(String::from_utf8_lossy(&filtered.stdout).lines().count(), 1);
     assert!(String::from_utf8_lossy(&filtered.stdout).contains("stdlib.qc"));
+    let single_file = Command::new(bin("qtest"))
+        .args(["--filter", "arithmetic.qc", "tests/scripts/arithmetic.qc"])
+        .output()
+        .unwrap();
+    assert!(single_file.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&single_file.stdout).lines().count(),
+        1
+    );
+    assert!(String::from_utf8_lossy(&single_file.stdout).contains("arithmetic.qc"));
     let listed = Command::new(bin("qtest"))
         .args(["--list", "--filter", "stdlib", "tests/scripts"])
         .output()

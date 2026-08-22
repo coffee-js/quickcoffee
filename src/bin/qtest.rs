@@ -144,15 +144,25 @@ fn main() -> ExitCode {
     }
     files.sort();
     files.dedup();
+    let filtered = filter.is_some();
     if let Some(filter) = filter.as_deref() {
-        files.retain(|path| path.to_string_lossy().contains(filter));
+        files.retain(|path| {
+            fs::canonicalize(path)
+                .map(|canonical| canonical.to_string_lossy().contains(filter))
+                .unwrap_or(false)
+        });
     }
     if files.is_empty() {
+        let message = if filtered {
+            "no matching .qc test files found"
+        } else {
+            "no .qc test files found"
+        };
         if tap {
             println!("TAP version 13");
-            println!("Bail out! no matching .qc test files found");
+            println!("Bail out! {message}");
         } else {
-            eprintln!("no matching .qc test files found");
+            eprintln!("{message}");
         }
         return ExitCode::from(2);
     }
