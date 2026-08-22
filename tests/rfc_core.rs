@@ -1032,6 +1032,36 @@ fn maps_ranges_and_indexing() {
     assert_eq!(cx.eval("[2..4]").unwrap().to_string(), "[2, 3, 4]");
 }
 #[test]
+fn string_indexing_and_slices_use_unicode_scalar_boundaries() {
+    assert_eq!(eval("len('a☕中')").as_number(), Some(3.));
+    assert_eq!(eval("'a☕中'[0]").as_str(), Some("a"));
+    assert_eq!(eval("'a☕中'[1]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[1..2]").as_str(), Some("☕中"));
+    assert_eq!(eval("'a☕中'[1...2]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[-2..-1]").as_str(), Some("☕中"));
+    assert_eq!(eval("text = 'a☕中'\ntext[2]").as_str(), Some("中"));
+    assert!(Context::new().eval("'a☕中'[3]").is_err());
+    assert!(Context::new().eval("'a☕中'[0.5]").is_err());
+    assert!(Context::new().eval("'a☕中'[0..3]").is_err());
+    assert!(Context::new().eval("{text: 'abc'}[0..1]").is_err());
+    assert!(matches!(eval("none = nil\nnone?[missing..1]"), Value::Nil));
+    let calls = Rc::new(Cell::new(0));
+    let counter = calls.clone();
+    let mut cx = Context::new();
+    cx.add_native("bound", move |_| {
+        let call = counter.get() + 1;
+        counter.set(call);
+        Ok(Value::Number(if call == 1 { 1. } else { 2. }))
+    });
+    assert_eq!(
+        cx.eval("'a☕中'[bound()..bound()]").unwrap().as_str(),
+        Some("☕中")
+    );
+    assert_eq!(calls.get(), 2);
+    let chunk = compile("'a☕中'[1..2]").unwrap();
+    assert!(chunk.verify().is_ok());
+}
+#[test]
 fn array_slices_use_strict_once_evaluated_bounds_and_nil_safe_suffixes() {
     assert_eq!(eval("[0..4][1..3]").to_string(), "[1, 2, 3]");
     assert_eq!(eval("[0..4][1...3]").to_string(), "[1, 2]");

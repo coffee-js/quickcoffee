@@ -21,6 +21,7 @@ Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoff
 
 `qcoffee --interactive` (or `-i`) keeps one Context across input lines; `:help` lists commands and `:quit`/`:exit` leave the session. Piped input receives no prompts.
 With `--stats`, each non-empty interactive line that executes or reaches a runtime error writes its instruction and remaining-fuel counters to stderr; parse and verify errors write no fresh record.
+`'a☕中'[1]` is `'☕'`, and `'a☕中'[1..2]` is `'☕中'`; string indices use Unicode scalars.
 
 Arguments after `--` are exposed as the ordinary string array `argv`: `qcoffee program.qc -- first second` makes `len(argv)` evaluate to `2`. No host process or environment object is exposed.
 

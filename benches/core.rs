@@ -72,6 +72,12 @@ fn main() {
             expected: "4",
         },
         Workload {
+            name: "string-indexing",
+            source: "text = 'a☕中'\nsum = 0\ni = 0\nwhile i < 100\n  sum += len(text[1..2]) + (if text[1] == '☕' then 1 else 0)\n  i += 1\nsum",
+            iterations: 10_000,
+            expected: "300",
+        },
+        Workload {
             name: "multiline-collections",
             source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
             iterations: 10_000,

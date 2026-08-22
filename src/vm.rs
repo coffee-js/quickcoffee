@@ -415,7 +415,7 @@ impl Context {
                 return Err(Error::runtime("len expects one argument"));
             }
             let n = match &xs[0] {
-                Value::String(x) => x.len(),
+                Value::String(x) => x.chars().count(),
                 Value::Array(x) => x.len(),
                 Value::Map(x) => x.len(),
                 _ => return Err(Error::runtime("len expects string, array, or map")),
@@ -1237,6 +1237,11 @@ fn index(target: Value, key: Value) -> Result<Value, Error> {
             .get(i as usize)
             .cloned()
             .ok_or_else(|| Error::runtime("array index out of range")),
+        (Value::String(text), Value::Number(i)) if i >= 0. && i.fract() == 0. => text
+            .chars()
+            .nth(i as usize)
+            .map(|character| Value::String(Rc::from(character.to_string())))
+            .ok_or_else(|| Error::runtime("string index out of range")),
         (Value::Map(m), Value::String(k)) => m
             .get(k.as_ref())
             .cloned()
@@ -1245,20 +1250,38 @@ fn index(target: Value, key: Value) -> Result<Value, Error> {
     }
 }
 fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
-    let Value::Array(values) = target else {
-        return Err(Error::runtime("slice expects an array"));
-    };
-    let start = slice_bound(start, values.len(), "slice start")?;
-    let mut end = slice_bound(end, values.len(), "slice end")?;
-    if inclusive {
-        end = end
-            .checked_add(1)
-            .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+    match target {
+        Value::Array(values) => {
+            let start = slice_bound(start, values.len(), "slice start")?;
+            let mut end = slice_bound(end, values.len(), "slice end")?;
+            if inclusive {
+                end = end
+                    .checked_add(1)
+                    .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+            }
+            if start > end || end > values.len() {
+                return Err(Error::runtime("slice bounds out of range"));
+            }
+            Ok(Value::Array(Rc::new(values[start..end].to_vec())))
+        }
+        Value::String(text) => {
+            let values: Vec<char> = text.chars().collect();
+            let start = slice_bound(start, values.len(), "slice start")?;
+            let mut end = slice_bound(end, values.len(), "slice end")?;
+            if inclusive {
+                end = end
+                    .checked_add(1)
+                    .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+            }
+            if start > end || end > values.len() {
+                return Err(Error::runtime("slice bounds out of range"));
+            }
+            Ok(Value::String(Rc::from(
+                values[start..end].iter().collect::<String>(),
+            )))
+        }
+        _ => Err(Error::runtime("slice expects an array or string")),
     }
-    if start > end || end > values.len() {
-        return Err(Error::runtime("slice bounds out of range"));
-    }
-    Ok(Value::Array(Rc::new(values[start..end].to_vec())))
 }
 fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
     let Value::Number(value) = value else {

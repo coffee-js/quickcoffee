@@ -20,6 +20,7 @@ Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat 
 `qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; cum `--check` aut `--dump-bytecode` coniungi non potest.
 
 `qcoffee --interactive` (vel `-i`) unum Context inter lineas servat; `:help` imperia ostendit, `:quit`/`:exit` sessionem finiunt. Input per fistulam promptum non accipit.
+'a☕中'[1] est '☕', et 'a☕中'[1..2] est '☕中'; indices stringarum scalas Unicode sequuntur.
 Cum `--stats`, unaquaeque linea non vacua numeros instructionum et alimenti reliqui ad errorem ordinarium scribit.
 
 Argumenta post `--` ut series chordarum ordinaria `argv` praebentur: in `qcoffee program.qc -- first second`, `len(argv)` est `2`. Nulla res processus aut ambitus hospitis exponitur.

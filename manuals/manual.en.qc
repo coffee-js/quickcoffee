@@ -6,6 +6,7 @@
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
+## 'a☕中'[1] is '☕', and 'a☕中'[1..2] is '☕中'; string indices use Unicode scalars.
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
 ## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.

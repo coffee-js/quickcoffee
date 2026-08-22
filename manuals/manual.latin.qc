@@ -6,6 +6,7 @@
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
 ## qcoffee --interactive --stats unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
+## 'a☕中'[1] est '☕', et 'a☕中'[1..2] est '☕中'; indices stringarum scalas Unicode sequuntur.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.

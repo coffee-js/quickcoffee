@@ -21,6 +21,7 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 
 `qcoffee --interactive`（或 `-i`）逐行共用一 Context；`:help` 示其命，`:quit`/`:exit` 出之。管道输入不见提示。
 交互而加 `--stats`，每一非空行亦书所试指令与余燃料于标准错误。
+'a☕中'[1] 即 '☕'，'[1..2]' 得 '☕中'；字符串索引循 Unicode 标量。
 
 `--` 后之参，以常字符串数组 `argv` 见：`qcoffee program.qc -- first second`，则 `len(argv)` 为 `2`。不暴宿主之进程与环境对象。
 
