@@ -178,6 +178,7 @@ fn qtest_reports_success_and_failure() {
         "tests/scripts/comprehension.qc",
         "tests/scripts/control-flow.qc",
         "tests/scripts/function.qc",
+        "tests/scripts/stdlib.qc",
     ] {
         assert!(
             directory_stdout.contains(fixture),

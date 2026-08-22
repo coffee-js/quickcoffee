@@ -16,7 +16,7 @@
 3. 使用已经采纳的 QuickCoffee 语法，覆盖至少一个可观察的核心语义；
 4. 可由 `qtest tests/scripts` 递归发现并以默认 fuel 完成。
 
-示例语料至少覆盖数值与闭包、map spread/解构、Unicode 字符串索引、筛选 comprehension，以及循环控制。语料只验证语义结果，不比较实现细节或运行时间；性能门禁仍由 RFC 0045、RFC 0081、RFC 0096 与 RFC 0107 负责。
+示例语料至少覆盖数值与闭包、map spread/解构、Unicode 字符串索引、筛选 comprehension、循环控制，以及无原型标准库的组合调用。标准库样例必须覆盖 `range`、`len`、`type`、`str`、`keys`、`values`、`join`、`split` 与成功的 `assert`。语料只验证语义结果，不比较实现细节或运行时间；性能门禁仍由 RFC 0045、RFC 0081、RFC 0096 与 RFC 0107 负责。
 
 ## 验收
 
