@@ -43,7 +43,7 @@ nil-सुरक्षित suffix CoffeeScript-रीत्या `record?.nam
 `qtest --fuel N FILE...` प्रत्येक-document पृथक् instruction-budget ददाति; एकस्य सीमित-loop अन्यस्य budget न क्षिणोति।
 `qtest --stats` प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, `ok`-निर्गमं न परिवर्तयति।
 
-क्रमः `for item in items then expression` इति लिख्यते; binding strict-pattern अपि भवति, यथा `for [left, right] in pairs then left + right`, तथा प्रत्येक-item-स्य सर्व-binding पूर्ण-match पश्चात् एव परिवर्तते। body-मूल्यानि नूतन-array मध्ये संगृह्णाति, `when`-अस्वीकृतानि न संगृह्णाति, `break` संगृहीत-prefix ददाति। `by step`, यथा `for item in [1..9] by 3 then expression`, एकवारं-मूल्यितं positive finite integer पदं ददाति। map-क्रमे `by` नास्ति; `break` तथा `continue` अन्तःस्थितं क्रमं नियच्छतः; while, until, loop nil फलन्ति।
+क्रमः `for item in items then expression` इति लिख्यते; binding strict-pattern अपि भवति, यथा `for [left, right] in pairs then left + right`, तथा प्रत्येक-item-स्य सर्व-binding पूर्ण-match पश्चात् एव परिवर्तते। body-मूल्यानि नूतन-array मध्ये संगृह्णाति, `when`-अस्वीकृतानि न संगृह्णाति, `break` संगृहीत-prefix ददाति। `by step`, यथा `for item in [1..9] by 3 then expression`, एकवारं-मूल्यितं non-zero finite integer पदं ददाति; negative क्रमः अन्तिम-पदात् आरभते। map-क्रमे `by` नास्ति; `break` तथा `continue` अन्तःस्थितं क्रमं नियच्छतः; while, until, loop nil फलन्ति।
 
 स एव collector CoffeeScript-postfix-comprehension अपि स्वीकरोति: `value * 2 for value in items`, अथवा `[value * 2 for value in items]`। brackets केवलं comprehension-सीमा, अतिरिक्त nested-array न; `by`, `when`, map, pattern, `break`, `continue` prefix-रूपस्य नियमैः चलन्ति।
 
