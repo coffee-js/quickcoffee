@@ -963,7 +963,21 @@ impl Parser {
                 ))
             }
             Token::Throw => Ok(Expr::Throw(Box::new(self.expr(0)?))),
-            Token::Do => Ok(Expr::Do(Box::new(self.expr(0)?))),
+            Token::Do => {
+                let function = self.expr(0)?;
+                if let Expr::Function(params, rest, _) = &function {
+                    let valid = rest.is_none()
+                        && params.iter().all(|param| {
+                            param.default.is_none() && matches!(param.pattern, Pattern::Bind(_))
+                        });
+                    if !valid {
+                        return Err(self.parse_error(
+                            "do function forwarding requires plain required name parameters",
+                        ));
+                    }
+                }
+                Ok(Expr::Do(Box::new(function)))
+            }
             Token::LParen => {
                 if let Some(params) = self.lambda_params()? {
                     self.expect_arrow()?;

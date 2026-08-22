@@ -37,4 +37,6 @@ UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`�
 
 ## 标准库
 
+RFC 0095 扩展字符串 `for` 也可使用正整数 `by` 步长；RFC 0097 规定 `do (name) -> ...` 从同名外层变量转发立即调用实参。
+
 预置函数是普通名称，不是对象原型方法：`print(value...)`、`len(value)`、`type(value)`、`range(start, end)`、`str(value)`、`keys(map)`、`values(map)`、`join(array, separator)`、`split(string, separator)`、`assert(bool, message?)`。它们的行为由 RFC 0003 的宿主接口定义。不存在 `console`、`Object.prototype`、`Array.prototype`。
