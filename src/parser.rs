@@ -159,6 +159,13 @@ impl Parser {
             false
         }
     }
+    fn eat_collection_separator(&mut self) -> bool {
+        let mut found = false;
+        while self.eat(&Token::Semi) || self.eat(&Token::Comma) {
+            found = true;
+        }
+        found
+    }
     fn expect(&mut self, expected: &Token) -> Result<(), Error> {
         if self.eat(expected) {
             Ok(())
@@ -837,6 +844,7 @@ impl Parser {
                 Box::new(self.body_after_arrow()?),
             )),
             Token::LBracket => {
+                self.eat_collection_separator();
                 if self.eat(&Token::RBracket) {
                     return Ok(Expr::Array(vec![]));
                 }
@@ -869,7 +877,7 @@ impl Parser {
                     } else {
                         Item::Expr(start)
                     }];
-                    while self.eat(&Token::Comma) {
+                    while self.eat_collection_separator() {
                         if self.eat(&Token::RBracket) {
                             return Ok(Expr::Array(items));
                         }
@@ -886,6 +894,7 @@ impl Parser {
             }
             Token::LBrace => {
                 let mut m = BTreeMap::new();
+                self.eat_collection_separator();
                 if self.eat(&Token::RBrace) {
                     return Ok(Expr::Map(m));
                 }
@@ -903,10 +912,17 @@ impl Parser {
                         return Err(self.parse_error("string map keys require ':' and a value"));
                     };
                     m.insert(k, value);
+                    let mut had_line_separator = false;
+                    while self.eat(&Token::Semi) {
+                        had_line_separator = true;
+                    }
                     if self.eat(&Token::RBrace) {
                         break;
                     }
-                    self.expect(&Token::Comma)?;
+                    if !had_line_separator {
+                        self.expect(&Token::Comma)?;
+                        while self.eat(&Token::Semi) {}
+                    }
                 }
                 Ok(Expr::Map(m))
             }

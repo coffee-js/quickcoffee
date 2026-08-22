@@ -73,3 +73,5 @@ In loco sententiae, `n = n + 1 while n < 3` est ordo postfixus aequalis while pr
 Hospes errorem structum accipit: `error.kind()` dat `ErrorKind::Parse`, `Verify`, aut `Runtime`; `error.message()` detail sine analysi textus ostensi dat, et `error.position()` lineam fontis a uno numeratam interdum dat.
 
 Ad iterandum programmatum compilatum, `Engine::compile_program` dat `Program` commune et `Context::run_program` illud currit; clavis eius sine copia bytecodicis clonatur.
+
+In seriebus et mapis per plures lineas, commata omitti possunt; argumenta functionum et parenteses ordinariae separationem apertam servant.

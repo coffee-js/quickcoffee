@@ -27,7 +27,7 @@ UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`�
 
 普通单引号/双引号多行字符串见 RFC 0059；三引号 heredoc 仍按 RFC 0040 保留换行。
 
-纯字面量常量折叠见 RFC 0060；折叠不改变严格运行时错误边界。
+纯字面量常量折叠见 RFC 0060；折叠不改变严格运行时错误边界。多行数组与映射可按 RFC 0063 省略逗号，但调用参数仍须显式分隔。
 
 `name = expression` 绑定或更新当前词法环境；顶层执行时该环境即全局环境。名称也支持严格数值前置/后置 `++`、`--`（RFC 0055）。函数调用建立子环境，因此函数内新赋值不泄漏到全局。数组与映射支持严格解构赋值；`_` 是显式忽略位。`if condition then expression else expression` 是表达式，`else` 可省略并产生 `nil`；`unless` 是条件取反的同义结构。后置 `expression if condition` 与 `expression unless condition` 在条件不满足时产生 `nil`。后缀 `value?` 仅检查是否非 nil，保持 Bool 值且不检查未绑定名称（RFC 0038）。`while condition then expression` 重复求值，`until condition then expression` 则重复至条件为真，语句位置的 `expression while condition` / `until condition` 是其后置形式（RFC 0036），`loop body` 则无限重复，三者结果均为 `nil`。数组可用严格切片 `items[start..end]`（含末端）或 `items[start...end]`（不含末端），负端点自末尾计，且端点必须为界内整数（RFC 0037）。数组可用 `for pattern in items [by step] [when condition] then expression` 遍历，映射可用 `for own key_pattern, value_pattern of map [when condition] then expression` 遍历；表达式也可写成后置推导 `expression for pattern in items` 或 `expression for own key_pattern, value_pattern of map`（RFC 0054）。绑定模式严格递归且每轮原子写入（RFC 0044），`by` 只用于数组且步长为一次求值的正整数（RFC 0029），`for` 收集每次体值为新数组，`when` 拒绝的项不收集，`break` 产生已收集前缀，`continue` 不收集当前项（RFC 0042）。`switch`/`when` 选择单一分支；`try`/`catch`/`finally` 与 `throw` 处理 QuickCoffee 运行时错误。`return expression` 仅在函数内结束当前调用并返回其值，裸 return 返回 `nil`；它清理循环并执行沿途 finally（RFC 0028）。
 

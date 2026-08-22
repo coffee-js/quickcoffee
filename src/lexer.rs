@@ -131,7 +131,7 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
     let logical_lines = normalize_multiline_strings(&normalized);
     let mut out = LexOutput::new();
     let mut indents = vec![0usize];
-    let mut nesting = 0usize;
+    let mut groups = Vec::new();
     let mut continued = false;
     let mut block_comment_start = None;
     for (line_number, raw_line) in logical_lines {
@@ -158,7 +158,7 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
         if content.is_empty() || content.starts_with('#') {
             continue;
         }
-        if nesting == 0 && !continued {
+        if groups.is_empty() && !continued {
             let current = *indents.last().expect("indent stack");
             if prefix > current {
                 indents.push(prefix);
@@ -174,13 +174,18 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
                 out.push(Token::Semi);
             }
         }
-        lex_line(content, line_number, &mut nesting, &mut out)?;
-        continued = nesting == 0 && line_continues(out.last());
-        if nesting == 0 && !continued && !matches!(out.last(), Some(Token::Semi)) {
+        lex_line(content, line_number, &mut groups, &mut out)?;
+        continued = groups.is_empty() && line_continues(out.last());
+        let needs_separator =
+            (groups.is_empty() && !continued && !matches!(out.last(), Some(Token::Semi)))
+                || (matches!(groups.last(), Some('[' | '{'))
+                    && !continued
+                    && collection_item_can_end(out.last()));
+        if needs_separator {
             out.push(Token::Semi);
         }
     }
-    if nesting != 0 {
+    if !groups.is_empty() {
         return Err(Error::parse("unterminated grouping delimiter")
             .at_line(normalized.lines().count().max(1)));
     }
@@ -329,7 +334,7 @@ fn normalize_heredocs(source: &str) -> Result<String, Error> {
 fn lex_line(
     line: &str,
     line_number: usize,
-    nesting: &mut usize,
+    groups: &mut Vec<char>,
     out: &mut LexOutput,
 ) -> Result<(), Error> {
     out.set_line(line_number);
@@ -574,27 +579,27 @@ fn lex_line(
             }
             '~' => out.push(Token::Tilde),
             '(' => {
-                *nesting += 1;
+                groups.push('(');
                 out.push(Token::LParen)
             }
             ')' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, ')', line_number)?;
                 out.push(Token::RParen)
             }
             '[' => {
-                *nesting += 1;
+                groups.push('[');
                 out.push(Token::LBracket)
             }
             ']' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, ']', line_number)?;
                 out.push(Token::RBracket)
             }
             '{' => {
-                *nesting += 1;
+                groups.push('{');
                 out.push(Token::LBrace)
             }
             '}' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, '}', line_number)?;
                 out.push(Token::RBrace)
             }
             ',' => out.push(Token::Comma),
@@ -732,13 +737,46 @@ fn line_continues(token: Option<&Token>) -> bool {
         )
     )
 }
-fn close_group(nesting: &mut usize, line: usize) -> Result<(), Error> {
-    if *nesting == 0 {
-        Err(Error::parse("unmatched grouping delimiter").at_line(line))
-    } else {
-        *nesting -= 1;
+fn close_group(groups: &mut Vec<char>, closing: char, line: usize) -> Result<(), Error> {
+    let Some(opening) = groups.pop() else {
+        return Err(Error::parse("unmatched grouping delimiter").at_line(line));
+    };
+    let expected = match opening {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        _ => unreachable!("group stack only contains opening delimiters"),
+    };
+    if expected == closing {
         Ok(())
+    } else {
+        Err(Error::parse(format!("expected '{expected}', found '{closing}'")).at_line(line))
     }
+}
+
+fn collection_item_can_end(token: Option<&Token>) -> bool {
+    !matches!(
+        token,
+        None | Some(
+            Token::Comma
+                | Token::Semi
+                | Token::LBracket
+                | Token::LBrace
+                | Token::Colon
+                | Token::Assign
+                | Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Slash
+                | Token::And
+                | Token::Or
+                | Token::Pipe
+                | Token::Caret
+                | Token::Amp
+                | Token::Arrow
+                | Token::FatArrow
+        )
+    )
 }
 
 #[cfg(test)]

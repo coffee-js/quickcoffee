@@ -118,3 +118,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 `qdocco demo.qc -o demo.html` 生成并校验可执行文档；用 `qdocco --check demo.qc` 只校验。`qtest cases` 会递归运行目录中的 `.qc` 文件，要求每个脚本的最后值严格为 `true`。
 
 `qtest --fuel N cases` 会为每个发现的测试文件分别设置指令预算，因此一个受限循环不会耗尽其他测试的预算。
+
+多行数组和映射可按行省略逗号；调用参数与普通括号内表达式仍须显式分隔。

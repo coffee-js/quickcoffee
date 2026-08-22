@@ -71,6 +71,16 @@ message = "hello
 message == 'hello world'
 folded = (1 + 2 * 3) == 7
 folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
 3 not in [1, 2] and 'missing' not of {present: 1}
 loop_count = 0
 loop

@@ -66,6 +66,12 @@ fn main() {
             expected: "10",
         },
         Workload {
+            name: "multiline-collections",
+            source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
+            iterations: 10_000,
+            expected: "6",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,

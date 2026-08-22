@@ -60,6 +60,20 @@ fn ordinary_quoted_strings_join_physical_lines_without_leaking_layout() {
     assert_eq!(error.position().map(|position| position.line), Some(1));
 }
 #[test]
+fn multiline_arrays_and_maps_accept_line_separators_without_commas() {
+    assert_eq!(
+        eval("values = [\n  1\n  2\n  3\n]\nvalues").to_string(),
+        "[1, 2, 3]"
+    );
+    assert_eq!(
+        eval("record = {\n  first: 1\n  nested: [\n    2\n    3\n  ]\n}\nrecord.first + record.nested[1]").as_number(),
+        Some(4.)
+    );
+    assert_eq!(eval("[1,\n 2,\n]").to_string(), "[1, 2]");
+    assert!(Context::new().eval("sum(\n 1\n 2\n)").is_err());
+    assert!(Context::new().eval("[1}").is_err());
+}
+#[test]
 fn floor_division_and_dividend_dependent_modulo_are_strict_numeric_operators() {
     assert_eq!(
         eval("[-7 // 5, -7 % 5, -7 %% 5, 7 // -5, 7 %% -5]").to_string(),
