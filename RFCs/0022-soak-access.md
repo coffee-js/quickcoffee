@@ -1,5 +1,7 @@
 # RFC 0022：nil 安全访问与调用
 
+- 状态：已采纳
+
 ## 决议
 
 QuickCoffee 增加 CoffeeScript 风格的 soak 后缀：`value?.name`、`value?[key]` 与 `function?(arguments)`。它们只保护接收者为 `nil` 的情形：此时结果为 `nil`，索引表达式或调用实参完全不求值。接收者非 `nil` 时，操作与普通 `.name`、`[key]` 或 `()` 相同。

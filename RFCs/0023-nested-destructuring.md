@@ -1,5 +1,7 @@
 # RFC 0023：严格递归解构赋值
 
+- 状态：已采纳
+
 ## 决议
 
 赋值左侧可递归组合数组和映射模式：`[first, [middle, last]] = value`、`{point: {x, y}, labels: [_, name]} = value`。原有的 `a, b = value` 是顶层数组模式的简写；`{key, source: target} = value` 仍支持键名与绑定名不同。`_` 在任何深度均显式忽略对应值。
