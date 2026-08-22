@@ -351,9 +351,10 @@ impl Parser {
                         }
                     }
                 }
-                rest.map_or(Pattern::Map(fields.clone()), |name| {
-                    Pattern::MapRest(fields, name)
-                })
+                match rest {
+                    Some(name) => Pattern::MapRest(fields, name),
+                    None => Pattern::Map(fields),
+                }
             }
             _ => {
                 self.at = saved;

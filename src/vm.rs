@@ -4,7 +4,7 @@ use crate::{
 };
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     rc::Rc,
 };
@@ -1380,7 +1380,7 @@ fn bind_pattern(
             let Some(Value::Map(map)) = value else {
                 return Err(Error::runtime("map destructuring expects a map"));
             };
-            for (key, pattern) in fields {
+            for (key, pattern) in fields.iter() {
                 bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
                     if map.contains_key(key) {
                         error
@@ -1389,9 +1389,11 @@ fn bind_pattern(
                     }
                 })?;
             }
+            let explicit_fields: BTreeSet<&str> =
+                fields.iter().map(|(field, _)| field.as_str()).collect();
             let mut remaining = BTreeMap::new();
             for (key, item) in map.iter() {
-                if !fields.iter().any(|(field, _)| field == key) {
+                if !explicit_fields.contains(key.as_str()) {
                     remaining.insert(key.clone(), item.clone());
                 }
             }

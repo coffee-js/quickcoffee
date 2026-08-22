@@ -57,6 +57,11 @@ fn map_destructuring_rest_captures_unlisted_keys_atomically() {
     );
     assert!(
         Context::new()
+            .eval("{id, ...metadata} = {id: 7, role: 'admin'}\nmetadata.id")
+            .is_err()
+    );
+    assert!(
+        Context::new()
             .eval("{id, ...metadata} = {role: 'admin'}")
             .is_err()
     );
