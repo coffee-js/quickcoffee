@@ -139,6 +139,27 @@ fn qtest_reports_success_and_failure() {
     let _ = fs::remove_file(temp);
 }
 
+#[cfg(unix)]
+#[test]
+fn qtest_ignores_recursive_directory_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-cycle-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    fs::write(temp.join("pass.qc"), "true\n").unwrap();
+    symlink(&temp, temp.join("loop")).unwrap();
+    let output = Command::new(bin("qtest"))
+        .args(["--tap", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("TAP version 13\nok 1 - {}/pass.qc\n1..1\n", temp.display())
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
 #[test]
 fn every_cli_reports_the_same_package_version() {
     for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
