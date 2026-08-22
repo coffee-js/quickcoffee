@@ -14,7 +14,7 @@ Voces CoffeeScript sine mutatione generum valent: `yes`/`on` sunt `true`, `no`/`
 
 Comparationes strictae vel numericae conecti possunt: `1 < middle() < 3` medium semel aestimat et, priore falso, posteriora non aestimat.
 
-Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat atque verificat sine cursu; `--fuel N` numerum instructionum finit. Bibliotheca parva habet `print`, `len`, `type`, `range(a, b)`, `str`, `keys`, `values`, `join`, `split`, et `assert`; finis in `range` exclusus est.
+Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat atque verificat sine cursu; `--fuel N` numerum instructionum finit. Bibliotheca parva habet `print`, `len`, `type`, `range(a, b)`, `str`, `abs`, `sum`, `min`, `max`, `keys`, `values`, `join`, `split`, et `assert`; aggregationes numericae solum series numerorum finitorum accipiunt; finis in `range` exclusus est.
 
 `qcoffee -` fontem ex initio normali legit; `qcoffee --dump-bytecode -` illum fontem sine cursu explicat.
 `qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
