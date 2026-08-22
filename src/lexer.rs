@@ -161,18 +161,22 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
         }
         if groups.is_empty() && !continued {
             let current = *indents.last().expect("indent stack");
-            if prefix > current {
-                indents.push(prefix);
-                out.push(Token::Indent);
-            } else if prefix < current {
-                while prefix < *indents.last().expect("indent stack") {
-                    indents.pop();
-                    out.push(Token::Dedent);
+            match prefix.cmp(&current) {
+                std::cmp::Ordering::Greater => {
+                    indents.push(prefix);
+                    out.push(Token::Indent);
                 }
-                if prefix != *indents.last().expect("indent stack") {
-                    return Err(Error::parse("inconsistent indentation").at_line(line_number));
+                std::cmp::Ordering::Less => {
+                    while prefix < *indents.last().expect("indent stack") {
+                        indents.pop();
+                        out.push(Token::Dedent);
+                    }
+                    if prefix != *indents.last().expect("indent stack") {
+                        return Err(Error::parse("inconsistent indentation").at_line(line_number));
+                    }
+                    out.push(Token::Semi);
                 }
-                out.push(Token::Semi);
+                std::cmp::Ordering::Equal => {}
             }
         }
         lex_line(content, line_number, &mut groups, &mut out)?;
