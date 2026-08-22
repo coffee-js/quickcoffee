@@ -14,6 +14,8 @@
 | 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, "first-name": first, ...metadata} = map`（标识符或字面字符串键）的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、`=>` 同义箭头、`do` 立即调用 | 动态 computed 映射键、无括号默认/rest/解构参数、生成器 |
 | OO/模块 | 无原型工厂类 `class Name(args) -> expression` | 继承、`this`、`new`、import/export |
 
+整数区间支持升序与降序：`[2..4]` 为 `[2, 3, 4]`，`[4..2]` 为 `[4, 3, 2]`；排除上界形式相应省略终点（`[4...2]` 为 `[4, 3]`）。边界必须是有限整数，过长区间仍报错。
+
 字符串索引与严格切片按 Unicode 标量边界：`'a☕中'[1]` 为 `'☕'`，`'a☕中'[1..2]` 为 `'☕中'`；负索引从末项计数（`items[-1]`），越界仍报错；字符串 `for` 仍不支持 `by`。
 
 映射字面量可从左至右展开：`{...defaults, theme: 'dark'}`；后写显式键或展开段覆盖先写键，展开值必须为映射。映射解构可用末尾尾部模式 `{id, ...metadata}` 捕获未列键，所得映射为新的不可变值。

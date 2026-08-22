@@ -33,6 +33,7 @@
 ## switch/when selects one strict-equality branch without fallthrough.
 ## try/catch/finally handles QuickCoffee runtime errors without JavaScript Error objects.
 ## Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.
+## Ranges may descend too: [3..1] yields [3, 2, 1], while [3...1] yields [3, 2].
 ## Triple-quoted heredocs preserve newlines: """...""" interpolates and '''...''' remains literal.
 ## Array slices use a[start..end] for an inclusive end and a[start...end] for an exclusive end; bounds are finite in-range integers, negatives count from the end, and a nil-safe slice skips bounds on nil.
 ## Nil-specific fallback is written as left ? right; false and zero are kept unchanged.

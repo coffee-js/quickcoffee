@@ -6,6 +6,8 @@ Cargo package metadata links embedding users to the repository, README, license,
 
 The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. `qcoffee --fingerprint FILE` prints a stable 16-digit hexadecimal key for verified bytecode without executing it; the key uses canonical encoding rather than Rust debug text. `qbench --json` emits guarded compile/verify/execute timing records, and `qdocco --markdown` renders literate notes, fenced source, and final values for review. Embedders can adjust a reused context with `Context::set_fuel` and inspect `Context::fuel`; `cargo run --example embed` is a compiled host integration example. Execution statistics remain on stderr with `--stats`.
 
+Integer ranges are ascending or descending: `[2..4]` is `[2, 3, 4]`, `[4..2]` is `[4, 3, 2]`, and exclusive forms omit the end (`[4...2]` is `[4, 3]`). Bounds must be finite integers and oversized ranges are rejected.
+
 Array and Unicode string indexing accepts negative finite integers (`items[-1]`, `'a☕中'[-2]`); out-of-range indices remain errors.
 
 Map destructuring accepts identifier or literal string keys (`{"first-name": first} = record`) and may capture unlisted keys with a final named rest pattern (`{id, ...metadata} = record`); keys remain literal (computed expressions are not evaluated), explicit fields remain strict, and the captured map is immutable.
