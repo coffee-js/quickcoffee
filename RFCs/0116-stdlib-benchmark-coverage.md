@@ -10,7 +10,7 @@ RFC 0113 新增了严格数值标准库函数，但既有 benchmark 只覆盖语
 ## 契约
 
 1. `qbench` 和 `cargo bench --bench core` 都必须包含同名的 `stdlib-abs`、`stdlib-sum`、`stdlib-min-max`、`stdlib-range-sum` 负载。
-2. 每个负载在编译、验证和执行阶段都检查 RFC0113 的最终值；qbench JSON schema、默认完整集合和 `--only` 选择语义不变。
+2. 每个负载在编译、验证和执行阶段都检查 RFC 0113 的最终值；qbench JSON schema、默认完整集合和 `--only` 选择语义不变。
 3. 标准 benchmark 继续记录重复迭代吞吐，不设置跨机器的硬时间阈值；性能报告必须说明样本口径和环境。
 
 ## 验收
