@@ -546,6 +546,10 @@ enum IterationKind {
         position: usize,
         step: usize,
     },
+    String {
+        values: Rc<Vec<Value>>,
+        position: usize,
+    },
     Map {
         entries: Vec<(String, Value)>,
         position: usize,
@@ -746,7 +750,7 @@ impl Vm {
                         let value = pop(frame)?;
                         return Err(Error::runtime(format!("thrown: {value}")));
                     }
-                    Instruction::IterStartArray => {
+                    Instruction::IterStartEnumerable => {
                         let step = array_iteration_step(pop(frame)?)?;
                         match pop(frame)? {
                             Value::Array(values) => frame.iterators.push(Iteration {
@@ -756,7 +760,31 @@ impl Vm {
                                     step,
                                 },
                             }),
-                            _ => return Err(Error::runtime("for expects an array iterable")),
+                            Value::String(value) => {
+                                if step != 1 {
+                                    return Err(Error::runtime(
+                                        "string iteration does not support a by step",
+                                    ));
+                                }
+                                frame.iterators.push(Iteration {
+                                    kind: IterationKind::String {
+                                        values: Rc::new(
+                                            value
+                                                .chars()
+                                                .map(|character| {
+                                                    Value::String(Rc::from(character.to_string()))
+                                                })
+                                                .collect(),
+                                        ),
+                                        position: 0,
+                                    },
+                                });
+                            }
+                            _ => {
+                                return Err(Error::runtime(
+                                    "for expects an array or string iterable",
+                                ));
+                            }
                         }
                     }
                     Instruction::IterStartMap => match pop(frame)? {
@@ -792,6 +820,19 @@ impl Vm {
                                     });
                                     if value.is_some() {
                                         *position = position.saturating_add(*step);
+                                    }
+                                    value
+                                }
+                                IterationKind::String { values, position } => {
+                                    let value = values.get(*position).cloned().map(|value| {
+                                        if patterns.len() == 2 {
+                                            vec![value, Value::Number(*position as f64)]
+                                        } else {
+                                            vec![value]
+                                        }
+                                    });
+                                    if value.is_some() {
+                                        *position += 1;
                                     }
                                     value
                                 }

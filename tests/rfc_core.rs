@@ -884,6 +884,33 @@ fn for_loops_break_and_continue_are_bytecode_control_flow() {
     );
 }
 #[test]
+fn string_iteration_uses_unicode_scalars_and_optional_scalar_indices() {
+    assert_eq!(
+        eval("for character in 'a☕中' then character").to_string(),
+        "[a, ☕, 中]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中' then index").to_string(),
+        "[0, 1, 2]"
+    );
+    assert_eq!(
+        eval("text = 'ab'\nfor character in text then character").to_string(),
+        "[a, b]"
+    );
+    assert_eq!(
+        eval("for character in 'a☕中' when character == '☕' then character").to_string(),
+        "[☕]"
+    );
+    assert!(
+        Context::new()
+            .eval("for character in 'abc' by 2 then character")
+            .is_err()
+    );
+    let chunk = compile("for character in 'abc' then character").unwrap();
+    assert!(chunk.verify().is_ok());
+    assert!(chunk.disassemble().contains("IterStartEnumerable"));
+}
+#[test]
 fn for_loop_bindings_support_strict_recursive_patterns_atomically() {
     assert_eq!(
         eval("for [left, right] in [[1, 2], [3, 4]] then left + right").to_string(),
