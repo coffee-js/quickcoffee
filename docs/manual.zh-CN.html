@@ -15,6 +15,7 @@
 <p>qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写标准错误。</p>
 <p>qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。</p>
 <p>qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。</p>
+<p>qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。</p>
 <p>Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime(&quot;message&quot;)，error.position() 可给出从 1 开始的源码行。</p>
 <p>Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。</p>
 <p>Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。</p>
@@ -67,7 +68,8 @@
 <p>数组循环可写 by step；步长只求一次，须为非零有限整数，负步从末项起，映射循环不用 by。</p>
 <p>数组循环亦可绑定从零开始的下标：for value, index in items then value + index。</p>
 <p>后置推导沿用严格收集：value * 2 for value in items，亦可写作 [value * 2 for value in items]。</p>
-</main><main><h1>Code</h1><pre><code>base = 21
+</main><main><h1>Code</h1><pre><code>
+base = 21
 double = (x) -&gt; x * 2
 shorthand = 'yes'
 [first, {point: [x, y]}] = [0, {point: [20, 22]}]

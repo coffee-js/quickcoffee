@@ -507,6 +507,75 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 }
 
 #[test]
+fn qcoffee_json_reports_values_and_structured_errors() {
+    let value = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "{answer: 42, ok: true}"])
+        .output()
+        .unwrap();
+    assert!(value.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&value.stdout),
+        "{\"ok\":true,\"value\":{\"answer\":42,\"ok\":true}}\n"
+    );
+    assert!(value.stderr.is_empty());
+
+    let function = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "(x) -> x"])
+        .output()
+        .unwrap();
+    assert!(function.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&function.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"function\"}}\n"
+    );
+
+    let nil = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "nil"])
+        .output()
+        .unwrap();
+    assert!(nil.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&nil.stdout),
+        "{\"ok\":true,\"value\":null}\n"
+    );
+
+    let parse_error = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "@"])
+        .output()
+        .unwrap();
+    assert!(!parse_error.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&parse_error.stdout),
+        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"unexpected character '@'\",\"line\":1}\n"
+    );
+    assert!(parse_error.stderr.is_empty());
+
+    let runtime_error = Command::new(bin("qcoffee"))
+        .args(["--json", "--fuel", "10", "-e", "while true then 1"])
+        .output()
+        .unwrap();
+    assert!(!runtime_error.status.success());
+    let runtime_stdout = String::from_utf8_lossy(&runtime_error.stdout);
+    assert!(runtime_stdout.starts_with("{\"ok\":false,\"kind\":\"runtime\""));
+    assert!(runtime_stdout.contains("fuel exhausted"));
+    assert!(runtime_stdout.ends_with("\"line\":null}\n"));
+
+    let missing = Command::new(bin("qcoffee"))
+        .args(["--json", "qcoffee-file-that-does-not-exist.qc"])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(
+        missing_stdout.starts_with(
+            "{\"ok\":false,\"stage\":\"read\",\"kind\":\"io\",\"message\":\"read error:"
+        )
+    );
+    assert!(missing_stdout.ends_with("\",\"line\":null}\n"));
+    assert!(missing.stderr.is_empty());
+}
+
+#[test]
 fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
     let temp = std::env::temp_dir().join(format!("qcoffee-fingerprint-{}.qc", std::process::id()));
     let other = std::env::temp_dir().join(format!(

@@ -23,6 +23,7 @@
 <p>qtest --json 每篇出一行 JSON，便于 CI 取用；--stats 仍书于标准错误。</p>
 <p>qtest --tap 出 TAP 13 及定次之记录；--json 与 --tap 不可并用。</p>
 <p>qtest --filter TEXT 依路径择篇；qtest --list 但列所择之篇而不行其文。</p>
+<p>qcoffee --json 一行以 JSON 载其值或错状，俾 CI 与宿主取用。</p>
 <p>宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。</p>
 <p>Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。</p>
 <p>Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。</p>
@@ -63,7 +64,8 @@
 <p>数组之环可书 by step；步惟求一遍，须非零有限整数，负者自末起，映射环弗用之。</p>
 <p>数组之环亦可系从一始之下标：for value, index in items then value + index。</p>
 <p>后置之推导亦循严收集：value * 2 for value in items，或括以 [value * 2 for value in items]。</p>
-</main><main><h1>Code</h1><pre><code>甲 = 6
+</main><main><h1>Code</h1><pre><code>
+甲 = 6
 倍 = (x) -&gt; x * 2
 shorthand = 'yes'
 [first, {point: [x, y]}] = [0, {point: [20, 22]}]

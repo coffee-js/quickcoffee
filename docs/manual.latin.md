@@ -21,6 +21,7 @@ qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad er
 qtest --json unam lineam JSON pro unoquoque documento scribit ad usum CI; --stats in stderr manet.
 qtest --tap versiones TAP 13 et numeros certos scribit; --json et --tap simul prohibentur.
 qtest --filter TEXT itinera congruentia eligit; qtest --list tantum documenta electa enumerat sine exsecutione.
+qcoffee --json unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
 Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
 Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
 Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
@@ -71,6 +72,7 @@ Comprehensio postfix eandem collectionem strictam servat: value * 2 for value in
 ## Code
 
 ````quickcoffee
+
 numerus = 7
 quadratum = (x) -> x * x
 shorthand = 'yes'

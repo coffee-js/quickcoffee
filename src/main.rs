@@ -1,6 +1,6 @@
 //! Command-line entry point for the `qcoffee` interpreter.
 
-use quickcoffee::{Context, Engine, Value};
+use quickcoffee::{Context, Engine, Error, Value};
 use std::{
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
@@ -9,7 +9,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -18,6 +18,77 @@ fn read_source(path: &str) -> Result<String, String> {
     } else {
         fs::read_to_string(path).map_err(|error| format!("read error: {error}"))
     }
+}
+fn json_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            character if character.is_control() => {
+                out.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => out.push(character),
+        }
+    }
+    out
+}
+fn json_value(value: &Value) -> String {
+    match value.kind() {
+        quickcoffee::ValueKind::Nil => "null".to_owned(),
+        quickcoffee::ValueKind::Bool => value.as_bool().unwrap().to_string(),
+        quickcoffee::ValueKind::Number => {
+            let number = value.as_number().unwrap();
+            if number.is_finite() {
+                number.to_string()
+            } else {
+                "null".to_owned()
+            }
+        }
+        quickcoffee::ValueKind::String => {
+            format!("\"{}\"", json_escape(value.as_str().unwrap()))
+        }
+        quickcoffee::ValueKind::Array => format!(
+            "[{}]",
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(json_value)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        quickcoffee::ValueKind::Map => format!(
+            "{{{}}}",
+            value
+                .as_map()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| { format!("\"{}\":{}", json_escape(key), json_value(value)) })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        quickcoffee::ValueKind::Function => "{\"$quickcoffee\":\"function\"}".to_owned(),
+    }
+}
+fn json_error(error: &Error) -> String {
+    let line = error
+        .position()
+        .map_or_else(|| "null".to_owned(), |position| position.line.to_string());
+    format!(
+        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\",\"line\":{line}}}",
+        error.kind(),
+        json_escape(error.message())
+    )
+}
+fn json_io_error(stage: &str, message: &str) -> String {
+    format!(
+        "{{\"ok\":false,\"stage\":\"{stage}\",\"kind\":\"io\",\"message\":\"{}\",\"line\":null}}",
+        json_escape(message)
+    )
 }
 fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
     let stdin = io::stdin();
@@ -90,6 +161,7 @@ fn main() -> ExitCode {
     let mut fingerprint = false;
     let mut check = false;
     let mut stats = false;
+    let mut json = false;
     let mut interactive = false;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
@@ -115,6 +187,7 @@ fn main() -> ExitCode {
                 }
             },
             "--stats" => stats = true,
+            "--json" => json = true,
             "-e" => match args.next() {
                 Some(s) if source.is_none() => source = Some(s),
                 Some(_) => {
@@ -127,7 +200,7 @@ fn main() -> ExitCode {
                 }
             },
             "--dump-bytecode" => {
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
@@ -154,7 +227,7 @@ fn main() -> ExitCode {
                 }
             }
             "--check" => {
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
@@ -165,7 +238,11 @@ fn main() -> ExitCode {
                     Some(path) => match read_source(&path) {
                         Ok(text) => source = Some(text),
                         Err(error) => {
-                            eprintln!("{error}");
+                            if json {
+                                println!("{}", json_io_error("read", &error));
+                            } else {
+                                eprintln!("{error}");
+                            }
                             return ExitCode::from(1);
                         }
                     },
@@ -176,7 +253,7 @@ fn main() -> ExitCode {
                 }
             }
             "--fingerprint" => {
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
@@ -205,14 +282,22 @@ fn main() -> ExitCode {
             "-" if source.is_none() => match read_source("-") {
                 Ok(text) => source = Some(text),
                 Err(error) => {
-                    eprintln!("{error}");
+                    if json {
+                        println!("{}", json_io_error("read", &error));
+                    } else {
+                        eprintln!("{error}");
+                    }
                     return ExitCode::from(1);
                 }
             },
             path if !path.starts_with('-') && source.is_none() => match read_source(path) {
                 Ok(text) => source = Some(text),
                 Err(error) => {
-                    eprintln!("{error}");
+                    if json {
+                        println!("{}", json_io_error("read", &error));
+                    } else {
+                        eprintln!("{error}");
+                    }
                     return ExitCode::from(1);
                 }
             },
@@ -223,9 +308,9 @@ fn main() -> ExitCode {
         }
     }
     if interactive {
-        if source.is_some() || check || dump || fingerprint {
+        if source.is_some() || check || dump || fingerprint || json {
             eprintln!(
-                "--interactive cannot be combined with a source, --check, --dump-bytecode, or --fingerprint"
+                "--interactive cannot be combined with a source, --check, --dump-bytecode, --fingerprint, or --json"
             );
             return ExitCode::from(2);
         }
@@ -245,7 +330,11 @@ fn main() -> ExitCode {
     let chunk = match engine.compile(&source) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{e}");
+            if json {
+                println!("{}", json_error(&e));
+            } else {
+                eprintln!("{e}");
+            }
             return ExitCode::from(1);
         }
     };
@@ -275,13 +364,19 @@ fn main() -> ExitCode {
     }
     match result {
         Ok(value) => {
-            if !matches!(value, quickcoffee::Value::Nil) {
+            if json {
+                println!("{{\"ok\":true,\"value\":{}}}", json_value(&value));
+            } else if !matches!(value, quickcoffee::Value::Nil) {
                 println!("{value}")
             }
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{e}");
+            if json {
+                println!("{}", json_error(&e));
+            } else {
+                eprintln!("{e}");
+            }
             ExitCode::from(1)
         }
     }
