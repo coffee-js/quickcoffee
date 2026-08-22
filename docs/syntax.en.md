@@ -1,5 +1,7 @@
 # QuickCoffee 0.1 syntax scope
 
+Map literals support left-to-right spread (`config = {...defaults, theme: 'dark'}`); each spread must evaluate to a map and later entries override earlier keys.
+
 Destructuring array and map members may use dynamic defaults (`[first = 1, second = first + 1] = [nil]`); missing or `nil` values evaluate defaults in the current lexical environment, with strict atomic matching.
 
 This is the English index of RFC 0001. An omitted CoffeeScript 2016 feature is deliberately unsupported, not silently compatible.

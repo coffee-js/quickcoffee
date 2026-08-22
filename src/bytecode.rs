@@ -1,5 +1,5 @@
 use crate::{
-    parser::{Binary, Expr, Item, Param, Pattern as AstPattern, Stmt, Unary, Update},
+    parser::{Binary, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update},
     vm::{Error, Value},
 };
 use std::{
@@ -92,6 +92,7 @@ pub enum Instruction {
     MakeArray(usize),
     Append,
     MergeArrays(usize),
+    MergeMaps(usize),
     MakeRange(bool),
     MakeMap(Vec<String>),
     Stringify,
@@ -277,6 +278,7 @@ impl Chunk {
                 }
                 Instruction::MakeArray(count)
                 | Instruction::MergeArrays(count)
+                | Instruction::MergeMaps(count)
                 | Instruction::Concat(count) => {
                     let count = *count as i32;
                     require(count)?;
@@ -445,7 +447,10 @@ fn constant_value(expression: &Expr) -> Option<Value> {
         }
         Expr::Map(entries) => {
             let mut values = BTreeMap::new();
-            for (key, value) in entries {
+            for entry in entries {
+                let MapItem::Entry(key, value) = entry else {
+                    return None;
+                };
                 values.insert(key.clone(), constant_value(value)?);
             }
             Some(Value::Map(Rc::new(values)))
@@ -829,11 +834,30 @@ impl Compiler {
                 self.expr(end)?;
                 self.emit(Instruction::MakeRange(*inclusive));
             }
-            Expr::Map(map) => {
-                for x in map.values() {
-                    self.expr(x)?
+            Expr::Map(items) => {
+                let has_splat = items.iter().any(|item| matches!(item, MapItem::Splat(_)));
+                if !has_splat {
+                    let mut keys = Vec::with_capacity(items.len());
+                    for item in items {
+                        let MapItem::Entry(key, value) = item else {
+                            unreachable!()
+                        };
+                        keys.push(key.clone());
+                        self.expr(value)?;
+                    }
+                    self.emit(Instruction::MakeMap(keys));
+                } else {
+                    for item in items {
+                        match item {
+                            MapItem::Entry(key, value) => {
+                                self.expr(value)?;
+                                self.emit(Instruction::MakeMap(vec![key.clone()]));
+                            }
+                            MapItem::Splat(value) => self.expr(value)?,
+                        }
+                    }
+                    self.emit(Instruction::MergeMaps(items.len()));
                 }
-                self.emit(Instruction::MakeMap(map.keys().cloned().collect()));
             }
             Expr::Unary(op, x) => {
                 self.expr(x)?;

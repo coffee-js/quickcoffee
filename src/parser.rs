@@ -2,7 +2,6 @@ use crate::{
     lexer::{Token, lex_spanned},
     vm::Error,
 };
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Expr {
@@ -18,7 +17,7 @@ pub(crate) enum Expr {
     Destructure(Pattern, Box<Expr>),
     Array(Vec<Item>),
     Range(Box<Expr>, Box<Expr>, bool),
-    Map(BTreeMap<String, Expr>),
+    Map(Vec<MapItem>),
     Unary(Unary, Box<Expr>),
     Exists(Box<Expr>),
     Binary(Box<Expr>, Binary, Box<Expr>),
@@ -51,6 +50,11 @@ pub(crate) enum Expr {
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
     Throw(Box<Expr>),
     Do(Box<Expr>),
+}
+#[derive(Clone, Debug)]
+pub(crate) enum MapItem {
+    Entry(String, Expr),
+    Splat(Expr),
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Pattern {
@@ -998,25 +1002,33 @@ impl Parser {
                 }
             }
             Token::LBrace => {
-                let mut m = BTreeMap::new();
+                let mut m = vec![];
                 self.eat_collection_separator();
                 if self.eat(&Token::RBrace) {
                     return Ok(Expr::Map(m));
                 }
                 loop {
-                    let key = self.next();
-                    let k = match &key {
-                        Token::Ident(s) | Token::String(s, _) => s.clone(),
-                        _ => return Err(self.parse_error("map key must be identifier or string")),
-                    };
-                    let value = if self.eat(&Token::Colon) {
-                        self.expr(0)?
-                    } else if matches!(key, Token::Ident(_)) {
-                        Expr::Name(k.clone())
+                    if self.eat(&Token::Ellipsis) {
+                        m.push(MapItem::Splat(self.expr(0)?));
                     } else {
-                        return Err(self.parse_error("string map keys require ':' and a value"));
-                    };
-                    m.insert(k, value);
+                        let key = self.next();
+                        let k = match &key {
+                            Token::Ident(s) | Token::String(s, _) => s.clone(),
+                            _ => {
+                                return Err(
+                                    self.parse_error("map key must be identifier or string")
+                                );
+                            }
+                        };
+                        let value = if self.eat(&Token::Colon) {
+                            self.expr(0)?
+                        } else if matches!(key, Token::Ident(_)) {
+                            Expr::Name(k.clone())
+                        } else {
+                            return Err(self.parse_error("string map keys require ':' and a value"));
+                        };
+                        m.push(MapItem::Entry(k, value));
+                    }
                     let mut had_line_separator = false;
                     while self.eat(&Token::Semi) {
                         had_line_separator = true;

@@ -36,6 +36,16 @@ fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
     assert!(chunk.verify().is_ok());
 }
 #[test]
+fn map_literals_support_checked_left_to_right_spread() {
+    assert_eq!(
+        eval("base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c").as_number(),
+        Some(8.)
+    );
+    assert_eq!(eval("{...{a: 1}, ...{a: 2}}.a").as_number(), Some(2.));
+    assert!(Context::new().eval("{...1}").is_err());
+    assert!(compile("{...{a: 1}, b: 2}").unwrap().verify().is_ok());
+}
+#[test]
 fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert_eq!(
         eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),

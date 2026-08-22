@@ -31,6 +31,7 @@
 ## value in array checks array membership; key of map checks only map-owned string keys.
 ## value not in array and key not of map negate those same strict checks without prototype keys.
 ## In a map literal, {name} abbreviates {name: name}.
+## Map literals support checked left-to-right spread: {...defaults, theme: 'dark'}; later keys win.
 ## Assignment patterns may nest arrays and maps; validation is atomic before bindings change.
 ## In arrays and calls, items... expands an array without JavaScript apply.
 ## Nil-safe soak suffixes record?.name, values?[i], and fn?(args) short-circuit only a nil receiver.

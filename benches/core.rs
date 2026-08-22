@@ -84,6 +84,12 @@ fn main() {
             expected: "300",
         },
         Workload {
+            name: "map-spread",
+            source: "base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c",
+            iterations: 20_000,
+            expected: "8",
+        },
+        Workload {
             name: "multiline-collections",
             source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
             iterations: 10_000,

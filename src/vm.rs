@@ -932,6 +932,21 @@ impl Vm {
                         }
                         frame.stack.push(Value::Array(Rc::new(values)));
                     }
+                    Instruction::MergeMaps(n) => {
+                        let segments = take(frame, n)?;
+                        let mut values = BTreeMap::new();
+                        for segment in segments {
+                            let Value::Map(segment) = segment else {
+                                return Err(Error::runtime("map splat expects a map"));
+                            };
+                            values.extend(
+                                segment
+                                    .iter()
+                                    .map(|(key, value)| (key.clone(), value.clone())),
+                            );
+                        }
+                        frame.stack.push(Value::Map(Rc::new(values)));
+                    }
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
                         let start = pop(frame)?;

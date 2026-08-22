@@ -1,5 +1,6 @@
 ## QuickCoffee मार्गदर्शिका
 ##
+## मानचित्र-विस्तारः पश्चात् लिखिता कुञ्जी पूर्वलिखितां जयति।
 ## स्रोतः पठ्यते, सत्यापित-bytecode मध्ये संकल्यते, fuel-सीमया चालयते।
 ## qcoffee - मानक-input तः QuickCoffee-program पठति।
 ## qcoffee --stats instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति।
