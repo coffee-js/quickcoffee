@@ -3,6 +3,8 @@
 use quickcoffee::{Context, Engine};
 use std::{env, process::ExitCode, time::Instant};
 
+const OUTPUT_SCHEMA: &str = "quickcoffee.qbench.v1";
+
 struct Workload {
     name: &'static str,
     source: &'static str,
@@ -109,7 +111,9 @@ fn main() -> ExitCode {
 
         if json {
             println!(
-                "{{\"name\":\"{}\",\"iterations\":{},\"expected\":\"{}\",\"compile_ns\":{},\"verify_ns\":{},\"execute_ns\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"expected\":\"{}\",\"compile_ns\":{},\"verify_ns\":{},\"execute_ns\":{}}}",
+                OUTPUT_SCHEMA,
+                env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
                 iterations,
                 json_escape(workload.expected),
@@ -119,8 +123,15 @@ fn main() -> ExitCode {
             );
         } else {
             println!(
-                "{} iterations={} compile_ns={} verify_ns={} execute_ns={} expected={}",
-                workload.name, iterations, compile_ns, verify_ns, execute_ns, workload.expected
+                "schema={} version={} {} iterations={} compile_ns={} verify_ns={} execute_ns={} expected={}",
+                OUTPUT_SCHEMA,
+                env!("CARGO_PKG_VERSION"),
+                workload.name,
+                iterations,
+                compile_ns,
+                verify_ns,
+                execute_ns,
+                workload.expected
             );
         }
     }

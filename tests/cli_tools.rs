@@ -465,6 +465,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
     for line in lines {
         assert!(line.starts_with('{') && line.ends_with('}'));
         for field in [
+            "\"schema\":\"quickcoffee.qbench.v1\"",
             "\"name\":\"",
             "\"iterations\":1",
             "\"expected\":\"",
@@ -474,13 +475,17 @@ fn qbench_json_is_guarded_and_machine_readable() {
         ] {
             assert!(line.contains(field), "missing {field} in {line}");
         }
+        assert!(line.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"))));
     }
     let text = Command::new(bin("qbench"))
         .args(["--iterations", "1"])
         .output()
         .unwrap();
     assert!(text.status.success());
-    assert!(!String::from_utf8_lossy(&text.stdout).starts_with('{'));
+    let text_stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(!text_stdout.starts_with('{'));
+    assert!(text_stdout.contains("schema=quickcoffee.qbench.v1"));
+    assert!(text_stdout.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
     let invalid = Command::new(bin("qbench"))
         .args(["--iterations", "0"])
         .output()
