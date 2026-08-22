@@ -1,0 +1,20 @@
+# Rust build products
+/target/
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local profiling and coverage output
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+coverage/
+
+# Temporary benchmark captures
+/tmp/
+*.log

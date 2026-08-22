@@ -1,0 +1,150 @@
+use std::{
+    fs,
+    io::Write,
+    process::{Command, Stdio},
+};
+fn bin(name: &str) -> String {
+    std::env::var(format!("CARGO_BIN_EXE_{name}")).expect("Cargo supplies bin path")
+}
+#[test]
+fn qdocco_renders_escaped_source_and_checks() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let input = temp.join("demo.qc");
+    let output = temp.join("demo.html");
+    fs::write(&input, "## <Guide>\n1 + 2\n").unwrap();
+    assert!(
+        Command::new(bin("qdocco"))
+            .args([input.to_str().unwrap(), "-o", output.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let page = fs::read_to_string(&output).unwrap();
+    assert!(page.contains("&lt;Guide&gt;"));
+    assert!(page.contains("Final value: <code>3</code>"));
+    assert!(
+        Command::new(bin("qdocco"))
+            .args(["--check", input.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+#[test]
+fn qtest_reports_success_and_failure() {
+    let ok = Command::new(bin("qtest"))
+        .arg("tests/scripts/arithmetic.qc")
+        .output()
+        .unwrap();
+    assert!(ok.status.success());
+    let directory = Command::new(bin("qtest"))
+        .arg("tests/scripts")
+        .output()
+        .unwrap();
+    assert!(directory.status.success());
+    let bad = Command::new(bin("qtest"))
+        .arg("tests/fixtures/failure.qc")
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-fuel-{}.qc", std::process::id()));
+    fs::write(&temp, "while true then 1\n").unwrap();
+    let exhausted = Command::new(bin("qtest"))
+        .args(["--fuel", "10", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!exhausted.status.success());
+    assert!(String::from_utf8_lossy(&exhausted.stderr).contains("fuel exhausted"));
+    let _ = fs::remove_file(temp);
+}
+#[test]
+fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
+    let version = Command::new(bin("qcoffee"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(version.status.success());
+    assert!(String::from_utf8_lossy(&version.stdout).starts_with("qcoffee "));
+
+    let evaluation = Command::new(bin("qcoffee"))
+        .args(["-e", "1 + 2"])
+        .output()
+        .unwrap();
+    assert!(evaluation.status.success());
+    assert_eq!(String::from_utf8_lossy(&evaluation.stdout), "3\n");
+
+    let args = Command::new(bin("qcoffee"))
+        .args(["-e", "len(argv)", "--", "one", "two"])
+        .output()
+        .unwrap();
+    assert!(args.status.success());
+    assert_eq!(String::from_utf8_lossy(&args.stdout), "2\n");
+
+    let mut stdin = Command::new(bin("qcoffee"))
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    stdin.stdin.take().unwrap().write_all(b"40 + 2\n").unwrap();
+    let stdin_output = stdin.wait_with_output().unwrap();
+    assert!(stdin_output.status.success());
+    assert_eq!(String::from_utf8_lossy(&stdin_output.stdout), "42\n");
+
+    let mut stdin_dump = Command::new(bin("qcoffee"))
+        .args(["--dump-bytecode", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    stdin_dump
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"1 + 2\n")
+        .unwrap();
+    let stdin_dump_output = stdin_dump.wait_with_output().unwrap();
+    assert!(stdin_dump_output.status.success());
+    assert!(String::from_utf8_lossy(&stdin_dump_output.stdout).contains("Return"));
+
+    let exhausted = Command::new(bin("qcoffee"))
+        .args(["--fuel", "10", "-e", "while true then 1"])
+        .output()
+        .unwrap();
+    assert!(!exhausted.status.success());
+    assert!(String::from_utf8_lossy(&exhausted.stderr).contains("fuel exhausted"));
+
+    let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.qc", std::process::id()));
+    fs::write(&temp, "1 + 2\n").unwrap();
+    let dump = Command::new(bin("qcoffee"))
+        .args(["--dump-bytecode", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(dump.status.success());
+    assert!(String::from_utf8_lossy(&dump.stdout).contains("Return"));
+
+    let check = Command::new(bin("qcoffee"))
+        .args(["--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(check.status.success());
+    assert!(check.stdout.is_empty());
+
+    fs::write(&temp, "while true then 1\n").unwrap();
+    let non_executing_check = Command::new(bin("qcoffee"))
+        .args(["--fuel", "1", "--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(non_executing_check.status.success());
+
+    fs::write(&temp, "value = 1\n@\n").unwrap();
+    let invalid_check = Command::new(bin("qcoffee"))
+        .args(["--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!invalid_check.status.success());
+    assert!(String::from_utf8_lossy(&invalid_check.stderr).contains("line 2"));
+    let _ = fs::remove_file(temp);
+}

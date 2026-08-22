@@ -1,0 +1,37 @@
+[package]
+name = "quickcoffee"
+version = "0.1.0"
+edition = "2024"
+description = "A compact CoffeeScript-inspired bytecode engine"
+license = "MIT OR Apache-2.0"
+default-run = "qcoffee"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lib]
+name = "quickcoffee"
+path = "src/lib.rs"
+
+[dependencies]
+unicode-ident = "1.0"
+
+[[bin]]
+name = "qcoffee"
+path = "src/main.rs"
+
+[[bin]]
+name = "qdocco"
+path = "src/bin/qdocco.rs"
+
+[[bin]]
+name = "qtest"
+path = "src/bin/qtest.rs"
+
+[[bench]]
+name = "core"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.rs   diff=rust
+*.md   text
+*.qc   text
+*.html text
+*.toml text
+Makefile text

@@ -1,0 +1,84 @@
+## QuickCoffee 用法
+##
+## 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无原型之链、this、eval 与内嵌之文。
+## # 注一行；### … ### 注一段，弗相嵌，先于布局析法略之。
+## 名从 Unicode XID 之法，合附之记可续名，而机不正其 Unicode。
+## yes、on 同 true；no、off 同 false；is、isnt 则严等也。
+## 严等与数较可相连，中项惟求一遍，前否则后不求。
+## qcoffee - 者，自标准输入读其文也。
+## qcoffee --check FILE 者，析编验其文而不行也。
+## qtest --fuel N 者，为各可行文别限其指令之数。
+## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
+## Engine::compile_program 与 Context::run_program 共用已验之字节码，可屡行之。
+## -- 后之参，以常字符串数组 argv 见于文中。
+## 其内府皆常函，如 print、len、type、range、str、keys、values、join、split、assert。
+## 函式取词法之境；末常参可书 y = 2，参缺或传 nil 则于函中取其值；末有余参，则书 tail...。
+## 常名之参可省其括：left, right -> left + right；常值、余参与解构仍须括之。
+## return expression 惟函中可用，反其值而终此函；徒 return 得 nil，且清环行 finally。
+## 函参可层叠数组映射之式；常值与余参仍惟名可书。
+## 整数之区间，`[1..3]` 及其终，`[1...3]` 则不及。
+## 数组之截，a[start..end] 及终，a[start...end] 不及终；端须界内有限整数，负自末计，受者 nil 则安截不求端。
+## 空值回退，书 left ? right；惟 nil 发之，false 与零不易。
+## 后缀 value? 惟验非 nil；nil? 为 false，false? 与 0? 皆 true，未名之误弗隐。
+## name ?= value，名未系或 nil 乃书之；既非 nil，右弗行，成员索引解构弗可。
+## 名亦可前后置增减：next = ++counter 得新值，previous = counter-- 先得旧值；惟名可用。
+## 算术亦有整除 // 与取模 %%：-7 // 5 得 -2，-7 %% 5 得 3。
+## value in array 验数组之有无；key of map 唯验映射己有之字符串键。
+## value not in array、key not of map，皆反其严验，不涉原型。
+## 映射字面量之 {name}，即 {name: name} 之省文。
+## 赋值之式，可层叠数组与映射；机先验其全式，后易诸名。
+## 数组与调用之 items...，展其数组，非假 JavaScript apply。
+## 安空值之缀，书 a?.name、a?[i]、f?(args)；惟受者 nil 则短之。
+## until condition then body 者，至其布尔条件真而止。
+## 语句可后书 while/until，反复其全赋或解构，弗嵌寻常子式。
+## loop body 者，如 while true 恒行；以 break 出之，犹受 fuel 限。
+## for 为收集之式：轮体诸值成新数组，when 与 continue 弗收，break 存既得之首。
+## for 所系可为严式：for [left, right] in pairs，每项全合乃易名。
+## 数组之环可书 by step；步惟求一遍，须正有限整数，映射环弗用之。
+## 数组之环亦可系从一始之下标：for value, index in items then value + index。
+## 后置之推导亦循严收集：value * 2 for value in items，或括以 [value * 2 for value in items]。
+甲 = 6
+倍 = (x) -> x * 2
+shorthand = 'yes'
+[first, {point: [x, y]}] = [0, {point: [20, 22]}]
+scale = ([left, right], {factor}) -> (left + right) * factor
+倍(甲) == 12 and "其数为 #{倍(甲)}" == '其数为 12' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((首, y = 2) -> 首 + y)(40) == 42 and ((首, 余...) -> 首 + len(余))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+步和 = 0
+for n in [1..9] by 3 then 步和 = 步和 + n
+步和 == 12
+len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+后置之倍 = value * 2 for value in [1..3]
+后置之倍 == [2, 4, 6]
+计数 = 2
+前增 = ++计数
+后减 = 计数--
+[前增, 后减, 计数] == [3, 3, 3]
+[-7 // 5, -7 %% 5] == [-2, 3]
+[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+continued = 1 +
+  2 * 3
+continued == 7
+message = "hello
+  world"
+message == 'hello world'
+folded = (1 + 2 * 3) == 7
+folded
+3 not in [1, 2] and '缺' not of {在: 1}
+循环数 = 0
+loop
+  循环数 = 循环数 + 1
+  break if 循环数 == 3
+循环数 == 3
+裸加 = left, right -> left + right
+裸加(20, 22) == 42
+后置数 = 0
+后置数 = 后置数 + 1 while 后置数 < 3
+后置数 == 3
+切片数 = [0..4][1..3]
+len(切片数) == 3 and 切片数[0] == 1 and [0..4][-3...-1][0] == 2
+nil? == false and false? == true and 0? == true
+默认数 ?= 42
+默认数 == 42
+### 此段有无效 ` 文，机不求之
+###
+42 == 42
