@@ -1341,6 +1341,32 @@ fn redesigned_standard_library_is_function_based_not_prototype_based() {
     assert!(Context::new().eval("assert(false, 'expected')").is_err());
 }
 #[test]
+fn numeric_standard_library_is_strict_and_total() {
+    assert_eq!(eval("abs(-3)").as_number(), Some(3.));
+    assert_eq!(eval("sum([])").as_number(), Some(0.));
+    assert_eq!(
+        eval("min([3, 1, 2]) + max([3, 1, 2])").as_number(),
+        Some(4.)
+    );
+    for source in [
+        "abs()",
+        "abs('3')",
+        "sum(1)",
+        "sum([1, '2'])",
+        "min([])",
+        "max([true])",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+    let mut host = Context::new();
+    host.set_global("nan", Value::Number(f64::NAN));
+    assert!(host.eval("abs(nan)").is_err());
+    assert!(host.eval("sum([nan])").is_err());
+}
+#[test]
 fn array_destructuring_is_strict_and_has_an_explicit_ignore_name() {
     assert_eq!(
         eval("left, right = [20, 22]\nleft + right").as_number(),

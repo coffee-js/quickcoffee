@@ -6,6 +6,8 @@
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。
 
+标准库是普通函数：`print`、`len`、`type`、`range`、`str`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。数值聚合只收一个有限数数组；`sum([])` 为 `0`，`min([])` 与 `max([])` 报错。
+
 | 类别 | 支持 | 不支持（本版） |
 |---|---|---|
 | 字面量 | 十进制、十六进制 `0xff`、二进制 `0b1010`、八进制 `0o755` 与科学计数法数字、字符串、双引号 `#{expr}` 插值、保留换行的 `"""…"""` 插值 heredoc 与 `'''…'''` 字面 heredoc、`true`/`yes`/`on`、`false`/`no`/`off`、`nil`、数组与 `[head, items...]` 展开、整数区间 `[1..3]`（含上界）/`[1...3]`（不含上界）、映射、`{name}` 简写与映射展开 `{...base, key: value}` | 正则、JS 插值、`undefined` |

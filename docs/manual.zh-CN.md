@@ -32,7 +32,7 @@ qcoffee --dump-bytecode program.qc
 
 `--` 之后的参数以普通字符串数组 `argv` 提供：`qcoffee program.qc -- first second` 中 `len(argv)` 为 `2`。引擎不会暴露宿主进程或环境对象。
 
-`--fuel` 是每次执行的指令上限，耗尽会安全失败。标准库包括 `print`、`len`、`type`、`range`、`str`、`keys`、`values`、`join`、`split` 与 `assert`；`range(a, b)` 生成 `[a, b)`。
+`--fuel` 是每次执行的指令上限，耗尽会安全失败。标准库包括 `print`、`len`、`type`、`range`、`str`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`；数值聚合只接受严格有限数数组，`range(a, b)` 生成 `[a, b)`。
 
 ## 语法示例
 

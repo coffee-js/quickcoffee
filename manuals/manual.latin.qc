@@ -36,7 +36,7 @@
 ## yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
 ## ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 ## Comparationes conectae medium semel servant atque priore falso breviant.
-## Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, keys, values, join, split, assert.
+## Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, abs, sum, min, max, keys, values, join, split, assert; aggregationes numericae solum series numerorum finitorum accipiunt.
 ## Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 ## Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 ## return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.

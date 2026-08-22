@@ -14,7 +14,7 @@ CoffeeScript-style spellings are available without changing runtime types: `yes`
 
 Adjacent strict or numeric comparisons may chain: `1 < middle() < 3` evaluates `middle()` once and stops before later operands when an earlier comparison is false.
 
-Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoffee --check program.qc`, or `qcoffee --dump-bytecode program.qc`. `--check` parses, compiles, and verifies without executing. Fuel limits executed instructions; exhaustion is a safe error. The small standard library contains `print`, `len`, `type`, end-exclusive `range(a, b)`, `str`, `keys`, `values`, `join`, `split`, and `assert`.
+Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoffee --check program.qc`, or `qcoffee --dump-bytecode program.qc`. `--check` parses, compiles, and verifies without executing. Fuel limits executed instructions; exhaustion is a safe error. The small standard library contains `print`, `len`, `type`, end-exclusive `range(a, b)`, `str`, `abs`, `sum`, `min`, `max`, `keys`, `values`, `join`, `split`, and `assert`; numeric aggregators accept strict finite-number arrays.
 
 `qcoffee -` reads source from standard input, which is convenient in pipelines; `qcoffee --dump-bytecode -` disassembles that same input instead of executing it.
 `qcoffee --stats` writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.

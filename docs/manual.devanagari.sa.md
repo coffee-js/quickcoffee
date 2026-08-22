@@ -14,7 +14,7 @@ CoffeeScript-नामानि type न परिवर्तयन्ति: `
 
 strict अथवा numeric-comparison श्रृङ्खला भवति: `1 < middle() < 3` मध्ये middle एकवारं मूल्यते, पूर्वं false चेत् परं न मूल्यते।
 
-`qcoffee -e "print(range(1, 4))"` प्रयुञ्जीत। `qcoffee --check FILE` स्रोतं compile-verify करोति, न चालयति; `--fuel N` निर्देश-संख्यां सीमयति। `print`, `len`, `type`, `range`, `str`, `keys`, `values`, `join`, `split`, `assert` मानक-सहायकाः; `range(a, b)` मध्ये `b` न गृह्यते।
+`qcoffee -e "print(range(1, 4))"` प्रयुञ्जीत। `qcoffee --check FILE` स्रोतं compile-verify करोति, न चालयति; `--fuel N` निर्देश-संख्यां सीमयति। `print`, `len`, `type`, `range`, `str`, `abs`, `sum`, `min`, `max`, `keys`, `values`, `join`, `split`, `assert` मानक-सहायकाः; संख्या-संग्रहाः केवलं finite-संख्याः गृह्णन्ति; `range(a, b)` मध्ये `b` न गृह्यते।
 
 `qcoffee -` मानक-input तः स्रोतः पठति; `qcoffee --dump-bytecode -` तमेव स्रोतं चालनं विना विच्छिनत्ति।
 `qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।

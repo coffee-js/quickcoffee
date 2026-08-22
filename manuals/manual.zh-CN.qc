@@ -33,7 +33,7 @@
 ## yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
 ## ! 是严格 Bool 的 not 别名；!= 仍为严格不等。
 ## 严格或数值比较可成链，保留中间值且前段失败会短路。
-## 标准库皆为普通函数：print、len、type、range、str、keys、values、join、split 与 assert。
+## 标准库皆为普通函数：print、len、type、range、str、abs、sum、min、max、keys、values、join、split 与 assert；数值聚合只收严格有限数数组。
 ## 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
 ## 映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
 ## 数组与 Unicode 字符串支持负索引，-1 取末项。
