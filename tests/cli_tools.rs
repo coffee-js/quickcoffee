@@ -1,10 +1,28 @@
 use std::{
     fs,
     io::Write,
+    path::PathBuf,
     process::{Command, Stdio},
 };
 fn bin(name: &str) -> String {
-    std::env::var(format!("CARGO_BIN_EXE_{name}")).expect("Cargo supplies bin path")
+    if let Ok(path) = std::env::var(format!("CARGO_BIN_EXE_{name}")) {
+        return path;
+    }
+    let test_binary = std::env::current_exe().expect("test binary path is available");
+    let target_debug = test_binary
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("test binary lives below target/debug/deps");
+    let mut candidate = PathBuf::from(target_debug);
+    candidate.push(name);
+    if cfg!(windows) {
+        candidate.set_extension("exe");
+    }
+    assert!(
+        candidate.is_file(),
+        "Cargo binary path is unavailable: {candidate:?}"
+    );
+    candidate.to_string_lossy().into_owned()
 }
 #[test]
 fn qdocco_renders_escaped_source_and_checks() {
