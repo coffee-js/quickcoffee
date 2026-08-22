@@ -1,4 +1,4 @@
-use quickcoffee::{Context, Engine, Error, ErrorKind, Value};
+use quickcoffee::{Context, Engine, Error, ErrorKind, Value, ValueKind};
 
 #[test]
 fn public_embedding_surface_runs_shared_programs_with_host_state() {
@@ -38,9 +38,14 @@ fn public_values_and_native_errors_are_structured() {
         ]),
     );
     let values = context.get_global("host_values").unwrap();
+    assert_eq!(values.kind(), ValueKind::Map);
+    assert!(!values.is_nil());
     let map = values.as_map().unwrap();
     assert_eq!(map["answer"].as_number(), Some(42.));
     assert_eq!(map["items"].as_array().unwrap()[0].as_str(), Some("coffee"));
+    assert_eq!(map["items"].kind(), ValueKind::Array);
+    assert_eq!(Value::Nil.kind(), ValueKind::Nil);
+    assert!(Value::Nil.is_nil());
 
     context.add_native("fail", |_| Err(Error::runtime("host failed")));
     let error = context.eval("fail()").unwrap_err();

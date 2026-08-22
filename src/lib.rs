@@ -11,7 +11,7 @@ mod vm;
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
 pub use vm::{
     Context, Engine, Error, ErrorKind, ExecutionStats, Function, NativeFunction, Program,
-    SourcePosition, Value,
+    SourcePosition, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.

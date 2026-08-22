@@ -11,6 +11,25 @@ use std::{
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
 
+/// Stable type tag for values crossing the embedding boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueKind {
+    /// The sole empty value.
+    Nil,
+    /// A strict boolean.
+    Bool,
+    /// An IEEE-754 number.
+    Number,
+    /// An immutable UTF-8 string.
+    String,
+    /// An immutable array.
+    Array,
+    /// An immutable string-keyed map.
+    Map,
+    /// An opaque bytecode or native function.
+    Function,
+}
+
 /// An immutable value crossing the QuickCoffee/host boundary.
 #[derive(Clone)]
 pub enum Value {
@@ -74,6 +93,22 @@ impl fmt::Display for Value {
     }
 }
 impl Value {
+    /// Returns a stable type tag without exposing the internal container representation.
+    pub fn kind(&self) -> ValueKind {
+        match self {
+            Self::Nil => ValueKind::Nil,
+            Self::Bool(_) => ValueKind::Bool,
+            Self::Number(_) => ValueKind::Number,
+            Self::String(_) => ValueKind::String,
+            Self::Array(_) => ValueKind::Array,
+            Self::Map(_) => ValueKind::Map,
+            Self::Function(_) => ValueKind::Function,
+        }
+    }
+    /// Returns whether this value is the language's `nil` value.
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Self::Nil)
+    }
     /// Builds a QuickCoffee string without exposing its `Rc<str>` storage.
     pub fn string(value: impl Into<Rc<str>>) -> Self {
         Self::String(value.into())
@@ -596,6 +631,7 @@ enum IterationKind {
     String {
         values: Rc<Vec<Value>>,
         position: usize,
+        step: usize,
     },
     Map {
         entries: Vec<(String, Value)>,
@@ -825,11 +861,6 @@ impl Vm {
                                 },
                             }),
                             Value::String(value) => {
-                                if step != 1 {
-                                    return Err(Error::runtime(
-                                        "string iteration does not support a by step",
-                                    ));
-                                }
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(
@@ -841,6 +872,7 @@ impl Vm {
                                                 .collect(),
                                         ),
                                         position: 0,
+                                        step,
                                     },
                                 });
                             }
@@ -887,7 +919,11 @@ impl Vm {
                                     }
                                     value
                                 }
-                                IterationKind::String { values, position } => {
+                                IterationKind::String {
+                                    values,
+                                    position,
+                                    step,
+                                } => {
                                     let value = values.get(*position).cloned().map(|value| {
                                         if patterns.len() == 2 {
                                             vec![value, Value::Number(*position as f64)]
@@ -896,7 +932,7 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position += 1;
+                                        *position = position.saturating_add(*step);
                                     }
                                     value
                                 }

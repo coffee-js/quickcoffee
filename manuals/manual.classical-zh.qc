@@ -14,7 +14,7 @@
 ## qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
 ## qcoffee --interactive --stats 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。
 ## 'a☕中'[1] 即 '☕'，'a☕中'[1..2]' 得 '☕中'；字符串索引循 Unicode 标量。
-## for character, index in 'a☕中' then index，得 [0, 1, 2]；字符串循 Unicode 标量，弗受 by。
+## for character, index in 'a☕中' then index，得 [0, 1, 2]；字符串循 Unicode 标量，亦受正整数 by。
 ## [head, tail...] = [1, 2, 3]，tail 得 [2, 3]；数组之 rest 必居末。
 ## qtest --fuel N 者，为各可行文别限其指令之数。
 ## qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
@@ -29,6 +29,7 @@
 ## qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 ## 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失。
 ## cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
+## 宿主可用 Value::kind() 别其类，Value::is_nil() 验 nil，不窥其内容器。
 ## Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。
 ## Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 ## -- 后之参，以常字符串数组 argv 见于文中。

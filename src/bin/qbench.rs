@@ -30,6 +30,11 @@ const WORKLOADS: &[Workload] = &[
         source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
         expected: "31",
     },
+    Workload {
+        name: "stepped-string-iteration",
+        source: "sum = 0\nfor character, index in 'a☕中x' by 2 then sum += index\nsum",
+        expected: "2",
+    },
 ];
 
 fn usage() {
