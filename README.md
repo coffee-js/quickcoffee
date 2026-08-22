@@ -2,7 +2,7 @@
 
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有原型链、`this`、`eval` 或嵌入 JavaScript。
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0106-package-verification-gate.md](RFCs/0106-package-verification-gate.md)。
+当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0107-qbench-release-gate.md](RFCs/0107-qbench-release-gate.md)。
 
 ```coffee
 square = (x) -> x * x
@@ -27,6 +27,7 @@ cargo run -- --dump-bytecode example.qc
 cargo run -- --fingerprint example.qc
 cargo run --release --bin qbench -- --json --iterations 100
 cargo run --release --bin qbench -- --json --iterations 100 --repeat 3
+cargo run --locked --quiet --release --bin qbench -- --json --iterations 1 --repeat 3
 cargo run --example embed
 cargo run --bin qdocco -- example.qc -o example.html
 cargo run --bin qdocco -- --markdown example.qc -o example.md

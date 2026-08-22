@@ -1,4 +1,4 @@
-.PHONY: fmt test examples package-metadata package clippy api-doc docs doc-check check bench qbench
+.PHONY: fmt test examples package-metadata package qbench-check clippy api-doc docs doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -35,10 +35,13 @@ docs: doc-check
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.qc -o docs/manual.latin.html
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.html
 
-check: fmt test examples package-metadata package clippy api-doc doc-check
+check: fmt test examples package-metadata package qbench-check clippy api-doc doc-check
 
 bench:
 	cargo bench --locked --bench core
 
 qbench:
 	cargo run --locked --release --bin qbench -- --json
+
+qbench-check:
+	cargo run --locked --quiet --release --bin qbench -- --json --iterations 1 --repeat 3 >/dev/null
