@@ -50,11 +50,16 @@ fn escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+fn prose_text(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let text = trimmed.strip_prefix("##")?;
+    (!text.starts_with('#')).then_some(text)
+}
 fn render(source: &str, result: &str) -> String {
     let mut prose = String::new();
     let mut code = String::new();
     for line in source.lines() {
-        if let Some(text) = line.trim_start().strip_prefix("##") {
+        if let Some(text) = prose_text(line) {
             prose.push_str(&format!("<p>{}</p>\n", escape(text.trim())))
         } else {
             code.push_str(line);
@@ -71,7 +76,7 @@ fn render_markdown(source: &str, result: &str) -> String {
     let mut prose = String::new();
     let mut code = String::new();
     for line in source.lines() {
-        if let Some(text) = line.trim_start().strip_prefix("##") {
+        if let Some(text) = prose_text(line) {
             let text = text.trim();
             if !text.is_empty() {
                 prose.push_str(text);

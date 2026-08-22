@@ -72,6 +72,37 @@ fn qdocco_renders_escaped_source_and_checks() {
     );
     let fenced_document = fs::read_to_string(&fenced_output).unwrap();
     assert!(fenced_document.contains("`````quickcoffee\n# ````\ntrue\n`````"));
+    let block_input = temp.join("block-comment.qc");
+    let block_output = temp.join("block-comment.html");
+    fs::write(&block_input, "### hidden code ###\ntrue\n").unwrap();
+    assert!(
+        Command::new(bin("qdocco"))
+            .args([
+                block_input.to_str().unwrap(),
+                "-o",
+                block_output.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let block_document = fs::read_to_string(&block_output).unwrap();
+    assert!(block_document.contains("<pre><code>### hidden code ###\ntrue\n</code></pre>"));
+    let block_markdown = temp.join("block-comment.md");
+    assert!(
+        Command::new(bin("qdocco"))
+            .args([
+                "--markdown",
+                block_input.to_str().unwrap(),
+                "-o",
+                block_markdown.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let block_markdown_document = fs::read_to_string(&block_markdown).unwrap();
+    assert!(block_markdown_document.contains("````quickcoffee\n### hidden code ###\ntrue\n````"));
     let overwrite = Command::new(bin("qdocco"))
         .args([input.to_str().unwrap(), "-o", input.to_str().unwrap()])
         .output()
