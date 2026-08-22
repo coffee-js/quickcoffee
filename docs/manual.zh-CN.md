@@ -56,7 +56,7 @@ if double(factor) == 12 then print('ok') else print('bad')
 
 nil 安全后缀采用 CoffeeScript 风格写法：`record?.name`、`values?[index]` 与 `fn?(args)`。接收者为 `nil` 时结果为 `nil`，索引或实参也不会求值；接收者非 `nil` 时沿用普通访问的严格规则，因此映射缺键仍会报错。
 
-数组循环写作 `for item in range(1, 4) then print(item)`；可在数组之后写 `by step`，如 `for item in [1..9] by 3 then print(item)`。第二个绑定可取得从零开始的实际下标，如 `for item, index in items then item + index`，步进时仍取数组位置。绑定位置可用严格递归模式，例如 `for [left, right] in pairs then left + right` 或 `for {point: {x, y}} in values then x + y`；每个项的全部绑定只会在模式完整匹配后写入。`for` 是收集表达式：每次循环体值组成新数组，`when` 拒绝的项不收集，`break` 返回已收集前缀。步长只求值一次，且必须是正的有限整数。`break` 和 `continue` 控制最内层循环；`while`/`until`/`loop` 的结果仍为 `nil`；映射循环不支持 `by`。
+数组循环写作 `for item in range(1, 4) then print(item)`；可在数组之后写 `by step`，如 `for item in [1..9] by 3 then print(item)` 或用负步长从末项反向遍历。第二个绑定可取得从零开始的实际下标，如 `for item, index in items then item + index`，步进时仍取数组位置。绑定位置可用严格递归模式，例如 `for [left, right] in pairs then left + right` 或 `for {point: {x, y}} in values then x + y`；每个项的全部绑定只会在模式完整匹配后写入。`for` 是收集表达式：每次循环体值组成新数组，`when` 拒绝的项不收集，`break` 返回已收集前缀。步长只求值一次，且必须是非零的有限整数。`break` 和 `continue` 控制最内层循环；`while`/`until`/`loop` 的结果仍为 `nil`；映射循环不支持 `by`。
 
 同一收集器也支持 CoffeeScript 风格后置推导：`value * 2 for value in items`，或写作 `[value * 2 for value in items]`。方括号只是推导界标，不产生额外嵌套数组；`by`、`when`、映射、模式、`break`、`continue` 仍遵循前置形式。
 

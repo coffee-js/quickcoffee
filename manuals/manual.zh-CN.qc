@@ -7,7 +7,7 @@
 ## qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 ## qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
 ## 'a☕中'[1] 为 '☕'，'a☕中'[1..2] 为 '☕中'；字符串索引按 Unicode 标量。
-## for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，亦可用正整数 by。
+## for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，by 可用非零有符号整数，负步从末项起。
 ## do (name, other) -> ... 即刻调用，并按名转发外层值；do -> ... 仍为零参。
 ## [head, tail...] = [1, 2, 3] 将 tail 绑定为 [2, 3]；数组模式 rest 必须居末。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
@@ -63,7 +63,7 @@
 ## loop body 是 while true 的无限形式，以 break 退出，仍受 fuel 限制。
 ## for 是收集表达式：每轮体值成新数组，when 与 continue 不收集，break 保留既得前缀。
 ## for 绑定可用严格模式：for [left, right] in pairs 会原子地绑定每个 pair。
-## 数组循环可写 by step；步长只求一次，须为正有限整数，映射循环不用 by。
+## 数组循环可写 by step；步长只求一次，须为非零有限整数，负步从末项起，映射循环不用 by。
 ## 数组循环亦可绑定从零开始的下标：for value, index in items then value + index。
 ## 后置推导沿用严格收集：value * 2 for value in items，亦可写作 [value * 2 for value in items]。
 base = 21
