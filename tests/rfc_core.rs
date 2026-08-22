@@ -857,6 +857,15 @@ fn shared_programs_repeat_without_copying_bytecode() {
     assert_eq!(cx.run_program(&top_level).unwrap().as_number(), Some(4.));
 }
 #[test]
+fn bytecode_fingerprints_are_stable_and_content_based() {
+    let first = quickcoffee::compile_program("1 + 2").unwrap();
+    let clone = first.clone();
+    let other = quickcoffee::compile_program("1 + 3").unwrap();
+    assert_eq!(first.fingerprint(), clone.fingerprint());
+    assert_ne!(first.fingerprint(), other.fingerprint());
+    assert_ne!(first.fingerprint(), 0);
+}
+#[test]
 fn while_and_fuel() {
     assert_eq!(
         eval("n = 0\nwhile n < 3 then n = n + 1\nn").as_number(),

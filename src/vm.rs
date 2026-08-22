@@ -300,6 +300,10 @@ impl Program {
     pub fn disassemble(&self) -> String {
         self.0.chunk.disassemble()
     }
+    /// Returns the deterministic fingerprint of the shared bytecode.
+    pub fn fingerprint(&self) -> u64 {
+        self.0.chunk.fingerprint()
+    }
     fn ensure_verified(&self) -> Result<(), Error> {
         if self.0.verified.get() {
             Ok(())

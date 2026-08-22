@@ -119,6 +119,16 @@ impl Chunk {
             .map(|(i, op)| format!("{i:04} {op:?}\n"))
             .collect()
     }
+    /// Returns a deterministic content fingerprint for cache keys and diagnostics.
+    pub fn fingerprint(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        let representation = format!("{:?}\n{:?}", self.constants, self.code);
+        for byte in representation.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
     pub fn verify(&self) -> Result<(), Error> {
         if self.code.is_empty() {
             return Err(Error::verify("chunk is empty"));
