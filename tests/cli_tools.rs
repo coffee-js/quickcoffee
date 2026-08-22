@@ -256,6 +256,49 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(String::from_utf8_lossy(&invalid_check.stderr).contains("line 2"));
     let _ = fs::remove_file(temp);
 }
+
+#[test]
+fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-fingerprint-{}.qc", std::process::id()));
+    let other = std::env::temp_dir().join(format!(
+        "qcoffee-fingerprint-other-{}.qc",
+        std::process::id()
+    ));
+    fs::write(&temp, "print('side effect')\n1 + 2\n").unwrap();
+    fs::write(&other, "print('side effect')\n1 + 3\n").unwrap();
+    let first = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let second = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let different = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", other.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(first.status.success() && second.status.success() && different.status.success());
+    assert_eq!(first.stdout, second.stdout);
+    assert_ne!(first.stdout, different.stdout);
+    let fingerprint = String::from_utf8_lossy(&first.stdout);
+    assert_eq!(fingerprint.trim().len(), 16);
+    assert!(fingerprint.trim().chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(first.stderr.is_empty());
+    assert!(
+        !first
+            .stdout
+            .windows(b"side effect".len())
+            .any(|w| w == b"side effect")
+    );
+    let conflict = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", "--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(conflict.status.code(), Some(2));
+    let _ = fs::remove_file(temp);
+    let _ = fs::remove_file(other);
+}
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     let mut process = Command::new(bin("qcoffee"))

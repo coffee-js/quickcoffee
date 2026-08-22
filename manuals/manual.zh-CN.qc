@@ -16,6 +16,7 @@
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 ## Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 ## Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
+## qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
 ## -- 后的参数以普通字符串数组 argv 暴露给程序。
 ## 它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。

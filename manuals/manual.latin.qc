@@ -19,6 +19,7 @@
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
 ## Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
 ## Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
+## qcoffee --fingerprint FILE eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.
 ## JavaScript non est: catena prototyporum, this, eval, atque JavaScript inclusum desunt.
