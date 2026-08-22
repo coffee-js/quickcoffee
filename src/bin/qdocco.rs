@@ -45,9 +45,23 @@ fn render_markdown(source: &str, result: &str) -> String {
             code.push('\n');
         }
     }
+    let fence = markdown_fence(source);
     format!(
-        "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n````quickcoffee\n{code}````\n\n## Final value\n\n`{result}`\n"
+        "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}quickcoffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"
     )
+}
+fn markdown_fence(source: &str) -> String {
+    let mut longest = 0;
+    let mut current = 0;
+    for character in source.chars() {
+        if character == '`' {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    "`".repeat((longest + 1).max(4))
 }
 fn main() -> ExitCode {
     let mut check = false;
