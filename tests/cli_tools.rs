@@ -499,6 +499,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
             "\"schema\":\"quickcoffee.qbench.v1\"",
             "\"name\":\"",
             "\"iterations\":1",
+            "\"repeat\":1",
             "\"expected\":\"",
             "\"compile_ns\":",
             "\"verify_ns\":",
@@ -517,11 +518,27 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(!text_stdout.starts_with('{'));
     assert!(text_stdout.contains("schema=quickcoffee.qbench.v1"));
     assert!(text_stdout.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
+    assert!(text_stdout.contains("repeat=1"));
+    let repeated = Command::new(bin("qbench"))
+        .args(["--json", "--iterations", "1", "--repeat", "3"])
+        .output()
+        .unwrap();
+    assert!(repeated.status.success());
+    assert!(
+        String::from_utf8_lossy(&repeated.stdout)
+            .lines()
+            .all(|line| line.contains("\"repeat\":3"))
+    );
     let invalid = Command::new(bin("qbench"))
         .args(["--iterations", "0"])
         .output()
         .unwrap();
     assert_eq!(invalid.status.code(), Some(2));
+    let invalid_repeat = Command::new(bin("qbench"))
+        .args(["--repeat", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid_repeat.status.code(), Some(2));
 }
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
