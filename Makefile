@@ -1,4 +1,4 @@
-.PHONY: fmt test examples clippy api-doc docs doc-check check bench qbench
+.PHONY: fmt test examples package-metadata clippy api-doc docs doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -8,6 +8,9 @@ test:
 
 examples:
 	cargo test --examples
+
+package-metadata:
+	cargo metadata --no-deps --format-version 1 >/dev/null
 
 clippy:
 	cargo clippy --all-targets -- -D warnings
@@ -29,7 +32,7 @@ docs: doc-check
 	cargo run --quiet --bin qdocco -- manuals/manual.latin.qc -o docs/manual.latin.html
 	cargo run --quiet --bin qdocco -- manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.html
 
-check: fmt test examples clippy api-doc doc-check
+check: fmt test examples package-metadata clippy api-doc doc-check
 
 bench:
 	cargo bench --bench core
