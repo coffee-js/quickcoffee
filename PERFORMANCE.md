@@ -545,6 +545,8 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 本次可复现实测（Apple arm64、Darwin 25.5.0、`rustc 1.94.0`，release，命令 `cargo run --locked --release --bin qbench -- --json --iterations 100`）得到 `signed-by-iteration` 一条记录：编译总计 `618750 ns`，验证总计 `28917 ns`，执行总计 `2363209 ns`，期望值为 `3333`。这是单次开发机样本，只用于确认工作负载已纳入语义护栏与性能采集；跨版本比较仍须按本报告口径重复至少三次并取中位数。
 
+标准 `cargo bench --locked --bench core`（10,000 次）同样已纳入该负载；本次样本为编译 `38.544 ms`、验证 `2.032 ms`、执行 `157.776 ms`，期望值 `3333`。它与正向 `stepped-iteration` 的执行样本（`124.616 ms`）同场输出，便于观察有符号步进的额外边界检查成本。
+
 ## RFC 0074 映射展开
 
 在同一 Darwin arm64 开发机上，`cargo bench --bench core` 的 `map-spread` workload（20,000 次）单次样本为：编译 91.995 ms，验证 2.767 ms，执行 48.784 ms。映射展开为每个显式项生成单项映射，再由 `MergeMaps` 合并；后续键覆盖前值。
