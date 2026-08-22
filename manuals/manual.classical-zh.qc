@@ -9,7 +9,7 @@
 ## qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改。
 ## qcoffee --check FILE 者，析编验其文而不行也。
 ## qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
-## qcoffee --interactive --stats 每一非空行皆书指令与余燃料一条。
+## qcoffee --interactive --stats 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。
 ## qtest --fuel N 者，为各可行文别限其指令之数。
 ## qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。

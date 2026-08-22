@@ -237,12 +237,14 @@ fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"1 + 2\n:quit\n")
+        .write_all(b"1 + 2\n@\n3 + 4\n:quit\n")
         .unwrap();
     let stats_output = stats_process.wait_with_output().unwrap();
     assert!(stats_output.status.success());
-    assert_eq!(String::from_utf8_lossy(&stats_output.stdout), "3\n");
-    assert!(String::from_utf8_lossy(&stats_output.stderr).contains("qcoffee stats: instructions="));
+    assert_eq!(String::from_utf8_lossy(&stats_output.stdout), "3\n7\n");
+    let stats_stderr = String::from_utf8_lossy(&stats_output.stderr);
+    assert_eq!(stats_stderr.matches("qcoffee stats:").count(), 2);
+    assert!(stats_stderr.contains("unexpected character '@'"));
 
     let conflict = Command::new(bin("qcoffee"))
         .args(["--interactive", "-e", "1 + 1"])

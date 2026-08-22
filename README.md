@@ -28,7 +28,7 @@ cargo run --bin qdocco -- example.qc -o example.html
 cargo run --bin qtest -- tests/scripts
 ```
 
-`qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个非空输入行输出执行统计。
+`qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个成功执行或运行时失败的非空输入行输出统计，解析错误不生成新记录。
 
 ## 验收
 

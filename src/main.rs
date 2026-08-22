@@ -57,7 +57,13 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
             "" => {}
             source => {
                 let result = context.eval(source);
-                if stats {
+                let report_stats = stats
+                    && (result.is_ok()
+                        || result
+                            .as_ref()
+                            .err()
+                            .is_some_and(|error| error.kind() == quickcoffee::ErrorKind::Runtime));
+                if report_stats {
                     let execution = context.last_execution();
                     eprintln!(
                         "qcoffee stats: instructions={} fuel_remaining={}",

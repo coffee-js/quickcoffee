@@ -5,7 +5,7 @@
 ## qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变。
 ## qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 ## qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
-## qcoffee --interactive --stats 为每个非空输入行输出一条指令/燃料统计。
+## qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
 ## qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
