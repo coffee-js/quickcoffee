@@ -73,6 +73,13 @@ fn map_destructuring_rest_captures_unlisted_keys_atomically() {
     );
 }
 #[test]
+fn arrays_and_strings_support_unicode_safe_negative_indices() {
+    assert_eq!(eval("[10, 20, 30][-1]").as_number(), Some(30.));
+    assert_eq!(eval("'a☕中'[-2]").to_string(), "☕");
+    assert!(Context::new().eval("[1][-2]").is_err());
+    assert!(Context::new().eval("'a'[1]").is_err());
+}
+#[test]
 fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert_eq!(
         eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),
