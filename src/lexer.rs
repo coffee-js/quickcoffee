@@ -257,7 +257,7 @@ fn trim_single_trailing_backslash(line: &mut String) -> bool {
         }
         backslashes += 1;
     }
-    if backslashes.is_multiple_of(2) {
+    if backslashes % 2 == 0 {
         line.truncate(trimmed_len);
         false
     } else {
