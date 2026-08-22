@@ -1316,6 +1316,11 @@ fn map_destructuring_accepts_literal_string_keys() {
     );
     assert!(
         Context::new()
+            .eval("{\"first-name\"} = {\"first-name\": 'Ada'}")
+            .is_err()
+    );
+    assert!(
+        Context::new()
             .eval("{\"missing-key\": value} = {other: 1}")
             .is_err()
     );
