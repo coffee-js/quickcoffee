@@ -2,6 +2,7 @@
 ##
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
+## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet.
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.

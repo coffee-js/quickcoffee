@@ -75,6 +75,16 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(evaluation.status.success());
     assert_eq!(String::from_utf8_lossy(&evaluation.stdout), "3\n");
 
+    let stats = Command::new(bin("qcoffee"))
+        .args(["--stats", "-e", "1 + 2"])
+        .output()
+        .unwrap();
+    assert!(stats.status.success());
+    assert_eq!(String::from_utf8_lossy(&stats.stdout), "3\n");
+    let stats_stderr = String::from_utf8_lossy(&stats.stderr);
+    assert!(stats_stderr.contains("qcoffee stats: instructions="));
+    assert!(stats_stderr.contains("fuel_remaining="));
+
     let args = Command::new(bin("qcoffee"))
         .args(["-e", "len(argv)", "--", "one", "two"])
         .output()
@@ -115,6 +125,22 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
         .unwrap();
     assert!(!exhausted.status.success());
     assert!(String::from_utf8_lossy(&exhausted.stderr).contains("fuel exhausted"));
+
+    let exhausted_stats = Command::new(bin("qcoffee"))
+        .args(["--stats", "--fuel", "10", "-e", "while true then 1"])
+        .output()
+        .unwrap();
+    assert!(!exhausted_stats.status.success());
+    let exhausted_stderr = String::from_utf8_lossy(&exhausted_stats.stderr);
+    assert!(exhausted_stderr.contains("fuel exhausted"));
+    assert!(exhausted_stderr.contains("qcoffee stats: instructions=10 fuel_remaining=0"));
+
+    let stats_check = Command::new(bin("qcoffee"))
+        .args(["--stats", "--check", "-"])
+        .output()
+        .unwrap();
+    assert_eq!(stats_check.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&stats_check.stderr).contains("execution-mode alternatives"));
 
     let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.qc", std::process::id()));
     fs::write(&temp, "1 + 2\n").unwrap();

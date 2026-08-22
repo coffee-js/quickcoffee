@@ -2,6 +2,7 @@
 ##
 ## Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 ## qcoffee - reads a QuickCoffee program from standard input.
+## qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.

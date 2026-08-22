@@ -3,7 +3,7 @@ use std::{env, fs, io, process::ExitCode};
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [-e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [-e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -19,6 +19,7 @@ fn main() -> ExitCode {
     let mut source = None;
     let mut dump = false;
     let mut check = false;
+    let mut stats = false;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--stats" => stats = true,
             "-e" => match args.next() {
                 Some(s) => source = Some(s),
                 None => {
@@ -49,8 +51,10 @@ fn main() -> ExitCode {
                 }
             },
             "--dump-bytecode" => {
-                if check {
-                    eprintln!("--check and --dump-bytecode cannot be combined");
+                if check || stats {
+                    eprintln!(
+                        "--check, --dump-bytecode, and --stats are execution-mode alternatives"
+                    );
                     return ExitCode::from(2);
                 }
                 dump = true;
@@ -69,8 +73,10 @@ fn main() -> ExitCode {
                 }
             }
             "--check" => {
-                if dump {
-                    eprintln!("--check and --dump-bytecode cannot be combined");
+                if dump || stats {
+                    eprintln!(
+                        "--check, --dump-bytecode, and --stats are execution-mode alternatives"
+                    );
                     return ExitCode::from(2);
                 }
                 check = true;
@@ -112,6 +118,10 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
+    if stats && (dump || check) {
+        eprintln!("--check, --dump-bytecode, and --stats are execution-mode alternatives");
+        return ExitCode::from(2);
+    }
     let engine = Engine::new();
     let chunk = match engine.compile(&source) {
         Ok(c) => c,
@@ -132,7 +142,15 @@ fn main() -> ExitCode {
         "argv",
         Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
     );
-    match context.run(chunk) {
+    let result = context.run(chunk);
+    if stats {
+        let execution = context.last_execution();
+        eprintln!(
+            "qcoffee stats: instructions={} fuel_remaining={}",
+            execution.instructions, execution.fuel_remaining
+        );
+    }
+    match result {
         Ok(value) => {
             if !matches!(value, quickcoffee::Value::Nil) {
                 println!("{value}")

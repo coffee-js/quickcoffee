@@ -6,6 +6,7 @@
 ## yes、on 同 true；no、off 同 false；is、isnt 则严等也。
 ## 严等与数较可相连，中项惟求一遍，前否则后不求。
 ## qcoffee - 者，自标准输入读其文也。
+## qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改。
 ## qcoffee --check FILE 者，析编验其文而不行也。
 ## qtest --fuel N 者，为各可行文别限其指令之数。
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。

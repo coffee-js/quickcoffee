@@ -2,6 +2,7 @@
 ##
 ## स्रोतः पठ्यते, सत्यापित-bytecode मध्ये संकल्यते, fuel-सीमया चालयते।
 ## qcoffee - मानक-input तः QuickCoffee-program पठति।
+## qcoffee --stats instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति।
 ## qcoffee --check FILE स्रोतं verify करोति, न चालयति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।

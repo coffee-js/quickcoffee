@@ -2,6 +2,7 @@
 ##
 ## QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 ## qcoffee - 可从标准输入读取 QuickCoffee 程序。
+## qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变。
 ## qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。

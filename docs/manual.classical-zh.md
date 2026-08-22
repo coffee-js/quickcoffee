@@ -15,6 +15,7 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 欲试之，曰：`qcoffee -e "print(range(1, 4))"`。`--check FILE` 者，析、编、验其文而不行；`--fuel N` 者，限所行指令之数也；数尽则止而报误。内府有 `print`、`len`、`type`、`range`、`str`、`keys`、`values`、`join`、`split`、`assert`；`range(a, b)` 取自 a 至 b 前。
 
 `qcoffee -` 自标准输入读其文，便于管道；`qcoffee --dump-bytecode -` 则析其指令而不行之。
+`qcoffee --stats` 则书所试指令与余燃料于标准错误，程序之标准输出不改；不可与 `--check`、`--dump-bytecode` 并用。
 
 `--` 后之参，以常字符串数组 `argv` 见：`qcoffee program.qc -- first second`，则 `len(argv)` 为 `2`。不暴宿主之进程与环境对象。
 
