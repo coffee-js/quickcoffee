@@ -30,6 +30,8 @@ String indexing and strict slices use Unicode scalar boundaries: `'a☕中'[1]` 
 
 `do` immediately invokes a function; `do (name, other) -> ...` forwards same-named outer values, while defaults, rest, and destructuring are rejected in `do` parameters. `do -> ...` remains a zero-argument IIFE.
 
+`!` is a strict Bool alias for `not`; `!=` remains strict inequality. Non-Bool operands such as `!1` are runtime errors.
+
 Array and string `by step` expressions are evaluated once and must be positive finite integers; map iteration excludes `by`.
 
 Names support arithmetic compound assignment (`+=`, `-=`, `*=`, `/=`, `%=` and `**=`). Compound assignment is intentionally name-only; members, indexes, and destructuring remain immutable API boundaries.

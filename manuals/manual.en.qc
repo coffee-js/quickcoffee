@@ -30,6 +30,7 @@
 ## # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 ## Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
+## ! is a strict Bool alias for not; != remains strict inequality.
 ## Chained strict or numeric comparisons keep the middle value once and short-circuit.
 ## The standard library is ordinary functions: print, len, type, range, str, keys, values, join, split, and assert.
 ## switch/when selects one strict-equality branch without fallthrough.
