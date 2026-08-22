@@ -1149,13 +1149,14 @@ impl Vm {
                         return Ok(value);
                     }
                 }
-                Ok(Step::Call { callee, args }) => {
-                    if let Err(error) = call(self, &mut frames, callee, args)
-                        && !handle_error(&mut frames, &error)
-                    {
-                        return Err(error);
+                Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if !handle_error(&mut frames, &error) {
+                            return Err(error);
+                        }
                     }
-                }
+                },
                 Err(error) => {
                     if !handle_error(&mut frames, &error) {
                         return Err(error);
