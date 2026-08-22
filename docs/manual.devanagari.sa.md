@@ -77,3 +77,5 @@ host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Par
 > 注：此文件按“天成文”近似“天城文（Devanagari）”的解释提供；若所指为其他语言或文字，可替换为经审订译本。
 
 बहु-पङ्क्ति array तथा map मध्ये comma त्यक्तुं शक्यते; call-argument तथा सामान्य parenthesis मध्ये स्पष्ट-विभागः आवश्यकः।
+
+एकाकी assignment (`record =`) अनन्तरं indentation द्वारा map लिखितुं शक्यते; nested `key: value` prototype-विहीनं भवति, सामान्य continuation न विपर्यस्यते।

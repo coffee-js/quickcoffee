@@ -75,3 +75,5 @@ Hospes errorem structum accipit: `error.kind()` dat `ErrorKind::Parse`, `Verify`
 Ad iterandum programmatum compilatum, `Engine::compile_program` dat `Program` commune et `Context::run_program` illud currit; clavis eius sine copia bytecodicis clonatur.
 
 In seriebus et mapis per plures lineas, commata omitti possunt; argumenta functionum et parenteses ordinariae separationem apertam servant.
+
+Post assignationem solam (`record =`) mapa per indentationem scribi potest; claves interiores sine prototypo fiunt, nec continuatio ordinaria confunditur.

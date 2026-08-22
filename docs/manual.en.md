@@ -99,3 +99,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 `qtest --fuel N FILE_OR_DIRECTORY...` gives every discovered test file its own instruction budget, so a deliberately bounded loop cannot consume the budget of another test.
 
 Multiline arrays and maps may omit commas at line boundaries; calls and ordinary parentheses still require explicit separators.
+
+An indented map may follow a standalone assignment (`record =`); nested `key: value` entries become a prototype-free map without changing ordinary assignment continuations.

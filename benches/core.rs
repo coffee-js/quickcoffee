@@ -72,6 +72,12 @@ fn main() {
             expected: "6",
         },
         Workload {
+            name: "indented-maps",
+            source: "record =\n  first: 1\n  nested:\n    second: 2\nrecord.nested.second + record.first",
+            iterations: 10_000,
+            expected: "3",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,

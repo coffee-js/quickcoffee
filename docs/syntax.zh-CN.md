@@ -26,6 +26,8 @@
 
 纯字面量算术、比较、集合与插值在编译时折叠为经验证的常量；含动态名称或可能在运行时失败的严格表达式仍交给 VM 执行。多行数组和映射可按物理行省略逗号（`[\n  1\n  2\n]`、`{\n  first: 1\n  second: 2\n}`）；普通括号和调用参数仍须显式分隔。
 
+映射亦可在单独赋值行后用缩进书写：`record =` 下一行的 `first: 1` 等条目会降低为无原型映射；嵌套映射递归处理。普通赋值续行（如 `value =` 下一行的 `1 + 2`）不会误判为映射。
+
 数组遍历可另绑定从零开始的下标：`for value, index in items then value + index`；使用 `by step` 时下标仍是实际数组位置。
 
 推导亦可用 CoffeeScript 风格后置形式：`value * 2 for value in items`，或以方括号包住写作 `[value * 2 for value in items]`。后置形式与前置形式共享 `by`、`when`、映射、模式、`break`、`continue` 语义；方括号只是推导界标，不再增加一层嵌套数组。

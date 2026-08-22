@@ -127,7 +127,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, Error> {
 }
 
 pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Error> {
-    let normalized = normalize_heredocs(source)?;
+    let normalized = normalize_indented_maps(&normalize_heredocs(source)?);
     let logical_lines = normalize_multiline_strings(&normalized);
     let mut out = LexOutput::new();
     let mut indents = vec![0usize];
@@ -329,6 +329,99 @@ fn normalize_heredocs(source: &str) -> Result<String, Error> {
         out.push(ch);
     }
     Ok(out)
+}
+
+/// Lowers the unbraced object form used by CoffeeScript into explicit map
+/// delimiters without adding physical lines. A block is recognized only when
+/// an indented child begins with an identifier/string key and follows a parent
+/// assignment (`record =`) or map entry (`nested:`).
+fn normalize_indented_maps(source: &str) -> String {
+    let mut output: Vec<String> = Vec::new();
+    let mut active: Vec<usize> = Vec::new();
+    for raw in source.split('\n') {
+        let indent = raw.len() - raw.trim_start_matches(' ').len();
+        let content = raw[indent..].trim_end();
+        if !content.is_empty() && !content.starts_with('#') {
+            while active.last().is_some_and(|child| indent < *child) {
+                append_map_closing(&mut output);
+                active.pop();
+            }
+            if let Some(previous) = previous_significant(&mut output) {
+                let previous_indent = previous.len() - previous.trim_start_matches(' ').len();
+                let previous_content = previous[previous_indent..].trim_end();
+                if indent > previous_indent
+                    && map_parent_line(previous_content)
+                    && map_entry_line(content)
+                {
+                    append_before_comment(previous, " {");
+                    active.push(indent);
+                }
+            }
+        }
+        output.push(raw.to_owned());
+    }
+    while !active.is_empty() {
+        append_map_closing(&mut output);
+        active.pop();
+    }
+    output.join("\n")
+}
+
+fn previous_significant(lines: &mut [String]) -> Option<&mut String> {
+    lines
+        .iter_mut()
+        .rev()
+        .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+}
+
+fn append_before_comment(line: &mut String, text: &str) {
+    if let Some(position) = line.find('#') {
+        line.insert_str(position, text);
+    } else {
+        line.push_str(text);
+    }
+}
+
+fn append_map_closing(lines: &mut [String]) {
+    if let Some(line) = previous_significant(lines) {
+        append_before_comment(line, " }");
+    }
+}
+
+fn map_parent_line(content: &str) -> bool {
+    let content = content.split('#').next().unwrap_or(content).trim_end();
+    if content.ends_with(':') {
+        return true;
+    }
+    if !content.ends_with('=') {
+        return false;
+    }
+    let before = content[..content.len() - 1].trim_end().chars().last();
+    !matches!(
+        before,
+        Some('=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^')
+    )
+}
+
+fn map_entry_line(content: &str) -> bool {
+    let Some((key, _)) = content.split_once(':') else {
+        return false;
+    };
+    let key = key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    if (key.starts_with('\'') && key.ends_with('\''))
+        || (key.starts_with('"') && key.ends_with('"'))
+    {
+        return key.len() >= 2;
+    }
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (is_xid_start(first) || first == '_')
+        && chars.all(|character| is_xid_continue(character) || character == '_')
 }
 
 fn lex_line(

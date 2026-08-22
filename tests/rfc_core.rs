@@ -74,6 +74,18 @@ fn multiline_arrays_and_maps_accept_line_separators_without_commas() {
     assert!(Context::new().eval("[1}").is_err());
 }
 #[test]
+fn indented_map_literals_lower_recursively_without_changing_assignment_continuation() {
+    assert_eq!(
+        eval("record =\n  first: 1\n  nested:\n    second: 2\n  third: 3\nrecord.nested.second + record.third").as_number(),
+        Some(5.)
+    );
+    assert_eq!(eval("value =\n  1 + 2\nvalue").as_number(), Some(3.));
+    assert_eq!(
+        eval("make = ->\n  record =\n    answer: 42\n  record.answer\nmake()").as_number(),
+        Some(42.)
+    );
+}
+#[test]
 fn floor_division_and_dividend_dependent_modulo_are_strict_numeric_operators() {
     assert_eq!(
         eval("[-7 // 5, -7 % 5, -7 %% 5, 7 // -5, 7 %% -5]").to_string(),
