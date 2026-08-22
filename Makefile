@@ -4,6 +4,7 @@ fmt:
 	cargo fmt --check
 
 test:
+	cargo build --locked --bins
 	cargo test --locked
 
 release-test:
