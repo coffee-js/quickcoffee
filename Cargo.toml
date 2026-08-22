@@ -28,6 +28,10 @@ path = "src/bin/qdocco.rs"
 name = "qtest"
 path = "src/bin/qtest.rs"
 
+[[bin]]
+name = "qbench"
+path = "src/bin/qbench.rs"
+
 [[bench]]
 name = "core"
 harness = false

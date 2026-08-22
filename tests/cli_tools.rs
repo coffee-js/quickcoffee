@@ -299,6 +299,42 @@ fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
     let _ = fs::remove_file(temp);
     let _ = fs::remove_file(other);
 }
+
+#[test]
+fn qbench_json_is_guarded_and_machine_readable() {
+    let json = Command::new(bin("qbench"))
+        .args(["--json", "--iterations", "1"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let stdout = String::from_utf8_lossy(&json.stdout);
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines.len(), 4);
+    for line in lines {
+        assert!(line.starts_with('{') && line.ends_with('}'));
+        for field in [
+            "\"name\":\"",
+            "\"iterations\":1",
+            "\"expected\":\"",
+            "\"compile_ns\":",
+            "\"verify_ns\":",
+            "\"execute_ns\":",
+        ] {
+            assert!(line.contains(field), "missing {field} in {line}");
+        }
+    }
+    let text = Command::new(bin("qbench"))
+        .args(["--iterations", "1"])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    assert!(!String::from_utf8_lossy(&text.stdout).starts_with('{'));
+    let invalid = Command::new(bin("qbench"))
+        .args(["--iterations", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+}
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     let mut process = Command::new(bin("qcoffee"))
