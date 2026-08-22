@@ -608,6 +608,34 @@ fn qbench_json_is_guarded_and_machine_readable() {
         .output()
         .unwrap();
     assert_eq!(invalid_repeat.status.code(), Some(2));
+    let listed = Command::new(bin("qbench")).arg("--list").output().unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .collect::<Vec<_>>(),
+        expected_names
+    );
+    assert!(listed.stderr.is_empty());
+    let selected = Command::new(bin("qbench"))
+        .args(["--only", "map-spread", "--json", "--iterations", "1"])
+        .output()
+        .unwrap();
+    assert!(selected.status.success());
+    let selected_stdout = String::from_utf8_lossy(&selected.stdout);
+    assert_eq!(selected_stdout.lines().count(), 1);
+    assert!(selected_stdout.contains("\"name\":\"map-spread\""));
+    let unknown = Command::new(bin("qbench"))
+        .args(["--only", "missing-workload"])
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("use --list"));
+    let list_conflict = Command::new(bin("qbench"))
+        .args(["--list", "--only", "map-spread"])
+        .output()
+        .unwrap();
+    assert_eq!(list_conflict.status.code(), Some(2));
 }
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
