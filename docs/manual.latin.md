@@ -20,6 +20,7 @@ Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat 
 `qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; cum `--check` aut `--dump-bytecode` coniungi non potest.
 
 `qcoffee --interactive` (vel `-i`) unum Context inter lineas servat; `:help` imperia ostendit, `:quit`/`:exit` sessionem finiunt. Input per fistulam promptum non accipit.
+`for character, index in 'a☕中' then index` indices `[0, 1, 2]` reddit; stringae per scalas Unicode iterantur et `by` non admittunt.
 [head, tail...] = [1, 2, 3] tail ad [2, 3] ligat; rest in forma array postremum esse debet.
 Cum `--stats`, unaquaeque linea non vacua numeros instructionum et alimenti reliqui ad errorem ordinarium scribit.
 

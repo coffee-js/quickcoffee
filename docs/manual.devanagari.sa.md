@@ -20,6 +20,7 @@ strict अथवा numeric-comparison श्रृङ्खला भवति:
 `qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; `--check` अथवा `--dump-bytecode` सह न योज्यम्।
 
 `qcoffee --interactive` (वा `-i`) पङ्क्तिषु एकं Context धारयति; `:help` आदेशान् दर्शयति, `:quit`/`:exit` सत्रं समापयतः। pipe-input मध्ये prompt न भवति।
+`for character, index in 'a☕中' then index` `[0, 1, 2]` ददाति; string Unicode-scalar-क्रमेण चलति, `by` न स्वीकरोति।
 [head, tail...] = [1, 2, 3] tail-नाम्नि [2, 3] बध्नाति; array-pattern rest अन्तिमः भवति।
 `--stats` सहिते प्रत्येक non-empty पङ्क्तिः instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति।
 

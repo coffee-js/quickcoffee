@@ -6,6 +6,7 @@
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
 ## qcoffee --interactive --stats unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
+## for character, index in 'a☕中' then index indices Unicode scalarum [0, 1, 2] reddit; iteratio stringarum by non accipit.
 ## [head, tail...] = [1, 2, 3] tail ad [2, 3] ligat; rest in forma array postremum esse debet.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
