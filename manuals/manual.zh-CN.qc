@@ -11,6 +11,7 @@
 ## [head, tail...] = [1, 2, 3] 将 tail 绑定为 [2, 3]；数组模式 rest 必须居末。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
 ## qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
+## qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写标准错误。
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 ## Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
