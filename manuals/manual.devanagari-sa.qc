@@ -24,6 +24,7 @@
 ## बीजाङ्काः Rust-debug-रूपं विना स्पष्ट-नियत-bytecode-संकेतेन निर्मीयन्ते, अतः साधन-रूपपरिवर्तनं सञ्चय-कुञ्जीं न परिवर्तयति।
 ## qdocco --markdown टिप्पणीन्, सीमितं QuickCoffee-कोडं, अन्तिम-मूल्यं च पठनीय Markdown-फलके लिखति।
 ## अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति।
+## `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
 ## Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
 ## -- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।
 ## JavaScript नास्ति: prototype-chain, this, eval, अन्तःस्थ-JavaScript च न सन्ति।

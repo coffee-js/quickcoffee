@@ -24,6 +24,7 @@
 ## Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
 ## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis.
+## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.
 ## JavaScript non est: catena prototyporum, this, eval, atque JavaScript inclusum desunt.
