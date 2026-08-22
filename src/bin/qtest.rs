@@ -27,10 +27,11 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 fn usage() {
-    eprintln!("Usage: qtest [--fuel N] FILE_OR_DIRECTORY...");
+    eprintln!("Usage: qtest [--fuel N] [--stats] FILE_OR_DIRECTORY...");
 }
 fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
+    let mut stats = false;
     let mut inputs: Vec<String> = vec![];
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -46,6 +47,7 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--stats" => stats = true,
             value if !value.starts_with('-') => inputs.push(value.to_string()),
             _ => {
                 usage();
@@ -74,10 +76,16 @@ fn main() -> ExitCode {
         let outcome = fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|src| {
-                Context::new()
-                    .with_fuel(fuel)
-                    .eval(&src)
-                    .map_err(|e| e.to_string())
+                let mut context = Context::new().with_fuel(fuel);
+                let result = context.eval(&src).map_err(|e| e.to_string());
+                if stats {
+                    let execution = context.last_execution();
+                    eprintln!(
+                        "qtest stats: {} instructions={} fuel_remaining={}",
+                        label, execution.instructions, execution.fuel_remaining
+                    );
+                }
+                result
             });
         match outcome {
             Ok(Value::Bool(true)) => println!("ok {label}"),

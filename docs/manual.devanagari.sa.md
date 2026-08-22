@@ -34,6 +34,7 @@ array-item अथवा call-argument पश्चात् `...` array-वि�
 nil-सुरक्षित suffix CoffeeScript-रीत्या `record?.name`, `values?[index]`, `fn?(args)` इति। receiver `nil` चेत् फलम् `nil` भवति, index अथवा argument न मूल्यते; non-nil receiver सामान्य-strict नियमम् अनुसरति।
 
 `qtest --fuel N FILE...` प्रत्येक-document पृथक् instruction-budget ददाति; एकस्य सीमित-loop अन्यस्य budget न क्षिणोति।
+`qtest --stats` प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, `ok`-निर्गमं न परिवर्तयति।
 
 क्रमः `for item in items then expression` इति लिख्यते; binding strict-pattern अपि भवति, यथा `for [left, right] in pairs then left + right`, तथा प्रत्येक-item-स्य सर्व-binding पूर्ण-match पश्चात् एव परिवर्तते। body-मूल्यानि नूतन-array मध्ये संगृह्णाति, `when`-अस्वीकृतानि न संगृह्णाति, `break` संगृहीत-prefix ददाति। `by step`, यथा `for item in [1..9] by 3 then expression`, एकवारं-मूल्यितं positive finite integer पदं ददाति। map-क्रमे `by` नास्ति; `break` तथा `continue` अन्तःस्थितं क्रमं नियच्छतः; while, until, loop nil फलन्ति।
 

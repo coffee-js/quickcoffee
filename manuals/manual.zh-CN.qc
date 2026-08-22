@@ -5,6 +5,7 @@
 ## qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变。
 ## qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
+## qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 ## Engine::compile_program 与 Context::run_program 可共享已验证字节码以重复执行。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。

@@ -34,6 +34,7 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 欲安于空值，则书 `record?.name`、`values?[index]`、`fn?(args)`：受者为 `nil`，即得 `nil`，索引与参亦不求；非空则仍循常法，映射缺键犹报误。
 
 `qtest --fuel N FILE...` 则各篇别限其指令，故一篇受限之环，不耗他篇之数。
+`qtest --stats` 更书各篇所试指令与余燃料于标准错误，而 `ok` 之出不改。
 
 遍数组，则曰 `for item in items then expression`；其所系可为严式，如 `for [left, right] in pairs then left + right`，一项之诸名必待全合而后易。若欲间取，则置 `by step`，如 `for item in [1..9] by 3 then expression`。其体诸值聚为新数组；`when` 所拒者不聚，`break` 则反已聚之先段。其步惟求一遍，且须正有限整数；映射之遍不得用之。`break` 止其内环，`continue` 逾其一轮；while、until、loop 之值恒为 `nil`。
 

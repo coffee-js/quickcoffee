@@ -34,6 +34,7 @@ Patterna assignmentis series et maps includere possunt: `[first, {point: [x, y]}
 Suffixa tuta nil more CoffeeScript scribuntur: `record?.name`, `values?[index]`, `fn?(args)`. Si recipiens est `nil`, eventus est `nil` nec index aut argumenta aestimantur; recipiens non-nil regulas strictas ordinarias sequitur.
 
 `qtest --fuel N FILE...` singulis documentis budget instructionum separatum dat; una iteratio finita alterius budget non consumit.
+`qtest --stats` etiam numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus `ok`.
 
 Ordo scribitur `for item in items then expressio`; ligamen pattern strictum esse potest, ut `for [left, right] in pairs then left + right`, et omnes ligamina cuiusque item solum post integram congruentiam mutantur. Valores corporis in seriem novam colligit, valores `when` reiecti non colliguntur, et `break` praefixum collectum reddit. `by step`, ut `for item in [1..9] by 3 then expressio`, gradum semel aestimatum et integrum finitum positivum dat. Maps `by` non accipiunt; `break` et `continue` ordinem intimum regunt; while, until, loop nil dant.
 

@@ -5,6 +5,7 @@
 ## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet.
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
+## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
 ## Engine::compile_program et Context::run_program bytecode verificatum communicant ad iteratum cursum.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.

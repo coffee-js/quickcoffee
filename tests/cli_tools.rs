@@ -39,6 +39,30 @@ fn qtest_reports_success_and_failure() {
         .output()
         .unwrap();
     assert!(ok.status.success());
+    let stats = Command::new(bin("qtest"))
+        .args(["--stats", "tests/scripts/arithmetic.qc"])
+        .output()
+        .unwrap();
+    assert!(stats.status.success());
+    assert!(String::from_utf8_lossy(&stats.stdout).contains("ok "));
+    let stats_stderr = String::from_utf8_lossy(&stats.stderr);
+    assert!(stats_stderr.contains("qtest stats:"));
+    assert!(stats_stderr.contains("instructions="));
+    assert!(stats_stderr.contains("fuel_remaining="));
+    let invalid =
+        std::env::temp_dir().join(format!("qcoffee-qtest-invalid-{}.qc", std::process::id()));
+    fs::write(&invalid, "@\n").unwrap();
+    let invalid_stats = Command::new(bin("qtest"))
+        .args(["--stats", invalid.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!invalid_stats.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid_stats.stderr).contains("qtest stats:")
+            && String::from_utf8_lossy(&invalid_stats.stderr)
+                .contains("instructions=0 fuel_remaining=0")
+    );
+    let _ = fs::remove_file(&invalid);
     let directory = Command::new(bin("qtest"))
         .arg("tests/scripts")
         .output()
@@ -57,6 +81,14 @@ fn qtest_reports_success_and_failure() {
         .unwrap();
     assert!(!exhausted.status.success());
     assert!(String::from_utf8_lossy(&exhausted.stderr).contains("fuel exhausted"));
+    let exhausted_stats = Command::new(bin("qtest"))
+        .args(["--stats", "--fuel", "10", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!exhausted_stats.status.success());
+    let exhausted_stats_stderr = String::from_utf8_lossy(&exhausted_stats.stderr);
+    assert!(exhausted_stats_stderr.contains("qtest stats:"));
+    assert!(exhausted_stats_stderr.contains("instructions=10 fuel_remaining=0"));
     let _ = fs::remove_file(temp);
 }
 #[test]

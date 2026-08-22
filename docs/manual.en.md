@@ -100,6 +100,7 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 `qdocco FILE -o FILE.html` verifies and renders executable documentation; `qtest FILE_OR_DIRECTORY...` recursively discovers `.qc` files and passes only when every final value is `true`.
 
 `qtest --fuel N FILE_OR_DIRECTORY...` gives every discovered test file its own instruction budget, so a deliberately bounded loop cannot consume the budget of another test.
+`qtest --stats` additionally writes each file's instruction count and remaining fuel to stderr without changing its `ok` output.
 
 Multiline arrays and maps may omit commas at line boundaries; calls and ordinary parentheses still require explicit separators.
 
