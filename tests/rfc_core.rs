@@ -17,6 +17,25 @@ fn arithmetic_precedence_and_arrays() {
     assert!(Context::new().eval("1.5 & 1").is_err());
 }
 #[test]
+fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
+    assert_eq!(
+        eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),
+        Some(2.)
+    );
+    assert_eq!(
+        eval("{name = 'coffee', count = len(name)} = {}\ncount").as_number(),
+        Some(6.)
+    );
+    assert_eq!(
+        eval("f = ([first = 10, second = first + 1]) -> second\nf([nil])").as_number(),
+        Some(11.)
+    );
+    assert!(Context::new().eval("[x = 1, y] = []").is_err());
+    assert!(Context::new().eval("[x = 1] = [2, 3]").is_err());
+    let chunk = compile("[x = 1] = []\nx").unwrap();
+    assert!(chunk.verify().is_ok());
+}
+#[test]
 fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert_eq!(
         eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),

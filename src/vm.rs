@@ -565,6 +565,16 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn eval_default(&mut self, chunk: Rc<Chunk>, env: Env) -> Result<Value, Error> {
+        let mut nested = Vm {
+            fuel: self.fuel,
+            instructions: self.instructions,
+        };
+        let result = nested.run(chunk, env);
+        self.fuel = nested.fuel;
+        self.instructions = nested.instructions;
+        result
+    }
     fn stats(&self) -> ExecutionStats {
         ExecutionStats {
             instructions: self.instructions,
@@ -622,7 +632,14 @@ impl Vm {
                     Instruction::Destructure(pattern) => {
                         let value = pop(frame)?;
                         let mut bindings = vec![];
-                        bind_pattern(&pattern, &value, &mut bindings)?;
+                        let env = frame.env.clone();
+                        let snapshot = env.borrow().values.clone();
+                        if let Err(error) =
+                            bind_pattern(self, &pattern, Some(&value), &mut bindings, &env)
+                        {
+                            env.borrow_mut().values = snapshot;
+                            return Err(error);
+                        }
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -862,8 +879,19 @@ impl Vm {
                                 }
                             } else {
                                 let mut bindings = vec![];
+                                let snapshot = frame.env.borrow().values.clone();
                                 for (pattern, value) in patterns.iter().zip(values.iter()) {
-                                    bind_pattern(pattern, value, &mut bindings)?;
+                                    let env = frame.env.clone();
+                                    if let Err(error) = bind_pattern(
+                                        self,
+                                        pattern,
+                                        Some(value),
+                                        &mut bindings,
+                                        &env,
+                                    ) {
+                                        frame.env.borrow_mut().values = snapshot;
+                                        return Err(error);
+                                    }
                                 }
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
@@ -1011,7 +1039,7 @@ impl Vm {
                     }
                 }
                 Ok(Step::Call { callee, args }) => {
-                    if let Err(error) = call(&mut frames, callee, args)
+                    if let Err(error) = call(self, &mut frames, callee, args)
                         && !handle_error(&mut frames, &error)
                     {
                         return Err(error);
@@ -1026,7 +1054,12 @@ impl Vm {
         }
     }
 }
-fn call(frames: &mut Vec<Frame>, callee: Value, args: Vec<Value>) -> Result<(), Error> {
+fn call(
+    vm: &mut Vm,
+    frames: &mut Vec<Frame>,
+    callee: Value,
+    args: Vec<Value>,
+) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
             FunctionKind::Native(function) => {
@@ -1056,7 +1089,13 @@ fn call(frames: &mut Vec<Frame>, callee: Value, args: Vec<Value>) -> Result<(), 
                 for (index, pattern) in params.iter().enumerate() {
                     let value = args.get(index).cloned().unwrap_or(Value::Nil);
                     let mut bindings = vec![];
-                    bind_pattern(pattern, &value, &mut bindings)?;
+                    let snapshot = local.borrow().values.clone();
+                    if let Err(error) =
+                        bind_pattern(vm, pattern, Some(&value), &mut bindings, &local)
+                    {
+                        local.borrow_mut().values = snapshot;
+                        return Err(error);
+                    }
                     let mut environment = local.borrow_mut();
                     for (key, value) in bindings {
                         environment.values.insert(key, value);
@@ -1232,41 +1271,60 @@ fn jump(f: &mut Frame, delta: i32) -> Result<(), Error> {
     Ok(())
 }
 fn bind_pattern(
+    vm: &mut Vm,
     pattern: &Pattern,
-    value: &Value,
+    value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
+    env: &Env,
 ) -> Result<(), Error> {
     match pattern {
-        Pattern::Ignore => Ok(()),
+        Pattern::Ignore => value.map_or_else(
+            || Err(Error::runtime("missing value for pattern")),
+            |_| Ok(()),
+        ),
         Pattern::Bind(name) => {
+            let value = value.ok_or_else(|| Error::runtime("missing value for pattern"))?;
             bindings.push((name.clone(), value.clone()));
+            if name != "_" {
+                env.borrow_mut().values.insert(name.clone(), value.clone());
+            }
             Ok(())
         }
+        Pattern::Default { pattern, default } => {
+            let value = match value {
+                Some(value) if !matches!(value, Value::Nil) => value.clone(),
+                _ => vm.eval_default(default.clone(), env.clone())?,
+            };
+            bind_pattern(vm, pattern, Some(&value), bindings, env)
+        }
         Pattern::Array(patterns) => {
-            let Value::Array(values) = value else {
+            let Some(Value::Array(values)) = value else {
                 return Err(Error::runtime("array destructuring expects an array"));
             };
-            if values.len() != patterns.len() {
+            if values.len() > patterns.len() {
                 return Err(Error::runtime(format!(
                     "array destructuring expected {} values, got {}",
                     patterns.len(),
                     values.len()
                 )));
             }
-            for (pattern, value) in patterns.iter().zip(values.iter()) {
-                bind_pattern(pattern, value, bindings)?;
+            for (index, pattern) in patterns.iter().enumerate() {
+                bind_pattern(vm, pattern, values.get(index), bindings, env)?;
             }
             Ok(())
         }
         Pattern::Map(fields) => {
-            let Value::Map(map) = value else {
+            let Some(Value::Map(map)) = value else {
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields {
-                let value = map
-                    .get(key)
-                    .ok_or_else(|| Error::runtime(format!("map key '{key}' not found")))?;
-                bind_pattern(pattern, value, bindings)?;
+                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
             }
             Ok(())
         }
