@@ -2,7 +2,7 @@
 
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有原型链、`this`、`eval` 或嵌入 JavaScript。
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0110-rust-msrv-contract.md](RFCs/0110-rust-msrv-contract.md)。
+当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0111-release-test-gate.md](RFCs/0111-release-test-gate.md)。
 构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
 
 ```coffee
@@ -44,7 +44,7 @@ cargo run --bin qbench -- --version
 
 ## 验收
 
-`make check` 运行格式检查、全部测试（含外部嵌入 API 集成测试和 1,024 条确定性编译压力语料）、零警告 Clippy 和五份可执行手册校验；`make docs` 从文学编程源重新生成 HTML；`make bench` 运行 release 基准。项目禁止 `unsafe`。
+`make check` 运行格式检查、debug 与 release 两套全部测试（含外部嵌入 API 集成测试和 1,024 条确定性编译压力语料）、零警告 Clippy 和五份可执行手册校验；`make docs` 从文学编程源重新生成 HTML；`make bench` 运行 release 基准。项目禁止 `unsafe`。
 
 手册源在 `manuals/`，每份都是可执行的 Docco 输入。生成 HTML：
 
