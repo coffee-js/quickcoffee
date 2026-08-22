@@ -1018,6 +1018,23 @@ fn string_iteration_uses_unicode_scalars_and_optional_scalar_indices() {
     assert!(chunk.disassemble().contains("IterStartEnumerable"));
 }
 #[test]
+fn do_iifes_forward_same_named_outer_arguments() {
+    assert_eq!(
+        eval("value = 41\ndo (value) -> value + 1").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("left = 20\nright = 22\ndo (left, right) -> left + right").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("for filename in ['a', 'b'] then do (filename) -> filename").to_string(),
+        "[a, b]"
+    );
+    assert_eq!(eval("do -> 42").as_number(), Some(42.));
+    assert!(Context::new().eval("do (value = 1) -> value").is_err());
+}
+#[test]
 fn for_loop_bindings_support_strict_recursive_patterns_atomically() {
     assert_eq!(
         eval("for [left, right] in [[1, 2], [3, 4]] then left + right").to_string(),
