@@ -573,6 +573,13 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     );
     assert!(missing_stdout.ends_with("\",\"line\":null}\n"));
     assert!(missing.stderr.is_empty());
+
+    let reverse_conflict = Command::new(bin("qcoffee"))
+        .args(["--check", "tests/scripts/arithmetic.qc", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(reverse_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&reverse_conflict.stderr).contains("--json"));
 }
 
 #[test]

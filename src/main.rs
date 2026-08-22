@@ -202,7 +202,7 @@ fn main() -> ExitCode {
             "--dump-bytecode" => {
                 if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -229,7 +229,7 @@ fn main() -> ExitCode {
             "--check" => {
                 if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -255,7 +255,7 @@ fn main() -> ExitCode {
             "--fingerprint" => {
                 if source.is_some() || dump || check || fingerprint || stats || json {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -306,6 +306,12 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         }
+    }
+    if json && (dump || check || fingerprint) {
+        eprintln!(
+            "--check, --dump-bytecode, --fingerprint, and --json are execution-mode alternatives"
+        );
+        return ExitCode::from(2);
     }
     if interactive {
         if source.is_some() || check || dump || fingerprint || json {
