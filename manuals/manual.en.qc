@@ -13,6 +13,7 @@
 ## qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
 ## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
+## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
 ## This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.
