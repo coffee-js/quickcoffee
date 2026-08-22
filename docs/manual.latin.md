@@ -90,3 +90,5 @@ In seriebus et mapis per plures lineas, commata omitti possunt; argumenta functi
 Post assignationem solam (`record =`) mapa per indentationem scribi potest; claves interiores sine prototypo fiunt, nec continuatio ordinaria confunditur.
 
 In una linea logica, functio sine parenthesibus vocari potest: `implicit_answer = implicit_add 20, 22`; apud comparationes vel limites ordinis parenthesibus uti licet.
+
+`qtest --json` unam rem stabilem pro quoque testium documento scribit, `qtest --tap` TAP 13 reddit; `qcoffee --fingerprint FILE` clavem bytecodicis canonice verificati sine exsecutione ostendit; `qbench --json` tempora compilationis, verificationis et cursus cum custodia semantica metitur; `qdocco --markdown` documentum literarium ad recensionem scribit. Hospes `Context::set_fuel` inter cursus mutare potest et `cargo run --example embed` exemplum integrum currere.
