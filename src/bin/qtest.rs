@@ -27,7 +27,9 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 fn usage() {
-    eprintln!("Usage: qtest [--fuel N] [--stats] [--json|--tap] FILE_OR_DIRECTORY...");
+    eprintln!(
+        "Usage: qtest [--fuel N] [--stats] [--json|--tap] FILE_OR_DIRECTORY...\n       qtest --version"
+    );
 }
 fn json_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -63,6 +65,10 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--version" => {
+                println!("qtest {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
             "--help" | "-h" => {
                 usage();
                 return ExitCode::SUCCESS;

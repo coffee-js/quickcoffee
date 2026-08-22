@@ -113,6 +113,19 @@ fn qtest_reports_success_and_failure() {
     assert!(exhausted_stats_stderr.contains("instructions=10 fuel_remaining=0"));
     let _ = fs::remove_file(temp);
 }
+
+#[test]
+fn every_cli_reports_the_same_package_version() {
+    for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
+        let output = Command::new(bin(name)).arg("--version").output().unwrap();
+        assert!(output.status.success(), "{name} --version failed");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("{name} {}\n", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(output.stderr.is_empty(), "{name} --version wrote stderr");
+    }
+}
 #[test]
 fn qtest_json_output_is_one_stable_record_per_file() {
     let ok = Command::new(bin("qtest"))
