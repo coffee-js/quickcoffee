@@ -26,6 +26,7 @@ cargo run -- --check example.qc
 cargo run -- --dump-bytecode example.qc
 cargo run -- --fingerprint example.qc
 cargo run --release --bin qbench -- --json --iterations 100
+cargo run --release --bin qbench -- --json --iterations 100 --repeat 3
 cargo run --example embed
 cargo run --bin qdocco -- example.qc -o example.html
 cargo run --bin qdocco -- --markdown example.qc -o example.md
