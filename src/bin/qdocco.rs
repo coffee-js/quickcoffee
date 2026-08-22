@@ -1,7 +1,12 @@
 //! Literate-programming renderer and checker for QuickCoffee sources.
 
 use quickcoffee::{Context, Engine, Value};
-use std::{env, fs, path::PathBuf, process::ExitCode};
+use std::{
+    env, fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 fn usage() {
     eprintln!("Usage: qdocco [--check | --markdown] FILE [-o OUTPUT]\n       qdocco --version");
@@ -11,6 +16,32 @@ fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => left == right,
     }
+}
+fn write_output(destination: &Path, document: &str) -> io::Result<()> {
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("qdocco-output");
+    let temporary = destination.with_file_name(format!(
+        ".{file_name}.quickcoffee-{}.tmp",
+        std::process::id()
+    ));
+    let mut created = false;
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        created = true;
+        file.write_all(document.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, destination)
+    })();
+    if result.is_err() && created {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 fn escape(input: &str) -> String {
     input
@@ -142,11 +173,44 @@ fn main() -> ExitCode {
         } else {
             render(&source, &result.to_string())
         };
-        if let Err(e) = fs::write(&destination, document) {
+        if let Err(e) = write_output(&destination, &document) {
             eprintln!("write error: {e}");
             return ExitCode::from(1);
         }
         println!("wrote {}", destination.display());
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_output;
+    use std::{fs, path::PathBuf};
+
+    #[test]
+    fn output_replacement_is_exclusive_and_cleans_up_on_collision() {
+        let directory =
+            std::env::temp_dir().join(format!("quickcoffee-qdocco-output-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temporary directory");
+        let destination = directory.join("document.html");
+        fs::write(&destination, "old").expect("seed output");
+        let temporary = PathBuf::from(format!(
+            ".document.html.quickcoffee-{}.tmp",
+            std::process::id()
+        ));
+        let temporary = directory.join(temporary);
+        fs::write(&temporary, "reserved").expect("reserve temporary output");
+
+        assert!(write_output(&destination, "new").is_err());
+        assert_eq!(fs::read_to_string(&destination).expect("old output"), "old");
+        assert_eq!(
+            fs::read_to_string(&temporary).expect("reserved temporary output"),
+            "reserved"
+        );
+
+        fs::remove_file(&temporary).expect("release temporary output");
+        write_output(&destination, "new").expect("replace output");
+        assert_eq!(fs::read_to_string(&destination).expect("new output"), "new");
+        fs::remove_dir_all(directory).expect("remove temporary directory");
+    }
 }
