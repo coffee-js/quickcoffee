@@ -45,15 +45,21 @@ const WORKLOADS: &[Workload] = &[
 ];
 
 fn usage() {
-    eprintln!("Usage: qbench [--iterations N] [--json]\n       qbench --version");
+    eprintln!("Usage: qbench [--iterations N] [--repeat N] [--json]\n       qbench --version");
 }
 
 fn json_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn median(samples: &mut [u128]) -> u128 {
+    samples.sort_unstable();
+    samples[samples.len() / 2]
+}
+
 fn main() -> ExitCode {
     let mut iterations = 100;
+    let mut repeat = 1;
     let mut json = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -74,6 +80,13 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--repeat" => match args.next().and_then(|value| value.parse().ok()) {
+                Some(value) if value > 0 => repeat = value,
+                _ => {
+                    eprintln!("--repeat requires a positive integer");
+                    return ExitCode::from(2);
+                }
+            },
             _ => {
                 usage();
                 return ExitCode::from(2);
@@ -82,40 +95,49 @@ fn main() -> ExitCode {
     }
     let engine = Engine::new();
     for workload in WORKLOADS {
-        let start = Instant::now();
-        for _ in 0..iterations {
-            engine
-                .compile(workload.source)
+        let mut compile_samples = Vec::with_capacity(repeat);
+        let mut verify_samples = Vec::with_capacity(repeat);
+        let mut execute_samples = Vec::with_capacity(repeat);
+        for _ in 0..repeat {
+            let start = Instant::now();
+            for _ in 0..iterations {
+                engine
+                    .compile(workload.source)
+                    .expect("qbench workload must compile");
+            }
+            compile_samples.push(start.elapsed().as_nanos());
+            let program = engine
+                .compile_program(workload.source)
                 .expect("qbench workload must compile");
-        }
-        let compile_ns = start.elapsed().as_nanos();
-        let program = engine
-            .compile_program(workload.source)
-            .expect("qbench workload must compile");
 
-        let start = Instant::now();
-        for _ in 0..iterations {
-            program.verify().expect("qbench workload must verify");
-        }
-        let verify_ns = start.elapsed().as_nanos();
+            let start = Instant::now();
+            for _ in 0..iterations {
+                program.verify().expect("qbench workload must verify");
+            }
+            verify_samples.push(start.elapsed().as_nanos());
 
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let mut context = Context::new().with_fuel(100_000);
-            let value = context
-                .run_program(&program)
-                .expect("qbench workload must execute");
-            assert_eq!(value.to_string(), workload.expected, "{}", workload.name);
+            let start = Instant::now();
+            for _ in 0..iterations {
+                let mut context = Context::new().with_fuel(100_000);
+                let value = context
+                    .run_program(&program)
+                    .expect("qbench workload must execute");
+                assert_eq!(value.to_string(), workload.expected, "{}", workload.name);
+            }
+            execute_samples.push(start.elapsed().as_nanos());
         }
-        let execute_ns = start.elapsed().as_nanos();
+        let compile_ns = median(&mut compile_samples);
+        let verify_ns = median(&mut verify_samples);
+        let execute_ns = median(&mut execute_samples);
 
         if json {
             println!(
-                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"expected\":\"{}\",\"compile_ns\":{},\"verify_ns\":{},\"execute_ns\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"verify_ns\":{},\"execute_ns\":{}}}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
                 iterations,
+                repeat,
                 json_escape(workload.expected),
                 compile_ns,
                 verify_ns,
@@ -123,11 +145,12 @@ fn main() -> ExitCode {
             );
         } else {
             println!(
-                "schema={} version={} {} iterations={} compile_ns={} verify_ns={} execute_ns={} expected={}",
+                "schema={} version={} {} iterations={} repeat={} compile_ns={} verify_ns={} execute_ns={} expected={}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 workload.name,
                 iterations,
+                repeat,
                 compile_ns,
                 verify_ns,
                 execute_ns,
