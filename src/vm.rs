@@ -631,6 +631,7 @@ enum IterationKind {
     String {
         values: Rc<Vec<Value>>,
         position: usize,
+        step: usize,
     },
     Map {
         entries: Vec<(String, Value)>,
@@ -860,11 +861,6 @@ impl Vm {
                                 },
                             }),
                             Value::String(value) => {
-                                if step != 1 {
-                                    return Err(Error::runtime(
-                                        "string iteration does not support a by step",
-                                    ));
-                                }
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(
@@ -876,6 +872,7 @@ impl Vm {
                                                 .collect(),
                                         ),
                                         position: 0,
+                                        step,
                                     },
                                 });
                             }
@@ -922,7 +919,11 @@ impl Vm {
                                     }
                                     value
                                 }
-                                IterationKind::String { values, position } => {
+                                IterationKind::String {
+                                    values,
+                                    position,
+                                    step,
+                                } => {
                                     let value = values.get(*position).cloned().map(|value| {
                                         if patterns.len() == 2 {
                                             vec![value, Value::Number(*position as f64)]
@@ -931,7 +932,7 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position += 1;
+                                        *position = position.saturating_add(*step);
                                     }
                                     value
                                 }

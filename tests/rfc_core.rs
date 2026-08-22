@@ -983,9 +983,34 @@ fn string_iteration_uses_unicode_scalars_and_optional_scalar_indices() {
         eval("for character in 'a☕中' when character == '☕' then character").to_string(),
         "[☕]"
     );
+    assert_eq!(
+        eval("for character in 'a☕中x' by 2 then character").to_string(),
+        "[a, 中]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中x' by 2 then index").to_string(),
+        "[0, 2]"
+    );
+    assert_eq!(
+        eval("step = 2\nfor character in 'a☕中x' by step then character").to_string(),
+        "[a, 中]"
+    );
+    assert_eq!(
+        eval("for character in 'a☕中x' by 2 when character != '中' then character").to_string(),
+        "[a]"
+    );
+    assert_eq!(
+        eval("for character in '' by 2 then character").to_string(),
+        "[]"
+    );
     assert!(
         Context::new()
-            .eval("for character in 'abc' by 2 then character")
+            .eval("for character in 'abc' by 0 then character")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("for character in 'abc' by 1.5 then character")
             .is_err()
     );
     let chunk = compile("for character in 'abc' then character").unwrap();
