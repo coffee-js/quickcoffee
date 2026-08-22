@@ -41,7 +41,7 @@ cargo run --bin qbench -- --version
 
 ## 验收
 
-`make check` 运行格式检查、全部测试（含 1,024 条确定性编译压力语料）、零警告 Clippy 和五份可执行手册校验；`make docs` 从文学编程源重新生成 HTML；`make bench` 运行 release 基准。项目禁止 `unsafe`。
+`make check` 运行格式检查、全部测试（含外部嵌入 API 集成测试和 1,024 条确定性编译压力语料）、零警告 Clippy 和五份可执行手册校验；`make docs` 从文学编程源重新生成 HTML；`make bench` 运行 release 基准。项目禁止 `unsafe`。
 
 手册源在 `manuals/`，每份都是可执行的 Docco 输入。生成 HTML：
 
