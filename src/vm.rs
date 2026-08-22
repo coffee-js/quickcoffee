@@ -937,7 +937,7 @@ impl Vm {
                         let mut values = BTreeMap::new();
                         for segment in segments {
                             let Value::Map(segment) = segment else {
-                                return Err(Error::runtime("map splat expects a map"));
+                                return Err(Error::runtime("map spread expects a map"));
                             };
                             values.extend(
                                 segment

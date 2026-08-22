@@ -1,6 +1,6 @@
 ## QuickCoffee 用法
 ##
-## 映射可展其项，后书之键胜前书：{...defaults, theme: 'dark}。
+## 映射可展其项，后书之键胜前书：{...defaults, theme: 'dark'}。
 ## 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无原型之链、this、eval 与内嵌之文。
 ## # 注一行；### … ### 注一段，弗相嵌，先于布局析法略之。
 ## 名从 Unicode XID 之法，合附之记可续名，而机不正其 Unicode。
