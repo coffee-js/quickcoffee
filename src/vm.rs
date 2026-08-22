@@ -2,7 +2,12 @@ use crate::{
     bytecode::{Chunk, Constant, Instruction, Pattern},
     compile,
 };
-use std::{cell::RefCell, collections::BTreeMap, fmt, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeMap,
+    fmt,
+    rc::Rc,
+};
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
 
@@ -263,23 +268,44 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
 
 #[derive(Clone, Default)]
 pub struct Engine;
-/// A verified, reference-counted compiled program for repeated execution.
+/// A reference-counted compiled program for repeated execution.
 ///
 /// The shared storage is private so embedding callers do not need to manage
 /// `Rc` themselves; cloning a `Program` is cheap and does not copy bytecode.
+/// Programs produced by [`Engine::compile_program`] are verified immediately;
+/// programs wrapped from a raw [`Chunk`] verify on their first execution.
+#[derive(Debug)]
+struct ProgramInner {
+    chunk: Rc<Chunk>,
+    verified: Cell<bool>,
+}
 #[derive(Clone, Debug)]
-pub struct Program(Rc<Chunk>);
+pub struct Program(Rc<ProgramInner>);
 impl From<Chunk> for Program {
     fn from(chunk: Chunk) -> Self {
-        Self(Rc::new(chunk))
+        Self(Rc::new(ProgramInner {
+            chunk: Rc::new(chunk),
+            verified: Cell::new(false),
+        }))
     }
 }
 impl Program {
     pub fn verify(&self) -> Result<(), Error> {
-        self.0.verify()
+        let result = self.0.chunk.verify();
+        if result.is_ok() {
+            self.0.verified.set(true);
+        }
+        result
     }
     pub fn disassemble(&self) -> String {
-        self.0.disassemble()
+        self.0.chunk.disassemble()
+    }
+    fn ensure_verified(&self) -> Result<(), Error> {
+        if self.0.verified.get() {
+            Ok(())
+        } else {
+            self.verify()
+        }
     }
 }
 impl Engine {
@@ -291,7 +317,9 @@ impl Engine {
     }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
-        Ok(self.compile(source)?.into())
+        let program: Program = self.compile(source)?.into();
+        program.verify()?;
+        Ok(program)
     }
 }
 /// Public counters for the most recent bytecode execution in a context.
@@ -362,12 +390,12 @@ impl Context {
     }
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
-        program.verify()?;
+        program.ensure_verified()?;
         let mut vm = Vm {
             fuel: self.fuel,
             instructions: 0,
         };
-        let result = vm.run(Rc::clone(&program.0), self.global.clone());
+        let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
         result
     }

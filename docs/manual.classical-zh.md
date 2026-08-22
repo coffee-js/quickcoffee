@@ -74,7 +74,7 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 
 嵌入方遇误，可由 `error.kind()` 别 `ErrorKind::Parse`、`Verify`、`Runtime`；`error.message()` 得其详，`error.position()` 或得从一始之源码行，不必析展示之文。
 
-欲屡行已编之文，可用 `Engine::compile_program` 得共享 `Program`，以 `Context::run_program` 行之；复制其柄，不复制字节码。
+欲屡行已编之文，可用 `Engine::compile_program` 编验一次得共享 `Program`，以 `Context::run_program` 行之；复制其柄，不复制字节码，亦不重验。
 
 `Context::last_execution()` 可取最近行止之 `ExecutionStats`，载所试指令数 `instructions` 及余燃料 `fuel_remaining`；编验之误，不易前录。
 

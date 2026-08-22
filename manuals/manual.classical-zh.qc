@@ -11,7 +11,7 @@
 ## qtest --fuel N 者，为各可行文别限其指令之数。
 ## qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
-## Engine::compile_program 与 Context::run_program 共用已验之字节码，可屡行之。
+## Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。
 ## Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 ## -- 后之参，以常字符串数组 argv 见于文中。
 ## 其内府皆常函，如 print、len、type、range、str、keys、values、join、split、assert。

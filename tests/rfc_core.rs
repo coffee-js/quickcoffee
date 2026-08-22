@@ -1,5 +1,5 @@
 use quickcoffee::{
-    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Value, compile,
+    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Program, Value, compile,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -49,6 +49,10 @@ fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
     let failed = cx.last_execution();
     assert!(failed.instructions > 0);
     assert!(failed.instructions + failed.fuel_remaining <= 100);
+
+    let invalid_program = Program::from(Chunk::default());
+    assert!(cx.run_program(&invalid_program).is_err());
+    assert_eq!(cx.last_execution(), failed);
 
     let mut exhausted = cx.with_fuel(5);
     assert!(exhausted.eval("while true then 1").is_err());
@@ -1200,6 +1204,11 @@ fn verifier_rejects_untrusted_bad_bytecode() {
     };
     assert!(bad_constant.verify().is_err());
     assert!(Context::new().run(bad_constant).is_err());
+    let bad_program = Program::from(Chunk {
+        constants: vec![],
+        code: vec![Instruction::Pop, Instruction::Return],
+    });
+    assert!(Context::new().run_program(&bad_program).is_err());
     let bad_jump = Chunk {
         constants: vec![],
         code: vec![Instruction::Jump(9), Instruction::Return],

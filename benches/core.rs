@@ -187,6 +187,12 @@ fn measure(engine: &Engine, workload: Workload) {
     let program = engine
         .compile_program(workload.source)
         .expect("benchmark program compiles");
+    let start = Instant::now();
+    for _ in 0..workload.iterations {
+        let verified = program.verify().is_ok();
+        assert!(black_box(verified), "benchmark bytecode verifies");
+    }
+    let verify = start.elapsed();
     let mut semantic_context = Context::new().with_fuel(100_000);
     let observed = semantic_context
         .run_program(&program)
@@ -213,6 +219,11 @@ fn measure(engine: &Engine, workload: Workload) {
         "  compile: {:.3}ms total, {:.0} programs/s",
         compile.as_secs_f64() * 1_000.,
         workload.iterations as f64 / compile.as_secs_f64()
+    );
+    println!(
+        "  verify: {:.3}ms total, {:.0} programs/s",
+        verify.as_secs_f64() * 1_000.,
+        workload.iterations as f64 / verify.as_secs_f64()
     );
     println!(
         "  execute: {:.3}ms total, {:.0} programs/s",

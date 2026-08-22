@@ -74,7 +74,7 @@ In loco sententiae, `n = n + 1 while n < 3` est ordo postfixus aequalis while pr
 
 Hospes errorem structum accipit: `error.kind()` dat `ErrorKind::Parse`, `Verify`, aut `Runtime`; `error.message()` detail sine analysi textus ostensi dat, et `error.position()` lineam fontis a uno numeratam interdum dat.
 
-Ad iterandum programmatum compilatum, `Engine::compile_program` dat `Program` commune et `Context::run_program` illud currit; clavis eius sine copia bytecodicis clonatur.
+Ad iterandum programmatum compilatum, `Engine::compile_program` semel compilat et verificat, `Program` commune dat, et `Context::run_program` illud currit; clavis eius sine copia bytecodicis vel repetita verificatione clonatur.
 
 `Context::last_execution()` reddit `ExecutionStats` publicas de ultimo cursu prospero vel errore temporis, cum `instructions` et `fuel_remaining`; errores compilationis vel verificationis memoriam priorem servant.
 

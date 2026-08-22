@@ -74,7 +74,7 @@ array-slice `items[start..end]` अन्तं गृह्णाति, `items
 
 host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Parse`/`Verify`/`Runtime` ददाति, `error.message()` प्रदर्शन-पाठं न विश्लेष्य विवरणं ददाति, `error.position()` कदाचित् एकतः गणितं स्रोत-पङ्क्तिं ददाति।
 
-पुनःचालनाय `Engine::compile_program` साझा `Program` निर्माति, `Context::run_program` तं चालयति; handle-स्य प्रतिलिपिः bytecode न प्रतिलिपयति।
+पुनःचालनाय `Engine::compile_program` एकवारं compile तथा verify कृत्वा साझा `Program` निर्माति, `Context::run_program` तं चालयति; handle-स्य प्रतिलिपिः bytecode न प्रतिलिपयति, पुनः verification अपि न करोति।
 
 `Context::last_execution()` अन्तिम-सफलतायाः वा runtime-विफलतायाः `ExecutionStats` ददाति; `instructions` तथा `fuel_remaining` तत्र स्तः, compilation अथवा verification-दोषः पूर्वलेखं न परिवर्तयति।
 

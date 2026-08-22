@@ -7,7 +7,7 @@
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
-## Engine::compile_program et Context::run_program bytecode verificatum communicant ad iteratum cursum.
+## Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.
 ## JavaScript non est: catena prototyporum, this, eval, atque JavaScript inclusum desunt.

@@ -7,7 +7,7 @@
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
 ## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
-## Engine::compile_program and Context::run_program share verified bytecode for repeated embedding calls.
+## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
 ## This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.

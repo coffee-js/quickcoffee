@@ -108,7 +108,7 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 
 `Value::from`、`Value::string`、`Value::array` 与 `Value::map` 可以直接构造宿主值，无需接触 VM 的引用计数内部表示。宿主回调可返回 `Error::runtime("message")`，脚本可用 `catch` 捕获。
 
-若需重复执行，使用 `Engine::compile_program` 编译一次，再将共享 `Program` 传给 `run_program`；克隆该句柄不会复制字节码。
+若需重复执行，使用 `Engine::compile_program` 编译并验证一次，再将共享 `Program` 传给 `run_program`；克隆该句柄不会复制字节码或重复验证。
 
 `Context::last_execution()` 可读最近一次成功或运行时失败的 `ExecutionStats`，其中有执行指令数 `instructions` 与余下燃料 `fuel_remaining`；编译或验证错误不会改写上一条记录。
 
