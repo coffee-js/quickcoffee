@@ -20,7 +20,7 @@
 ## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
-## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.
+## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.
 ## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 ## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.

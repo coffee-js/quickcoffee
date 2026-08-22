@@ -29,7 +29,7 @@
 <p>qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。</p>
 <p>指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。</p>
 <p>qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。</p>
-<p>嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失。</p>
+<p>嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。</p>
 <p>cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。</p>
 <p>宿主可用 Value::kind() 别其类，Value::is_nil() 验 nil，不窥其内容器。</p>
 <p>Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。</p>
