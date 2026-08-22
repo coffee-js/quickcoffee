@@ -6,6 +6,7 @@
 <p>qtest --fuel N 为每份可执行文档设置独立指令预算。</p>
 <p>Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime(&quot;message&quot;)，error.position() 可给出从 1 开始的源码行。</p>
 <p>Engine::compile_program 与 Context::run_program 可共享已验证字节码以重复执行。</p>
+<p>Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。</p>
 <p>-- 后的参数以普通字符串数组 argv 暴露给程序。</p>
 <p>它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。</p>
 <p># 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。</p>

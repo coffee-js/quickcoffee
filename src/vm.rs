@@ -294,10 +294,20 @@ impl Engine {
         Ok(self.compile(source)?.into())
     }
 }
+/// Public counters for the most recent bytecode execution in a context.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExecutionStats {
+    /// Number of VM instructions attempted, including the instruction that
+    /// produced a runtime error.
+    pub instructions: u64,
+    /// Fuel left after the execution stopped.
+    pub fuel_remaining: u64,
+}
 pub struct Context {
     engine: Engine,
     global: Env,
     fuel: u64,
+    last_execution: ExecutionStats,
 }
 impl Default for Context {
     fn default() -> Self {
@@ -311,6 +321,7 @@ impl Context {
             engine: Engine::new(),
             global,
             fuel: 1_000_000,
+            last_execution: ExecutionStats::default(),
         };
         x.install_builtins();
         x
@@ -318,6 +329,11 @@ impl Context {
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.fuel = fuel;
         self
+    }
+    /// Returns counters from the most recent successful or failed execution.
+    /// Compilation and verification errors do not replace the previous record.
+    pub fn last_execution(&self) -> ExecutionStats {
+        self.last_execution
     }
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
         self.global.borrow_mut().values.insert(name.into(), value);
@@ -347,7 +363,13 @@ impl Context {
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
         program.verify()?;
-        Vm { fuel: self.fuel }.run(Rc::clone(&program.0), self.global.clone())
+        let mut vm = Vm {
+            fuel: self.fuel,
+            instructions: 0,
+        };
+        let result = vm.run(Rc::clone(&program.0), self.global.clone());
+        self.last_execution = vm.stats();
+        result
     }
     fn install_builtins(&mut self) {
         self.add_native("print", |xs| {
@@ -503,6 +525,7 @@ enum IterationKind {
 }
 struct Vm {
     fuel: u64,
+    instructions: u64,
 }
 enum Step {
     Continue,
@@ -510,6 +533,12 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn stats(&self) -> ExecutionStats {
+        ExecutionStats {
+            instructions: self.instructions,
+            fuel_remaining: self.fuel,
+        }
+    }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
         let mut frames = vec![Frame {
             chunk,
@@ -524,6 +553,7 @@ impl Vm {
                 return Err(Error::runtime("execution fuel exhausted"));
             }
             self.fuel -= 1;
+            self.instructions += 1;
             let step = (|| -> Result<Step, Error> {
                 let frame = frames.last_mut().expect("VM has an initial frame");
                 let op = frame

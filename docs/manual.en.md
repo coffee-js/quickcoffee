@@ -78,6 +78,8 @@ Exceptions use `try`, `catch error`, optional `finally`, and `throw value`. A ca
 
 For Rust embedding, create `Context`, optionally call `with_fuel`, register a host callback with `add_native`, then call `eval`; callbacks can return `Error::runtime("message")` and the script may catch it. For repeated execution, compile once with `Engine::compile_program` and pass the shared `Program` to `run_program`; cloning that handle does not copy bytecode. `Value::from`, `Value::string`, `Value::array`, and `Value::map` construct host values without exposing VM reference-counting internals.
 
+`Context::last_execution()` returns public `ExecutionStats` (`instructions` and `fuel_remaining`) for the latest successful or runtime-failed execution; compile and verification errors leave the previous record unchanged.
+
 `cx.get_global("host_values")` reads a script or host global without executing code and returns `None` for an unknown name. It returns a public `Value` clone only, never an environment or call frame.
 
 Embedding errors are structured: `error.kind()` returns `ErrorKind::Parse`, `ErrorKind::Verify`, or `ErrorKind::Runtime`, `error.message()` returns its detail, and `error.position()` may provide a one-based source line. Hosts need not parse display text; `Display` remains suitable for CLI output and QuickCoffee `catch` strings.

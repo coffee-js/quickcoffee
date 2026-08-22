@@ -84,6 +84,12 @@ fn main() {
             expected: "42",
         },
         Workload {
+            name: "execution-stats",
+            source: "sum = 0\ni = 0\nwhile i < 100\n  sum += i\n  i++\nsum",
+            iterations: 10_000,
+            expected: "4950",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,
@@ -181,8 +187,8 @@ fn measure(engine: &Engine, workload: Workload) {
     let program = engine
         .compile_program(workload.source)
         .expect("benchmark program compiles");
-    let observed = Context::new()
-        .with_fuel(100_000)
+    let mut semantic_context = Context::new().with_fuel(100_000);
+    let observed = semantic_context
         .run_program(&program)
         .expect("benchmark semantic check runs");
     assert_eq!(
@@ -191,6 +197,7 @@ fn measure(engine: &Engine, workload: Workload) {
         "benchmark {} returned an unexpected value",
         workload.name
     );
+    assert!(semantic_context.last_execution().instructions > 0);
     let start = Instant::now();
     for _ in 0..workload.iterations {
         black_box(

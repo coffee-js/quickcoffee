@@ -74,6 +74,8 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 
 欲屡行已编之文，可用 `Engine::compile_program` 得共享 `Program`，以 `Context::run_program` 行之；复制其柄，不复制字节码。
 
+`Context::last_execution()` 可取最近行止之 `ExecutionStats`，载所试指令数 `instructions` 及余燃料 `fuel_remaining`；编验之误，不易前录。
+
 数组映射跨行时，逗号可省；调用之参与寻常括中之式，仍须明分其隔。
 
 赋值独行而后缩进，亦可成映射；其键值层叠而无原型，寻常赋值续行不误为之。

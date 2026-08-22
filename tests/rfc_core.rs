@@ -35,6 +35,28 @@ fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
     assert!(Context::new().eval("add(20 22)").is_err());
 }
 #[test]
+fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
+    let mut cx = Context::new().with_fuel(100);
+    assert_eq!(cx.eval("1 + 2").unwrap().as_number(), Some(3.));
+    let success = cx.last_execution();
+    assert!(success.instructions > 0);
+    assert_eq!(success.instructions + success.fuel_remaining, 100);
+    assert!(cx.eval("(").is_err());
+    assert_eq!(cx.last_execution(), success);
+
+    let error = cx.eval("unknown_name").unwrap_err();
+    assert!(error.message().contains("unknown name"));
+    let failed = cx.last_execution();
+    assert!(failed.instructions > 0);
+    assert!(failed.instructions + failed.fuel_remaining <= 100);
+
+    let mut exhausted = cx.with_fuel(5);
+    assert!(exhausted.eval("while true then 1").is_err());
+    let fuel = exhausted.last_execution();
+    assert_eq!(fuel.instructions, 5);
+    assert_eq!(fuel.fuel_remaining, 0);
+}
+#[test]
 fn explicit_operator_line_continuation_preserves_expression_and_layout() {
     assert_eq!(eval("value = 1 +\n  2 * 3\nvalue").as_number(), Some(7.));
     assert_eq!(

@@ -8,7 +8,8 @@ mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
 pub use vm::{
-    Context, Engine, Error, ErrorKind, Function, NativeFunction, Program, SourcePosition, Value,
+    Context, Engine, Error, ErrorKind, ExecutionStats, Function, NativeFunction, Program,
+    SourcePosition, Value,
 };
 
 /// Compiles `source` to verified bytecode without executing it.

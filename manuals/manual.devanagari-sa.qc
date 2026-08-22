@@ -6,6 +6,7 @@
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
 ## Engine::compile_program तथा Context::run_program सत्यापित-bytecode पुनःप्रयोगाय साझीकुरुतः।
+## Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
 ## -- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।
 ## JavaScript नास्ति: prototype-chain, this, eval, अन्तःस्थ-JavaScript च न सन्ति।
 ## # line-comment अस्ति; ### … ### non-nesting block-comment layout तथा parse पूर्वं त्यज्यते।

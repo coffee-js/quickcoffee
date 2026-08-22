@@ -109,6 +109,8 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 
 若需重复执行，使用 `Engine::compile_program` 编译一次，再将共享 `Program` 传给 `run_program`；克隆该句柄不会复制字节码。
 
+`Context::last_execution()` 可读最近一次成功或运行时失败的 `ExecutionStats`，其中有执行指令数 `instructions` 与余下燃料 `fuel_remaining`；编译或验证错误不会改写上一条记录。
+
 `cx.get_global("host_values")` 可在不执行脚本的情况下读取脚本或宿主设置的全局值；未知名称返回 `None`。它只返回公开 `Value` 的副本，不泄漏环境或调用帧。
 
 嵌入错误具有结构：`error.kind()` 返回 `ErrorKind::Parse`、`ErrorKind::Verify` 或 `ErrorKind::Runtime`，`error.message()` 返回详情，`error.position()` 可返回从 1 开始的源码行号。宿主无需解析展示文本；`Display` 输出仍适合 CLI 与 QuickCoffee 的 `catch` 错误字符串。
