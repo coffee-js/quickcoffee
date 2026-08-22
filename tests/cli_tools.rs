@@ -185,6 +185,32 @@ fn qtest_reports_success_and_failure() {
             "qtest skipped {fixture}"
         );
     }
+    let filtered = Command::new(bin("qtest"))
+        .args(["--filter", "stdlib", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert!(filtered.status.success());
+    assert_eq!(String::from_utf8_lossy(&filtered.stdout).lines().count(), 1);
+    assert!(String::from_utf8_lossy(&filtered.stdout).contains("stdlib.qc"));
+    let listed = Command::new(bin("qtest"))
+        .args(["--list", "--filter", "stdlib", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout),
+        "tests/scripts/stdlib.qc\n"
+    );
+    let missing_filter = Command::new(bin("qtest"))
+        .args(["--filter", "does-not-exist", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert_eq!(missing_filter.status.code(), Some(2));
+    let list_conflict = Command::new(bin("qtest"))
+        .args(["--list", "--json", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert_eq!(list_conflict.status.code(), Some(2));
     let bad = Command::new(bin("qtest"))
         .arg("tests/fixtures/failure.qc")
         .output()

@@ -43,7 +43,7 @@ fn collect(
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--stats] [--json|--tap] FILE_OR_DIRECTORY...\n       qtest --version"
+        "Usage: qtest [--fuel N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
@@ -76,6 +76,8 @@ fn main() -> ExitCode {
     let mut stats = false;
     let mut json = false;
     let mut tap = false;
+    let mut filter = None;
+    let mut list = false;
     let mut inputs: Vec<String> = vec![];
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -98,6 +100,14 @@ fn main() -> ExitCode {
             "--stats" => stats = true,
             "--json" => json = true,
             "--tap" => tap = true,
+            "--list" => list = true,
+            "--filter" => match args.next() {
+                Some(value) if !value.is_empty() => filter = Some(value),
+                _ => {
+                    eprintln!("--filter requires non-empty text");
+                    return ExitCode::from(2);
+                }
+            },
             value if !value.starts_with('-') => inputs.push(value.to_string()),
             _ => {
                 usage();
@@ -134,14 +144,27 @@ fn main() -> ExitCode {
     }
     files.sort();
     files.dedup();
+    if let Some(filter) = filter.as_deref() {
+        files.retain(|path| path.to_string_lossy().contains(filter));
+    }
     if files.is_empty() {
         if tap {
             println!("TAP version 13");
-            println!("Bail out! no .qc test files found");
+            println!("Bail out! no matching .qc test files found");
         } else {
-            eprintln!("no .qc test files found");
+            eprintln!("no matching .qc test files found");
         }
         return ExitCode::from(2);
+    }
+    if list {
+        if json || tap || stats {
+            eprintln!("--list cannot be combined with --json, --tap, or --stats");
+            return ExitCode::from(2);
+        }
+        for path in files {
+            println!("{}", path.display());
+        }
+        return ExitCode::SUCCESS;
     }
     if tap {
         println!("TAP version 13");

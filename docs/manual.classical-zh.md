@@ -25,6 +25,7 @@ qtest --fuel N 者，为各可行文别限其指令之数。
 qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 qtest --json 每篇出一行 JSON，便于 CI 取用；--stats 仍书于标准错误。
 qtest --tap 出 TAP 13 及定次之记录；--json 与 --tap 不可并用。
+qtest --filter TEXT 依路径择篇；qtest --list 但列所择之篇而不行其文。
 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
 Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。
 Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。
