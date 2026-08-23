@@ -148,6 +148,23 @@ fn qtest_reports_success_and_failure() {
 
 #[cfg(unix)]
 #[test]
+fn qtest_directory_errors_name_the_failing_child_path() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-broken-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let broken = temp.join("broken.qc");
+    std::os::unix::fs::symlink(temp.join("missing.qc"), &broken).unwrap();
+
+    let output = Command::new(bin("qtest"))
+        .arg(temp.to_str().unwrap())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&broken.display().to_string()));
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[cfg(unix)]
+#[test]
 fn qtest_ignores_recursive_directory_symlinks() {
     use std::os::unix::fs::symlink;
 
@@ -163,6 +180,30 @@ fn qtest_ignores_recursive_directory_symlinks() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!("TAP version 13\nok 1 - {}/pass.qc\n1..1\n", temp.display())
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[cfg(unix)]
+#[test]
+fn qtest_executes_a_file_symlink_only_once() {
+    use std::os::unix::fs::symlink;
+
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-qtest-file-alias-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let actual = temp.join("actual.qc");
+    let alias = temp.join("alias.qc");
+    fs::write(&actual, "true\n").unwrap();
+    symlink(&actual, &alias).unwrap();
+    let output = Command::new(bin("qtest"))
+        .args(["--tap", actual.to_str().unwrap(), alias.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("TAP version 13\nok 1 - {}\n1..1\n", actual.display())
     );
     let _ = fs::remove_dir_all(temp);
 }

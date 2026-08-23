@@ -12,29 +12,33 @@ fn collect(
     path: &Path,
     files: &mut Vec<PathBuf>,
     visited_directories: &mut HashSet<PathBuf>,
+    visited_files: &mut HashSet<PathBuf>,
 ) -> Result<(), String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    let metadata = fs::metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
     if metadata.is_file() {
-        files.push(path.to_path_buf());
+        let canonical =
+            fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if visited_files.insert(canonical) {
+            files.push(path.to_path_buf());
+        }
         return Ok(());
     }
     if metadata.is_dir() {
-        let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
+        let canonical =
+            fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))?;
         if !visited_directories.insert(canonical) {
             return Ok(());
         }
     }
     let mut entries: Vec<_> = fs::read_dir(path)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{}: {error}", path.display()))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("{}: {error}", path.display()))?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let child = entry.path();
-        if child.is_dir() {
-            collect(&child, files, visited_directories)?;
-        } else if child.extension().is_some_and(|extension| extension == "qc") {
-            files.push(child);
+        if child.is_dir() || child.extension().is_some_and(|extension| extension == "qc") {
+            collect(&child, files, visited_directories, visited_files)?;
         }
     }
     Ok(())
@@ -113,8 +117,14 @@ fn main() -> ExitCode {
     }
     let mut files = vec![];
     let mut visited_directories = HashSet::new();
+    let mut visited_files = HashSet::new();
     for input in inputs {
-        if let Err(error) = collect(Path::new(&input), &mut files, &mut visited_directories) {
+        if let Err(error) = collect(
+            Path::new(&input),
+            &mut files,
+            &mut visited_directories,
+            &mut visited_files,
+        ) {
             if tap {
                 println!("TAP version 13");
                 println!("Bail out! {input}: {error}");
