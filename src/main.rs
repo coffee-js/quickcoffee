@@ -132,10 +132,12 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                 let result = context.eval(source);
                 let report_stats = stats
                     && (result.is_ok()
-                        || result
-                            .as_ref()
-                            .err()
-                            .is_some_and(|error| error.kind() == quickcoffee::ErrorKind::Runtime));
+                        || result.as_ref().err().is_some_and(|error| {
+                            matches!(
+                                error.kind(),
+                                quickcoffee::ErrorKind::Runtime | quickcoffee::ErrorKind::Resource
+                            )
+                        }));
                 if report_stats {
                     let execution = context.last_execution();
                     eprintln!(

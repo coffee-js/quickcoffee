@@ -7,6 +7,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
@@ -205,6 +209,18 @@ pub enum ErrorKind {
     Verify,
     /// Execution or a host callback failed.
     Runtime,
+    /// Execution stopped because a configured resource boundary was reached.
+    Resource,
+}
+/// Stable reason for a resource-boundary failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceLimit {
+    /// The per-run instruction budget was exhausted.
+    Fuel,
+    /// A bytecode function call would exceed the configured nesting depth.
+    CallDepth,
+    /// The embedding host cancelled the current execution.
+    Cancellation,
 }
 /// One-based source line attached to a lexical or parse diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +234,7 @@ impl fmt::Display for ErrorKind {
             Self::Parse => write!(f, "parse"),
             Self::Verify => write!(f, "verify"),
             Self::Runtime => write!(f, "runtime"),
+            Self::Resource => write!(f, "resource"),
         }
     }
 }
@@ -227,6 +244,7 @@ pub struct Error {
     kind: ErrorKind,
     message: String,
     position: Option<SourcePosition>,
+    resource_limit: Option<ResourceLimit>,
 }
 impl Error {
     pub(crate) fn parse(m: impl Into<String>) -> Self {
@@ -234,6 +252,7 @@ impl Error {
             kind: ErrorKind::Parse,
             message: m.into(),
             position: None,
+            resource_limit: None,
         }
     }
     pub(crate) fn verify(m: impl Into<String>) -> Self {
@@ -241,6 +260,7 @@ impl Error {
             kind: ErrorKind::Verify,
             message: m.into(),
             position: None,
+            resource_limit: None,
         }
     }
     /// Creates a runtime error for a host callback to return across the VM boundary.
@@ -249,6 +269,15 @@ impl Error {
             kind: ErrorKind::Runtime,
             message: m.into(),
             position: None,
+            resource_limit: None,
+        }
+    }
+    fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Resource,
+            message: message.into(),
+            position: None,
+            resource_limit: Some(limit),
         }
     }
     /// Returns the machine-readable category without requiring display-text parsing.
@@ -262,6 +291,10 @@ impl Error {
     /// Returns the one-based source line when the compiler knows it.
     pub fn position(&self) -> Option<SourcePosition> {
         self.position
+    }
+    /// Returns the crossed resource boundary for a resource error.
+    pub fn resource_limit(&self) -> Option<ResourceLimit> {
+        self.resource_limit
     }
     pub(crate) fn at_line(mut self, line: usize) -> Self {
         self.position = Some(SourcePosition { line });
@@ -282,6 +315,27 @@ impl fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+/// A cloneable, one-way cancellation signal owned by the embedding host.
+///
+/// Clones share state. Cancelling a token causes the next VM instruction check
+/// in every context configured with it to stop with [`ResourceLimit::Cancellation`].
+#[derive(Clone, Debug, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+impl CancellationToken {
+    /// Creates an uncancelled token.
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Requests cancellation for all contexts sharing this token.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    /// Reports whether cancellation was requested.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
 
 /// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
@@ -394,12 +448,18 @@ pub struct ExecutionStats {
     pub instructions: u64,
     /// Fuel left after the execution stopped.
     pub fuel_remaining: u64,
+    /// Greatest nested QuickCoffee function-call depth reached during the run.
+    ///
+    /// The top-level program does not count toward this value.
+    pub call_depth_peak: usize,
 }
-/// An execution context containing globals, builtins, and a per-run fuel budget.
+/// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
     engine: Engine,
     global: Env,
     fuel: u64,
+    max_call_depth: usize,
+    cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
 }
 impl Default for Context {
@@ -415,6 +475,8 @@ impl Context {
             engine: Engine::new(),
             global,
             fuel: 1_000_000,
+            max_call_depth: 1_024,
+            cancellation: None,
             last_execution: ExecutionStats::default(),
         };
         x.install_builtins();
@@ -435,6 +497,35 @@ impl Context {
     /// Returns the instruction budget configured for each new run.
     pub fn fuel(&self) -> u64 {
         self.fuel
+    }
+    /// Returns this context with a maximum nested QuickCoffee function-call depth.
+    ///
+    /// A value of zero permits top-level code but rejects every bytecode function
+    /// call. Native host callbacks do not add a QuickCoffee call frame.
+    pub fn with_max_call_depth(mut self, max_call_depth: usize) -> Self {
+        self.set_max_call_depth(max_call_depth);
+        self
+    }
+    /// Sets the maximum nested QuickCoffee function-call depth for future runs.
+    pub fn set_max_call_depth(&mut self, max_call_depth: usize) {
+        self.max_call_depth = max_call_depth;
+    }
+    /// Returns the maximum nested QuickCoffee function-call depth for each run.
+    pub fn max_call_depth(&self) -> usize {
+        self.max_call_depth
+    }
+    /// Returns this context configured to observe an embedding-host cancellation token.
+    pub fn with_cancellation_token(mut self, token: CancellationToken) -> Self {
+        self.set_cancellation_token(token);
+        self
+    }
+    /// Sets or replaces the cancellation token observed by future runs.
+    pub fn set_cancellation_token(&mut self, token: CancellationToken) {
+        self.cancellation = Some(token);
+    }
+    /// Removes the configured cancellation token from future runs.
+    pub fn clear_cancellation_token(&mut self) {
+        self.cancellation = None;
     }
     /// Returns counters from the most recent successful or failed execution.
     /// Compilation and verification errors do not replace the previous record.
@@ -494,6 +585,10 @@ impl Context {
         let mut vm = Vm {
             fuel: self.fuel,
             instructions: 0,
+            max_call_depth: self.max_call_depth,
+            call_depth: 0,
+            call_depth_peak: 0,
+            cancellation: self.cancellation.clone(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -687,6 +782,10 @@ enum IterationKind {
 struct Vm {
     fuel: u64,
     instructions: u64,
+    max_call_depth: usize,
+    call_depth: usize,
+    call_depth_peak: usize,
+    cancellation: Option<CancellationToken>,
 }
 enum Step {
     Continue,
@@ -698,16 +797,23 @@ impl Vm {
         let mut nested = Vm {
             fuel: self.fuel,
             instructions: self.instructions,
+            max_call_depth: self.max_call_depth,
+            call_depth: self.call_depth,
+            call_depth_peak: self.call_depth_peak,
+            cancellation: self.cancellation.clone(),
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
         self.instructions = nested.instructions;
+        self.call_depth = nested.call_depth;
+        self.call_depth_peak = nested.call_depth_peak;
         result
     }
     fn stats(&self) -> ExecutionStats {
         ExecutionStats {
             instructions: self.instructions,
             fuel_remaining: self.fuel,
+            call_depth_peak: self.call_depth_peak,
         }
     }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
@@ -720,8 +826,21 @@ impl Vm {
             env: global,
         }];
         loop {
+            if self
+                .cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(Error::resource(
+                    ResourceLimit::Cancellation,
+                    "execution cancelled by host",
+                ));
+            }
             if self.fuel == 0 {
-                return Err(Error::runtime("execution fuel exhausted"));
+                return Err(Error::resource(
+                    ResourceLimit::Fuel,
+                    "execution fuel exhausted",
+                ));
             }
             self.fuel -= 1;
             self.instructions += 1;
@@ -1188,6 +1307,9 @@ impl Vm {
             match step {
                 Ok(Step::Continue) => {}
                 Ok(Step::Return(value)) => {
+                    if frames.len() > 1 {
+                        self.call_depth = self.call_depth.saturating_sub(1);
+                    }
                     frames.pop();
                     if let Some(parent) = frames.last_mut() {
                         parent.stack.push(value);
@@ -1198,13 +1320,13 @@ impl Vm {
                 Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
                     Ok(()) => {}
                     Err(error) => {
-                        if !handle_error(&mut frames, &error) {
+                        if !handle_error(self, &mut frames, &error) {
                             return Err(error);
                         }
                     }
                 },
                 Err(error) => {
-                    if !handle_error(&mut frames, &error) {
+                    if !handle_error(self, &mut frames, &error) {
                         return Err(error);
                     }
                 }
@@ -1235,6 +1357,15 @@ fn call(
                 chunk,
                 env: captured,
             } => {
+                if vm.call_depth >= vm.max_call_depth {
+                    return Err(Error::resource(
+                        ResourceLimit::CallDepth,
+                        format!(
+                            "maximum QuickCoffee call depth of {} exceeded",
+                            vm.max_call_depth
+                        ),
+                    ));
+                }
                 if args.len() < *required || (rest.is_none() && args.len() > params.len()) {
                     return Err(Error::runtime(format!(
                         "expected {}{} arguments, got {}",
@@ -1273,13 +1404,18 @@ fn call(
                     handlers: vec![],
                     env: local,
                 });
+                vm.call_depth += 1;
+                vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
             }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
     }
     Ok(())
 }
-fn handle_error(frames: &mut Vec<Frame>, error: &Error) -> bool {
+fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
+    if error.kind() == ErrorKind::Resource {
+        return false;
+    }
     loop {
         let Some(frame) = frames.last_mut() else {
             return false;
@@ -1294,6 +1430,9 @@ fn handle_error(frames: &mut Vec<Frame>, error: &Error) -> bool {
                 .insert(handler.name, Value::String(Rc::from(error.to_string())));
             frame.pc = handler.catch_pc;
             return true;
+        }
+        if frames.len() > 1 {
+            vm.call_depth = vm.call_depth.saturating_sub(1);
         }
         frames.pop();
     }

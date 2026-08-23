@@ -1,4 +1,6 @@
-use quickcoffee::{Context, Engine, Error, ErrorKind, Value, ValueKind};
+use quickcoffee::{
+    CancellationToken, Context, Engine, Error, ErrorKind, ResourceLimit, Value, ValueKind,
+};
 
 #[test]
 fn public_embedding_surface_runs_shared_programs_with_host_state() {
@@ -83,9 +85,57 @@ fn public_values_and_native_errors_are_structured() {
 fn public_fuel_and_execution_stats_bound_untrusted_programs() {
     let mut context = Context::new().with_fuel(8);
     let error = context.eval("while true then 1").unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Fuel));
     assert!(error.message().contains("fuel exhausted"));
     let stats = context.last_execution();
     assert_eq!(stats.instructions, 8);
     assert_eq!(stats.fuel_remaining, 0);
+    assert_eq!(stats.call_depth_peak, 0);
+}
+
+#[test]
+fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
+    let mut context = Context::new().with_fuel(1_000).with_max_call_depth(3);
+    assert_eq!(context.max_call_depth(), 3);
+    let error = context
+        .eval("recur = -> recur()\ntry recur() catch ignored then 42")
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::CallDepth));
+    assert!(error.message().contains("call depth of 3"));
+    let stats = context.last_execution();
+    assert_eq!(stats.call_depth_peak, 3);
+    assert!(stats.fuel_remaining > 0);
+
+    context.set_max_call_depth(0);
+    assert_eq!(context.max_call_depth(), 0);
+    let error = context.eval("(-> 1)()").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::CallDepth));
+}
+
+#[test]
+fn cancellation_token_stops_runs_before_execution_and_can_be_replaced() {
+    let token = CancellationToken::new();
+    let mut context = Context::new()
+        .with_fuel(20)
+        .with_cancellation_token(token.clone());
+    token.cancel();
+    assert!(token.is_cancelled());
+    let error = context.eval("1 + 2").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Cancellation));
+    assert_eq!(context.last_execution().instructions, 0);
+    assert_eq!(context.last_execution().fuel_remaining, 20);
+
+    let replacement = CancellationToken::new();
+    context.set_cancellation_token(replacement.clone());
+    assert_eq!(context.eval("1 + 2").unwrap().as_number(), Some(3.));
+
+    replacement.cancel();
+    let error = context.eval("1 + 2").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Cancellation));
+
+    context.clear_cancellation_token();
+    assert_eq!(context.eval("1 + 2").unwrap().as_number(), Some(3.));
 }

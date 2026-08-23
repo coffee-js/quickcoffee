@@ -14,7 +14,7 @@ let stats = context.last_execution();
 assert!(stats.instructions > 0);
 ```
 
-`ExecutionStats` 包含 `instructions`（尝试执行的 VM 指令数）和 `fuel_remaining`（停止时剩余 fuel）。成功返回、运行时错误和 fuel 耗尽都会更新记录；编译或字节码验证错误不会伪造一次执行记录，保留上一条统计。
+`ExecutionStats` 包含 `instructions`（尝试执行的 VM 指令数）、`fuel_remaining`（停止时剩余 fuel）和 `call_depth_peak`（本次达到的嵌套 QuickCoffee 函数调用深度）。成功返回、运行时错误和 RFC 0118 的资源错误都会更新记录；编译或字节码验证错误不会伪造一次执行记录，保留上一条统计。
 
 ## 资源与封装边界
 
