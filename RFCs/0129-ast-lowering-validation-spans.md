@@ -14,7 +14,7 @@ parser 能为 token 产生精确范围，但有些错误必须等到 AST lowerin
 2. AST 的 `import`、赋值式 `export` 与列表式 `export` statement 保存指令关键字范围。单文件编译拒绝模块指令时指向该关键字；模块解析在拆分 directives 与可执行 body 时继续携带 export span。
 3. 重复模块导出指向后出现的 `export` directive，并保留 `Engine::compile_module` 的不透明模块名。第一处定义的 secondary label 留待多标签 AST 数据流完成后添加。
 4. AST 只保存 lexer 已确认可靠的内部 span。Unicode 列仍按 scalar value 计数；缩进 map 等预处理改写输入保持 `column: None`、`end: None`，lowering 不反推或伪造列。
-5. 本切片不向公开 `Chunk`、`Instruction` 或常量编码加入 span，不改变 disassembly 与 `Program::fingerprint()`。成功 lowering 的一般表达式/statement 全量归因、bytecode verification 和 runtime span 仍属于 #74 后续工作。
+5. 本切片不向公开 `Chunk`、`Instruction` 或常量编码加入 span，不改变 disassembly 与 `Program::fingerprint()`。RFC 0130 已通过私有 `Program` sidecar 完成成功表达式/statement 的运行期归因；裸 bytecode verification 与多标签调用栈仍属于 #74 后续工作。
 
 ## 验收
 

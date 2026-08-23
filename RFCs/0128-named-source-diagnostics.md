@@ -15,7 +15,7 @@ RFC 0126 已把 `source_name` 定义为结构化 span 的可选不透明字段�
 3. 既有 `compile`、`compile_program`、`eval` 与 `Context::eval` 保持匿名；成功产物、字节码编码、指纹和 `Error::Display` 均不改变。
 4. `Engine::compile_module` 使用调用者传入的模块规范名；经 `ModuleLoader` 返回的依赖使用 `ModuleSource::name()`。模块 parser/compiler 已产生的 label 因而携带对应规范名，而不是 import 字面量或引擎推测的路径。
 5. `qcoffee` 对文件、`-`、`--check`、`--dump-bytecode` 与 `--fingerprint` 使用用户传入的原字符串作为来源名。普通人类错误文本保持兼容；`--json` 的错误对象在 label 有来源时增加可选字符串字段 `source`，原有 `line` 字段、匿名 `-e` 输出和退出码不变。
-6. 本切片只传播编译期已有 label 的来源名。RFC 0129 已覆盖 AST lowering 的控制流与模块验证错误；一般成功表达式的 bytecode/verification 与 runtime label 保存仍由 #74 后续切片完成，`eval_named` 会沿用同一入口。
+6. 本切片只传播编译期已有 label 的来源名。RFC 0129 已覆盖 AST lowering 的控制流与模块验证错误，RFC 0130 已让正常 `Program` 编译路径的成功表达式 span 归因 runtime/resource 错误；裸 bytecode verification 与多标签调用栈仍由 #74 后续切片完成。
 
 ## 验收
 

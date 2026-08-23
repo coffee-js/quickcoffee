@@ -1,4 +1,5 @@
 use crate::{
+    lexer::TokenSpan,
     parser::{Binary, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update},
     vm::{Error, Value},
 };
@@ -730,23 +731,29 @@ fn validate_pattern_at(pattern: &Pattern, allow_rest: bool) -> Result<(), Error>
     }
 }
 
-pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
-    let mut c = Compiler::default();
+#[derive(Debug, Default)]
+pub(crate) struct ChunkSourceMap {
+    pub(crate) instructions: Vec<u32>,
+    pub(crate) spans: Vec<TokenSpan>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CompiledSourceMap {
+    pub(crate) top: ChunkSourceMap,
+    pub(crate) nested: Vec<(Rc<Chunk>, ChunkSourceMap)>,
+}
+
+fn lower(program: &[Stmt], record_source_map: bool) -> Result<Compiler, Error> {
+    let mut c = Compiler {
+        record_source_map,
+        ..Default::default()
+    };
     if program.is_empty() {
         c.emit_const(Value::Nil);
     } else {
         for (i, stmt) in program.iter().enumerate() {
             if i + 1 != program.len() {
-                if let Stmt::Expr(Expr::For(patterns, map, iterable, step, filter, body)) = stmt {
-                    c.for_discard(
-                        patterns,
-                        *map,
-                        iterable,
-                        step.as_deref(),
-                        filter.as_deref(),
-                        body,
-                    )?;
-                } else {
+                if !c.stmt_discard(stmt)? {
                     c.stmt(stmt)?;
                 }
             } else {
@@ -758,7 +765,26 @@ pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
         }
     }
     c.emit(Instruction::Return);
-    Ok(c.chunk)
+    Ok(c)
+}
+
+pub(crate) fn compile_mapped(program: &[Stmt]) -> Result<(Chunk, CompiledSourceMap), Error> {
+    let c = lower(program, true)?;
+    debug_assert_eq!(c.chunk.code.len(), c.instruction_spans.len());
+    Ok((
+        c.chunk,
+        CompiledSourceMap {
+            top: ChunkSourceMap {
+                instructions: c.instruction_spans,
+                spans: c.span_table,
+            },
+            nested: c.nested_source_maps,
+        },
+    ))
+}
+
+pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
+    lower(program, false).map(|compiler| compiler.chunk)
 }
 
 /// Evaluates only side-effect-free literal expressions at compile time. A
@@ -766,6 +792,7 @@ pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
 /// expression on the normal VM path so strict runtime errors remain intact.
 fn constant_value(expression: &Expr) -> Option<Value> {
     match expression {
+        Expr::Located(_, expression) => constant_value(expression),
         Expr::Number(value) => Some(Value::Number(*value)),
         Expr::String(value) => Some(Value::String(Rc::from(value.as_str()))),
         Expr::Bool(value) => Some(Value::Bool(*value)),
@@ -959,6 +986,11 @@ fn constant_equal(left: &Value, right: &Value) -> bool {
 #[derive(Default)]
 struct Compiler {
     chunk: Chunk,
+    instruction_spans: Vec<u32>,
+    span_table: Vec<TokenSpan>,
+    nested_source_maps: Vec<(Rc<Chunk>, ChunkSourceMap)>,
+    current_span: u32,
+    record_source_map: bool,
     loops: Vec<LoopContext>,
     in_function: bool,
     return_cleanups: Vec<ReturnCleanup>,
@@ -974,7 +1006,41 @@ struct ReturnCleanup {
     finalizer: Option<Expr>,
 }
 impl Compiler {
-    fn compile_pattern(pattern: &AstPattern) -> Result<Pattern, Error> {
+    fn enter_span(&mut self, span: TokenSpan) -> u32 {
+        let previous = self.current_span;
+        if !self.record_source_map {
+            return previous;
+        }
+        self.span_table.push(span);
+        self.current_span = u32::try_from(self.span_table.len())
+            .expect("source span table exceeds u32::MAX entries");
+        previous
+    }
+
+    fn stmt_discard(&mut self, statement: &Stmt) -> Result<bool, Error> {
+        let Stmt::Expr(expression) = statement else {
+            return Ok(false);
+        };
+        let Expr::For(patterns, map, iterable, step, filter, body) = expression.unspanned() else {
+            return Ok(false);
+        };
+        let previous = expression.span().map(|span| self.enter_span(span));
+        let result = self.for_discard(
+            patterns,
+            *map,
+            iterable,
+            step.as_deref(),
+            filter.as_deref(),
+            body,
+        );
+        if let Some(previous) = previous {
+            self.current_span = previous;
+        }
+        result?;
+        Ok(true)
+    }
+
+    fn compile_pattern(&mut self, pattern: &AstPattern) -> Result<Pattern, Error> {
         Ok(match pattern {
             AstPattern::Ignore => Pattern::Ignore,
             AstPattern::Bind(name) => Pattern::Bind(name.clone()),
@@ -982,29 +1048,43 @@ impl Compiler {
             AstPattern::Array(items) => Pattern::Array(
                 items
                     .iter()
-                    .map(Self::compile_pattern)
+                    .map(|pattern| self.compile_pattern(pattern))
                     .collect::<Result<_, _>>()?,
             ),
             AstPattern::Map(fields) => Pattern::Map(
                 fields
                     .iter()
-                    .map(|(key, p)| Ok((key.clone(), Self::compile_pattern(p)?)))
+                    .map(|(key, pattern)| Ok((key.clone(), self.compile_pattern(pattern)?)))
                     .collect::<Result<_, Error>>()?,
             ),
             AstPattern::MapRest(fields, rest) => Pattern::MapRest {
                 fields: fields
                     .iter()
-                    .map(|(key, p)| Ok((key.clone(), Self::compile_pattern(p)?)))
+                    .map(|(key, pattern)| Ok((key.clone(), self.compile_pattern(pattern)?)))
                     .collect::<Result<_, Error>>()?,
                 rest: rest.clone(),
             },
             AstPattern::Default(inner, expr) => {
-                let mut compiler = Compiler::default();
+                let mut compiler = Compiler {
+                    record_source_map: self.record_source_map,
+                    ..Default::default()
+                };
                 compiler.expr(expr)?;
                 compiler.emit(Instruction::Return);
+                let default = Rc::new(compiler.chunk);
+                if self.record_source_map {
+                    self.nested_source_maps.extend(compiler.nested_source_maps);
+                    self.nested_source_maps.push((
+                        default.clone(),
+                        ChunkSourceMap {
+                            instructions: compiler.instruction_spans,
+                            spans: compiler.span_table,
+                        },
+                    ));
+                }
                 Pattern::Default {
-                    pattern: Box::new(Self::compile_pattern(inner)?),
-                    default: Rc::new(compiler.chunk),
+                    pattern: Box::new(self.compile_pattern(inner)?),
+                    default,
                 }
             }
         })
@@ -1012,6 +1092,9 @@ impl Compiler {
     fn emit(&mut self, op: Instruction) -> usize {
         let i = self.chunk.code.len();
         self.chunk.code.push(op);
+        if self.record_source_map {
+            self.instruction_spans.push(self.current_span);
+        }
         i
     }
     fn emit_const(&mut self, v: Value) {
@@ -1050,14 +1133,18 @@ impl Compiler {
     }
     fn stmt(&mut self, s: &Stmt) -> Result<(), Error> {
         match s {
-            Stmt::Assign(n, e) => {
+            Stmt::Assign(n, e, span) => {
                 self.expr(e)?;
+                let previous = self.enter_span(*span);
                 self.emit(Instruction::Store(n.clone()));
+                self.current_span = previous;
             }
-            Stmt::Destructure(pattern, e) => {
+            Stmt::Destructure(pattern, e, span) => {
                 self.expr(e)?;
-                let compiled = Self::compile_pattern(pattern)?;
+                let compiled = self.compile_pattern(pattern)?;
+                let previous = self.enter_span(*span);
                 self.emit(Instruction::Destructure(compiled));
+                self.current_span = previous;
             }
             Stmt::Import(_, _, span)
             | Stmt::ExportAssign(_, _, span)
@@ -1094,7 +1181,7 @@ impl Compiler {
         let start = self.chunk.code.len();
         let compiled_patterns = patterns
             .iter()
-            .map(Self::compile_pattern)
+            .map(|pattern| self.compile_pattern(pattern))
             .collect::<Result<_, _>>()?;
         let exit = self.emit(Instruction::IterNext {
             patterns: compiled_patterns,
@@ -1131,11 +1218,18 @@ impl Compiler {
         Ok(())
     }
     fn expr(&mut self, e: &Expr) -> Result<(), Error> {
+        if let Expr::Located(span, expression) = e {
+            let previous = self.enter_span(*span);
+            let result = self.expr(expression);
+            self.current_span = previous;
+            return result;
+        }
         if let Some(value) = constant_value(e) {
             self.emit_const(value);
             return Ok(());
         }
         match e {
+            Expr::Located(..) => unreachable!("handled before constant folding"),
             Expr::Number(n) => self.emit_const(Value::Number(*n)),
             Expr::String(s) => self.emit_const(Value::String(Rc::from(s.as_str()))),
             Expr::Interpolate(parts) => {
@@ -1184,7 +1278,7 @@ impl Compiler {
             }
             Expr::Destructure(pattern, value) => {
                 self.expr(value)?;
-                let compiled = Self::compile_pattern(pattern)?;
+                let compiled = self.compile_pattern(pattern)?;
                 self.emit(Instruction::Destructure(compiled));
             }
             Expr::Array(items) => {
@@ -1398,7 +1492,7 @@ impl Compiler {
                 let start = self.chunk.code.len();
                 let compiled_patterns = patterns
                     .iter()
-                    .map(Self::compile_pattern)
+                    .map(|pattern| self.compile_pattern(pattern))
                     .collect::<Result<_, _>>()?;
                 let exit = self.emit(Instruction::IterNext {
                     patterns: compiled_patterns,
@@ -1506,24 +1600,7 @@ impl Compiler {
                 } else {
                     for (index, statement) in statements.iter().enumerate() {
                         if index + 1 != statements.len() {
-                            if let Stmt::Expr(Expr::For(
-                                patterns,
-                                map,
-                                iterable,
-                                step,
-                                filter,
-                                body,
-                            )) = statement
-                            {
-                                self.for_discard(
-                                    patterns,
-                                    *map,
-                                    iterable,
-                                    step.as_deref(),
-                                    filter.as_deref(),
-                                    body,
-                                )?;
-                            } else {
+                            if !self.stmt_discard(statement)? {
                                 self.stmt(statement)?;
                             }
                         } else {
@@ -1602,7 +1679,7 @@ impl Compiler {
             }
             Expr::Do(function) => {
                 self.expr(function)?;
-                let forwarded = match function.as_ref() {
+                let forwarded = match function.unspanned() {
                     Expr::Function(params, rest, _) if rest.is_none() => params
                         .iter()
                         .map(|param| match &param.pattern {
@@ -1665,6 +1742,7 @@ impl Compiler {
     ) -> Result<(), Error> {
         let mut inner = Compiler {
             in_function: true,
+            record_source_map: self.record_source_map,
             ..Default::default()
         };
         for param in params {
@@ -1690,8 +1768,19 @@ impl Compiler {
         let idx = self.chunk.constants.len();
         let compiled_params = params
             .iter()
-            .map(|param| Self::compile_pattern(&param.pattern))
+            .map(|param| inner.compile_pattern(&param.pattern))
             .collect::<Result<_, _>>()?;
+        let function_chunk = Rc::new(inner.chunk);
+        if self.record_source_map {
+            self.nested_source_maps.extend(inner.nested_source_maps);
+            self.nested_source_maps.push((
+                function_chunk.clone(),
+                ChunkSourceMap {
+                    instructions: inner.instruction_spans,
+                    spans: inner.span_table,
+                },
+            ));
+        }
         self.chunk.constants.push(Constant::Function {
             params: compiled_params,
             required: params
@@ -1699,7 +1788,7 @@ impl Compiler {
                 .take_while(|param| param.default.is_none())
                 .count(),
             rest: rest.cloned(),
-            chunk: Rc::new(inner.chunk),
+            chunk: function_chunk,
         });
         self.emit(Instruction::MakeFunction(idx));
         Ok(())

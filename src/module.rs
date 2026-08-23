@@ -115,12 +115,12 @@ impl Engine {
                     .with_source_name(name.as_str()));
             }
         }
-        let program: Program = bytecode::compile(&syntax.body)
-            .map_err(|error| error.with_source_name(name.as_str()))?
-            .into();
-        program
+        let (chunk, source_map) = bytecode::compile_mapped(&syntax.body)
+            .map_err(|error| error.with_source_name(name.as_str()))?;
+        chunk
             .verify()
             .map_err(|error| error.with_source_name(name.as_str()))?;
+        let program = Program::from_compiled(chunk, source_map, Some(name.as_str()));
         Ok(Module {
             name,
             program,

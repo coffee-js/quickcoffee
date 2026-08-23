@@ -5,6 +5,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub(crate) enum Expr {
+    Located(TokenSpan, Box<Expr>),
     Number(f64),
     String(String),
     Interpolate(Vec<Expr>),
@@ -51,6 +52,20 @@ pub(crate) enum Expr {
     Throw(Box<Expr>),
     Do(Box<Expr>),
 }
+impl Expr {
+    pub(crate) fn unspanned(&self) -> &Self {
+        match self {
+            Self::Located(_, expression) => expression.unspanned(),
+            expression => expression,
+        }
+    }
+    pub(crate) fn span(&self) -> Option<TokenSpan> {
+        match self {
+            Self::Located(span, _) => Some(*span),
+            _ => None,
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) enum MapItem {
     Entry(String, Expr),
@@ -78,8 +93,8 @@ pub(crate) struct Param {
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Stmt {
-    Assign(String, Expr),
-    Destructure(Pattern, Expr),
+    Assign(String, Expr, TokenSpan),
+    Destructure(Pattern, Expr, TokenSpan),
     Import(Vec<(String, String)>, String, TokenSpan),
     ExportAssign(String, Expr, TokenSpan),
     ExportNames(Vec<(String, String)>, TokenSpan),
@@ -162,7 +177,7 @@ pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
             Stmt::Import(bindings, specifier, _) => imports.push((bindings, specifier)),
             Stmt::ExportAssign(name, value, span) => {
                 exports.push((name.clone(), name.clone(), span));
-                body.push(Stmt::Assign(name, value));
+                body.push(Stmt::Assign(name, value, span));
             }
             Stmt::ExportNames(names, span) => exports.extend(
                 names
@@ -244,6 +259,7 @@ impl Parser {
         Ok(out)
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
+        let span = self.spans[self.at];
         if self.eat(&Token::Import) {
             return self.import_statement(self.spans[self.at - 1]);
         }
@@ -260,9 +276,9 @@ impl Parser {
                 return Ok(Stmt::Expr(self.postfix_loop(body)?));
             }
             if let Pattern::Bind(name) = pattern {
-                Ok(Stmt::Assign(name, value))
+                Ok(Stmt::Assign(name, value, span))
             } else {
-                Ok(Stmt::Destructure(pattern, value))
+                Ok(Stmt::Destructure(pattern, value, span))
             }
         } else {
             let expression = self.expr(0)?;
@@ -561,6 +577,7 @@ impl Parser {
         Ok((cases, fallback))
     }
     fn expr(&mut self, min: u8) -> Result<Expr, Error> {
+        let span = self.spans[self.at];
         let mut left = self.prefix()?;
         loop {
             if self.eat(&Token::LParen) {
@@ -770,7 +787,7 @@ impl Parser {
                 left = Expr::Binary(Box::new(left), op, Box::new(right));
             }
         }
-        Ok(left)
+        Ok(Expr::Located(span, Box::new(left)))
     }
     fn question_starts_expression(&self, index: usize) -> bool {
         matches!(
@@ -851,7 +868,7 @@ impl Parser {
     }
     fn can_be_called(&self, expression: &Expr) -> bool {
         matches!(
-            expression,
+            expression.unspanned(),
             Expr::Name(_)
                 | Expr::Member(_, _)
                 | Expr::Call(_, _)
@@ -1069,7 +1086,7 @@ impl Parser {
             Token::Throw => Ok(Expr::Throw(Box::new(self.expr(0)?))),
             Token::Do => {
                 let function = self.expr(0)?;
-                if let Expr::Function(params, rest, _) = &function {
+                if let Expr::Function(params, rest, _) = function.unspanned() {
                     let valid = rest.is_none()
                         && params.iter().all(|param| {
                             param.default.is_none() && matches!(param.pattern, Pattern::Bind(_))
@@ -1128,7 +1145,7 @@ impl Parser {
                     let end = self.expr(0)?;
                     self.expect(&Token::RBracket)?;
                     Ok(Expr::Range(Box::new(start), Box::new(end), inclusive))
-                } else if matches!(&start, Expr::For(..)) {
+                } else if matches!(start.unspanned(), Expr::For(..)) {
                     // CoffeeScript-style `[value for item in items]` is a
                     // comprehension wrapper, not an additional nested array.
                     self.expect(&Token::RBracket)?;
