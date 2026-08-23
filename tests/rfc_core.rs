@@ -248,7 +248,10 @@ fn bang_is_a_strict_boolean_alias_for_not() {
         "[false, true, false, true]"
     );
     assert_eq!(eval("!!true").as_bool(), Some(true));
-    assert!(Context::new().eval("!1").is_err());
+    let error = Context::new().eval("!1").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert!(compile("value = 1\nvalue !in [1]").is_err());
+    assert!(compile("value = {key: 1}\nkey !of value").is_err());
     let chunk = compile("value = true\n!value").unwrap();
     assert!(chunk.verify().is_ok());
     assert!(chunk.disassemble().contains("Not"));
