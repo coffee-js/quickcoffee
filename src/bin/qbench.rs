@@ -42,6 +42,146 @@ const WORKLOADS: &[Workload] = &[
         source: "sum = 0\nfor n, index in [1...100] by -3 then sum += n + index\nsum",
         expected: "3333",
     },
+    Workload {
+        name: "postfix-loops",
+        source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
+        expected: "100",
+    },
+    Workload {
+        name: "array-slices",
+        source: "items = [0...100]\nsum = 0\ni = 0\nwhile i < 100\n  slice = items[10...90]\n  sum = sum + slice[0] + slice[79]\n  i = i + 1\nsum",
+        expected: "9900",
+    },
+    Workload {
+        name: "existence-tests",
+        source: "value = nil\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + (if value? then 0 else 1)\n  i = i + 1\nsum",
+        expected: "100",
+    },
+    Workload {
+        name: "existential-assignment",
+        source: "value = 1\nsum = 0\ni = 0\nwhile i < 100\n  value ?= 2\n  sum = sum + value\n  i = i + 1\nsum",
+        expected: "100",
+    },
+    Workload {
+        name: "name-updates",
+        source: "i = 0\nsum = 0\nwhile i < 100\n  sum += i\n  i++\nsum",
+        expected: "4950",
+    },
+    Workload {
+        name: "floor-modulo",
+        source: "sum = 0\ni = -100\nwhile i < 100\n  sum += i // 3\n  sum += i %% 7\n  i += 1\nsum",
+        expected: "500",
+    },
+    Workload {
+        name: "bitwise",
+        source: "sum = 0\ni = -100\nwhile i < 100\n  sum += (i & 31) ^ (i << 1)\n  i += 1\nsum",
+        expected: "-196",
+    },
+    Workload {
+        name: "multiline-strings",
+        source: "message = \"alpha\n  beta\"\nlen(message)",
+        expected: "10",
+    },
+    Workload {
+        name: "string-iteration",
+        source: "sum = 0\nfor character, index in 'a☕中' then sum += index\nsum",
+        expected: "3",
+    },
+    Workload {
+        name: "string-escapes",
+        source: "message = \"A\\x42\\u{43}\"\nlen(message) + (if message == 'ABC' then 1 else 0)",
+        expected: "4",
+    },
+    Workload {
+        name: "string-indexing",
+        source: "text = 'a☕中'\nsum = 0\ni = 0\nwhile i < 100\n  sum += len(text[1..2]) + (if text[1] == '☕' then 1 else 0)\n  i += 1\nsum",
+        expected: "300",
+    },
+    Workload {
+        name: "multiline-collections",
+        source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
+        expected: "6",
+    },
+    Workload {
+        name: "indented-maps",
+        source: "record =\n  first: 1\n  nested:\n    second: 2\nrecord.nested.second + record.first",
+        expected: "3",
+    },
+    Workload {
+        name: "implicit-calls",
+        source: "add = (left, right) -> left + right\nanswer = add 20, 22\nanswer",
+        expected: "42",
+    },
+    Workload {
+        name: "execution-stats",
+        source: "sum = 0\ni = 0\nwhile i < 100\n  sum += i\n  i++\nsum",
+        expected: "4950",
+    },
+    Workload {
+        name: "constant-folding",
+        source: "value = (1 + 2 * 3) == 7\nvalue",
+        expected: "true",
+    },
+    Workload {
+        name: "bare-lambda",
+        source: "base = 1\nadd = n -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
+        expected: "1274",
+    },
+    Workload {
+        name: "stepped-iteration",
+        source: "sum = 0\nfor n in [1...100] by 3 then sum = sum + n\nsum",
+        expected: "1617",
+    },
+    Workload {
+        name: "for-collection",
+        source: "values = for n in [1...100] when n % 3 == 0 then n * 2\nlen(values)",
+        expected: "33",
+    },
+    Workload {
+        name: "postfix-comprehension",
+        source: "values = n * 2 for n in [1...100]\nsum = 0\nfor n in values then sum = sum + n\nsum",
+        expected: "9900",
+    },
+    Workload {
+        name: "for-pattern-bindings",
+        source: "pairs = for n in [1...100] then [n, n + 1]\nsum = 0\nfor [left, right] in pairs then sum = sum + left + right\nsum",
+        expected: "9999",
+    },
+    Workload {
+        name: "maps-and-control",
+        source: "record = {a: 1, b: 2, c: 3}\nsum = 0\nfor own key, value of record when value > 1 then sum = sum + value\ntry sum ? 0 catch error then 0",
+        expected: "5",
+    },
+    Workload {
+        name: "soak-access",
+        source: "record = {answer: 1}\nnone = nil\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + record?.answer + (none?[i] ? 0)\n  i = i + 1\nsum",
+        expected: "100",
+    },
+    Workload {
+        name: "nested-destructuring",
+        source: "sum = 0\ni = 0\nwhile i < 100\n  [first, {point: [x, y]}] = [1, {point: [2, 3]}]\n  sum = sum + first + x + y\n  i = i + 1\nsum",
+        expected: "600",
+    },
+    Workload {
+        name: "destructuring-rest",
+        source: "sum = 0\ni = 0\nwhile i < 100\n  [head, tail...] = [1, 2, 3, 4]\n  sum += head + len(tail)\n  i += 1\nsum",
+        expected: "400",
+    },
+    Workload {
+        name: "chained-comparisons",
+        source: "low = 0\nmiddle = 1\nhigh = 2\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + (if low < middle < high then 1 else 0)\n  i = i + 1\nsum",
+        expected: "100",
+    },
+    Workload {
+        name: "destructuring-parameters",
+        source: "scale = ([left, right], {factor}) -> (left + right) * factor\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + scale([1, 2], {factor: 3})\n  i = i + 1\nsum",
+        expected: "900",
+    },
+    Workload {
+        name: "return-cleanup",
+        source: "find = (items) ->\n  try\n    for n in items then if n == 73 then return n\n    nil\n  catch error\n    0\n  finally\n    0\nsum = 0\ni = 0\nwhile i < 100\n  sum = sum + find([1...100])\n  i = i + 1\nsum",
+        expected: "7300",
+    },
 ];
 
 fn usage() {
