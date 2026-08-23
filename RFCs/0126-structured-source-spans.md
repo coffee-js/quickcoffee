@@ -31,6 +31,8 @@ RFC 0127 完成第一步中可与原始物理行一一对应的 lexer token 与 
 
 RFC 0128 把嵌入宿主、命名模块与 CLI 文件入口已知的不透明来源名附到现有 label，并为 `qcoffee --json` 增加可选 `source` 字段；它不为无位置错误合成 label，也不提前声称运行期 span 已完成。
 
+RFC 0129 让 AST lowering 的控制流上下文错误、单文件模块指令错误与重复 export 保留触发关键字 span；一般成功表达式的 bytecode/runtime 归因仍未完成。
+
 字节码指纹在 span 未进入规范编码前不得改变。任何无法可靠定位的错误宁可没有标签，也不得伪造列或来源名。
 
 ## 验收

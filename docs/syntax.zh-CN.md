@@ -4,6 +4,8 @@
 
 嵌入诊断通过 `Error::labels()` 暴露有序的 primary/secondary 标签。`SourceSpan` 包含可选的不透明来源名、起点与可选的不含终点；列从 1 开始按 Unicode 标量计数。物理行未被预处理改写时，lexer/parser 错误携带精确范围；合成或已改写输入保持行级位置，不虚构列。`compile_named`、`compile_program_named` 与 `Context::eval_named` 会把宿主给出的名称原样保存在已有 label，命名模块和 CLI 文件输入亦同；匿名调用仍无名称。`Error::position()` 继续作为 primary 起点的兼容访问器。
 
+`break`、`continue`、`return` 的 lowering 上下文错误、单文件误用模块指令及重复模块导出会保留触发关键字 span。一般 bytecode 与运行期归因仍待后续完成；预处理改写输入继续降级为可靠行号，而不猜测列。
+
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 
 内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，指纹使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用和取消，资源错误不能由脚本 `catch` 吞掉，也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。

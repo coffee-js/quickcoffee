@@ -40,9 +40,9 @@ pub(crate) enum Expr {
         Option<Box<Expr>>,
         Box<Expr>,
     ),
-    Break,
-    Continue,
-    Return(Option<Box<Expr>>),
+    Break(TokenSpan),
+    Continue(TokenSpan),
+    Return(Option<Box<Expr>>, TokenSpan),
     Function(Vec<Param>, Option<String>, Box<Expr>),
     Class(String, Vec<Param>, Box<Expr>),
     Block(Vec<Stmt>),
@@ -80,16 +80,16 @@ pub(crate) struct Param {
 pub(crate) enum Stmt {
     Assign(String, Expr),
     Destructure(Pattern, Expr),
-    Import(Vec<(String, String)>, String),
-    ExportAssign(String, Expr),
-    ExportNames(Vec<(String, String)>),
+    Import(Vec<(String, String)>, String, TokenSpan),
+    ExportAssign(String, Expr, TokenSpan),
+    ExportNames(Vec<(String, String)>, TokenSpan),
     Expr(Expr),
 }
 /// Parsed module directives plus the executable module body.
 #[derive(Clone, Debug)]
 pub(crate) struct ModuleSyntax {
     pub imports: Vec<(Vec<(String, String)>, String)>,
-    pub exports: Vec<(String, String)>,
+    pub exports: Vec<(String, String, TokenSpan)>,
     pub body: Vec<Stmt>,
 }
 #[derive(Clone, Copy, Debug)]
@@ -159,12 +159,16 @@ pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
     let mut body = Vec::new();
     for statement in statements {
         match statement {
-            Stmt::Import(bindings, specifier) => imports.push((bindings, specifier)),
-            Stmt::ExportAssign(name, value) => {
-                exports.push((name.clone(), name.clone()));
+            Stmt::Import(bindings, specifier, _) => imports.push((bindings, specifier)),
+            Stmt::ExportAssign(name, value, span) => {
+                exports.push((name.clone(), name.clone(), span));
                 body.push(Stmt::Assign(name, value));
             }
-            Stmt::ExportNames(names) => exports.extend(names),
+            Stmt::ExportNames(names, span) => exports.extend(
+                names
+                    .into_iter()
+                    .map(|(public, local)| (public, local, span)),
+            ),
             statement => body.push(statement),
         }
     }
@@ -241,10 +245,10 @@ impl Parser {
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
         if self.eat(&Token::Import) {
-            return self.import_statement();
+            return self.import_statement(self.spans[self.at - 1]);
         }
         if self.eat(&Token::Export) {
-            return self.export_statement();
+            return self.export_statement(self.spans[self.at - 1]);
         }
         if let Some(pattern) = self.assignment_pattern() {
             let value = self.expr(0)?;
@@ -269,15 +273,15 @@ impl Parser {
             }
         }
     }
-    fn import_statement(&mut self) -> Result<Stmt, Error> {
+    fn import_statement(&mut self, span: TokenSpan) -> Result<Stmt, Error> {
         let bindings = self.named_bindings()?;
         self.expect(&Token::From)?;
         let Token::String(specifier, false) = self.next() else {
             return Err(self.previous_error("module specifier must be a literal string"));
         };
-        Ok(Stmt::Import(bindings, specifier))
+        Ok(Stmt::Import(bindings, specifier, span))
     }
-    fn export_statement(&mut self) -> Result<Stmt, Error> {
+    fn export_statement(&mut self, span: TokenSpan) -> Result<Stmt, Error> {
         if self.eat(&Token::LBrace) {
             self.at = self.at.saturating_sub(1);
             return Ok(Stmt::ExportNames(
@@ -285,13 +289,14 @@ impl Parser {
                     .into_iter()
                     .map(|(local, public)| (public, local))
                     .collect(),
+                span,
             ));
         }
         let Token::Ident(name) = self.next() else {
             return Err(self.previous_error("expected exported name or named export list"));
         };
         self.expect(&Token::Assign)?;
-        Ok(Stmt::ExportAssign(name, self.expr(0)?))
+        Ok(Stmt::ExportAssign(name, self.expr(0)?, span))
     }
     fn named_bindings(&mut self) -> Result<Vec<(String, String)>, Error> {
         self.expect(&Token::LBrace)?;
@@ -883,6 +888,7 @@ impl Parser {
         Ok(args)
     }
     fn prefix(&mut self) -> Result<Expr, Error> {
+        let span = self.spans[self.at];
         match self.next() {
             Token::Number(n) => Ok(Expr::Number(n)),
             Token::String(s, interpolate) => {
@@ -991,8 +997,8 @@ impl Parser {
                 Box::new(self.body()?),
             )),
             Token::For => self.for_prefix(),
-            Token::Break => Ok(Expr::Break),
-            Token::Continue => Ok(Expr::Continue),
+            Token::Break => Ok(Expr::Break(span)),
+            Token::Continue => Ok(Expr::Continue(span)),
             Token::Return => {
                 let value = if matches!(
                     self.peek(),
@@ -1007,7 +1013,7 @@ impl Parser {
                 } else {
                     Some(Box::new(self.expr(0)?))
                 };
-                Ok(Expr::Return(value))
+                Ok(Expr::Return(value, span))
             }
             Token::Class => {
                 let name = match self.next() {
