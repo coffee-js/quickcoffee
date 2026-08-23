@@ -104,9 +104,12 @@ fn checked_compilation_does_not_split_failed_control_flow_continuations() {
 
 #[test]
 fn checked_compilation_handles_many_independent_errors_in_one_pass() {
-    let source = (0..1_024)
-        .map(|index| format!("broken{index} = [1 2]\n"))
-        .collect::<String>();
+    use std::fmt::Write as _;
+
+    let mut source = String::with_capacity(24 * 1_024);
+    for index in 0..1_024 {
+        writeln!(&mut source, "broken{index} = [1 2]").unwrap();
+    }
     let errors = Engine::new()
         .check_program(&source)
         .expect_err("every malformed top-level statement should be reported");
