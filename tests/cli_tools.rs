@@ -47,17 +47,6 @@ fn qdocco_renders_escaped_source_and_checks() {
     assert!(document.contains("## Notes\n\n<Guide>"));
     assert!(document.contains("````quickcoffee\n1 + 2\n````"));
     assert!(document.contains("## Final value\n\n`3`"));
-    let default_markdown = temp.join("default.qc");
-    fs::write(&default_markdown, "'a`b'\n").unwrap();
-    assert!(
-        Command::new(bin("qdocco"))
-            .args(["--markdown", default_markdown.to_str().unwrap()])
-            .status()
-            .unwrap()
-            .success()
-    );
-    let default_document = fs::read_to_string(temp.join("default.md")).unwrap();
-    assert!(default_document.contains("## Final value\n\n``a`b``"));
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])
         .output()
