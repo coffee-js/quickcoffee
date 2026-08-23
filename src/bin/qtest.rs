@@ -27,7 +27,7 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 fn usage() {
-    eprintln!("Usage: qtest [--fuel N] [--stats] [--json] FILE_OR_DIRECTORY...");
+    eprintln!("Usage: qtest [--fuel N] [--stats] [--json|--tap] FILE_OR_DIRECTORY...");
 }
 fn json_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -46,10 +46,19 @@ fn json_escape(value: &str) -> String {
     }
     out
 }
+fn tap_comments(detail: &str) {
+    for line in detail.lines() {
+        println!("# {line}");
+    }
+    if detail.is_empty() {
+        println!("#");
+    }
+}
 fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
     let mut stats = false;
     let mut json = false;
+    let mut tap = false;
     let mut inputs: Vec<String> = vec![];
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -67,6 +76,7 @@ fn main() -> ExitCode {
             },
             "--stats" => stats = true,
             "--json" => json = true,
+            "--tap" => tap = true,
             value if !value.starts_with('-') => inputs.push(value.to_string()),
             _ => {
                 usage();
@@ -78,19 +88,37 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     }
+    if json && tap {
+        eprintln!("--json and --tap cannot be used together");
+        return ExitCode::from(2);
+    }
     let mut files = vec![];
     for input in inputs {
         if let Err(error) = collect(Path::new(&input), &mut files) {
-            eprintln!("not ok {input}: {error}");
+            if tap {
+                println!("TAP version 13");
+                println!("Bail out! {input}: {error}");
+            } else {
+                eprintln!("not ok {input}: {error}");
+            }
             return ExitCode::from(1);
         }
     }
     if files.is_empty() {
-        eprintln!("no .qc test files found");
+        if tap {
+            println!("TAP version 13");
+            println!("Bail out! no .qc test files found");
+        } else {
+            eprintln!("no .qc test files found");
+        }
         return ExitCode::from(2);
     }
+    if tap {
+        println!("TAP version 13");
+    }
     let mut failed = 0;
-    for path in files {
+    let total = files.len();
+    for (index, path) in files.into_iter().enumerate() {
         let label = path.display();
         let outcome = fs::read_to_string(&path)
             .map_err(|e| e.to_string())
@@ -113,6 +141,8 @@ fn main() -> ExitCode {
                         "{{\"ok\":true,\"file\":\"{}\"}}",
                         json_escape(&label.to_string())
                     );
+                } else if tap {
+                    println!("ok {} - {label}", index + 1);
                 } else {
                     println!("ok {label}");
                 }
@@ -126,6 +156,9 @@ fn main() -> ExitCode {
                         json_escape(&label.to_string()),
                         json_escape(&detail)
                     );
+                } else if tap {
+                    println!("not ok {} - {label}", index + 1);
+                    tap_comments(&detail);
                 } else {
                     eprintln!("not ok {label}: {detail}");
                 }
@@ -139,11 +172,17 @@ fn main() -> ExitCode {
                         json_escape(&label.to_string()),
                         json_escape(&detail)
                     );
+                } else if tap {
+                    println!("not ok {} - {label}", index + 1);
+                    tap_comments(&detail);
                 } else {
                     eprintln!("not ok {label}: {detail}");
                 }
             }
         }
+    }
+    if tap {
+        println!("1..{total}");
     }
     if failed == 0 {
         ExitCode::SUCCESS

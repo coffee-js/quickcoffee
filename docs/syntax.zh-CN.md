@@ -2,7 +2,7 @@
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 
-内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`--stats` 的执行统计仍写入标准错误。
+内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`--stats` 的执行统计仍写入标准错误。
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。
 
