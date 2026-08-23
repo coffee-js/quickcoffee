@@ -129,9 +129,9 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
-            temp.display(),
-            temp.display()
+            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
+            temp.join("a-fail.qc").display(),
+            temp.join("b-pass.qc").display()
         )
     );
     let conflict = Command::new(bin("qtest"))
