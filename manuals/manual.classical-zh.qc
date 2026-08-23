@@ -26,6 +26,7 @@
 ## qcoffee --fingerprint FILE 出十六位小写字节码键，先验之而不行其文。
 ## qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。
 ## 指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。
+## qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 ## Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 ## -- 后之参，以常字符串数组 argv 见于文中。
 ## 其内府皆常函，如 print、len、type、range、str、keys、values、join、split、assert。

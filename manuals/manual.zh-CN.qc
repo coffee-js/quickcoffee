@@ -19,6 +19,7 @@
 ## qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 ## qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
 ## 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
+## qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
 ## -- 后的参数以普通字符串数组 argv 暴露给程序。
 ## 它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。
