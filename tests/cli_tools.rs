@@ -148,6 +148,23 @@ fn qtest_reports_success_and_failure() {
 
 #[cfg(unix)]
 #[test]
+fn qtest_directory_errors_name_the_failing_child_path() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-broken-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let broken = temp.join("broken.qc");
+    std::os::unix::fs::symlink(temp.join("missing.qc"), &broken).unwrap();
+
+    let output = Command::new(bin("qtest"))
+        .arg(temp.to_str().unwrap())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&broken.display().to_string()));
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[cfg(unix)]
+#[test]
 fn qtest_ignores_recursive_directory_symlinks() {
     use std::os::unix::fs::symlink;
 
