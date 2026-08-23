@@ -63,3 +63,64 @@ fn package_manifest_declares_the_documented_msrv() {
         "Cargo.toml must declare the RFC 0110 MSRV"
     );
 }
+
+#[test]
+fn coffeescript_feature_matrix_covers_the_official_language_reference() {
+    let matrix = fs::read_to_string("docs/coffeescript-2016-matrix.md")
+        .expect("CoffeeScript feature matrix exists");
+    let sections = [
+        "Functions",
+        "Objects and Arrays",
+        "Lexical Scoping and Variable Safety",
+        "If, Else, Unless, and Conditional Assignment",
+        "Splats…",
+        "Loops and Comprehensions",
+        "Array Slicing and Splicing with Ranges",
+        "Everything is an Expression (at least, as much as possible)",
+        "Operators and Aliases",
+        "The Existential Operator",
+        "Classes, Inheritance, and Super",
+        "Destructuring Assignment",
+        "Bound Functions, Generator Functions",
+        "Embedded JavaScript",
+        "Switch/When/Else",
+        "Try/Catch/Finally",
+        "Chained Comparisons",
+        "String Interpolation, Block Strings, and Block Comments",
+        "Tagged Template Literals",
+        "Block Regular Expressions",
+        "Modules",
+    ];
+
+    for section in sections {
+        let marker = format!("| {section} |");
+        assert_eq!(
+            matrix.matches(&marker).count(),
+            1,
+            "matrix must contain exactly one row for official section {section:?}"
+        );
+    }
+
+    let rows = matrix
+        .lines()
+        .filter(|line| line.starts_with("| ") && !line.starts_with("|---"))
+        .skip(1)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), sections.len(), "matrix has an unexpected row");
+    for row in rows {
+        let columns = row
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(columns.len(), 4, "matrix row must have four columns: {row}");
+        assert!(
+            matches!(columns[1], "Implement" | "Adapt" | "Reject"),
+            "matrix row has an invalid status: {row}"
+        );
+        assert!(
+            columns[3].contains("(../RFCs/"),
+            "matrix row must link normative RFC evidence: {row}"
+        );
+    }
+}

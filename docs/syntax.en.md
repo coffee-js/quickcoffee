@@ -1,5 +1,7 @@
 # QuickCoffee 0.1 syntax scope
 
+For a section-by-section comparison with the CoffeeScript 1.12.7 language reference, including explicit **Implement**, **Adapt**, and **Reject** decisions, see the [CoffeeScript 2016 feature matrix](coffeescript-2016-matrix.md).
+
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 
 Cargo package metadata links embedding users to the repository, README, license, and docs.rs API.
