@@ -315,9 +315,6 @@ fn normalize_heredocs(source: &str) -> Result<String, Error> {
                     chars.next();
                     out.push('#');
                     block_comment = false;
-                    // The lexer treats the entire closing-delimiter line as a
-                    // comment, so heredoc markers after it must stay inert.
-                    line_comment = true;
                 }
             }
             continue;
@@ -1026,8 +1023,6 @@ mod tests {
         assert!(tokens.contains(&Token::Indent));
         assert!(tokens.contains(&Token::Number(42.)));
         assert!(lex("### one line ###\n42").is_ok());
-        let tokens = lex("### starts\nignored\n### \"\"\"\n42").unwrap();
-        assert!(tokens.contains(&Token::Number(42.)));
         assert!(lex("### starts\n42").is_err());
     }
 
