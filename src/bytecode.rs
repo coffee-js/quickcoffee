@@ -408,7 +408,9 @@ impl FingerprintEncoder {
         }
     }
     fn i32(&mut self, value: i32) {
-        self.u64(value as i64 as u64);
+        for byte in value.to_le_bytes() {
+            self.byte(byte);
+        }
     }
     fn bool(&mut self, value: bool) {
         self.byte(u8::from(value));
@@ -676,6 +678,23 @@ impl FingerprintEncoder {
             }
             Instruction::Return => simple!(0x7b),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FingerprintEncoder;
+
+    #[test]
+    fn fingerprint_i32_uses_four_little_endian_bytes() {
+        let mut fingerprint = FingerprintEncoder::new();
+        fingerprint.i32(-2);
+
+        let mut expected = FingerprintEncoder::new();
+        for byte in (-2_i32).to_le_bytes() {
+            expected.byte(byte);
+        }
+        assert_eq!(fingerprint.finish(), expected.finish());
     }
 }
 
