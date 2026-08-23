@@ -7,7 +7,7 @@
 ## qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 ## qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
 ## 'a☕中'[1] 为 '☕'，'a☕中'[1..2] 为 '☕中'；字符串索引按 Unicode 标量。
-## for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，不可用 by。
+## for character, index in 'a☕中' then index 得 [0, 1, 2]；字符串按 Unicode 标量遍历，亦可用正整数 by。
 ## [head, tail...] = [1, 2, 3] 将 tail 绑定为 [2, 3]；数组模式 rest 必须居末。
 ## qtest --fuel N 为每份可执行文档设置独立指令预算。
 ## qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
@@ -22,6 +22,7 @@
 ## qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
 ## 嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值。
 ## cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
+## 宿主可用 Value::kind() 分流类型，用 Value::is_nil() 判断 nil，无须检查内部容器。
 ## Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
 ## Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
 ## -- 后的参数以普通字符串数组 argv 暴露给程序。

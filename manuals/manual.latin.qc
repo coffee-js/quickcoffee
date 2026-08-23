@@ -10,7 +10,7 @@
 ## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
 ## qcoffee --interactive --stats unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
 ## 'a☕中'[1] est '☕', et 'a☕中'[1..2] est '☕中'; indices stringarum scalas Unicode sequuntur.
-## for character, index in 'a☕中' then index indices Unicode scalarum [0, 1, 2] reddit; iteratio stringarum by non accipit.
+## for character, index in 'a☕中' then index indices Unicode scalarum [0, 1, 2] reddit; iteratio stringarum gradus positivos by accipit.
 ## [head, tail...] = [1, 2, 3] tail ad [2, 3] ligat; rest in forma array postremum esse debet.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
@@ -25,6 +25,7 @@
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
 ## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis.
 ## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
+## Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
 ## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.

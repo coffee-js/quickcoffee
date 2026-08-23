@@ -84,7 +84,7 @@ Use `switch value` with indented `when pattern` branches for strict-equality sel
 
 Exceptions use `try`, `catch error`, optional `finally`, and `throw value`. A catch receives a stable error string rather than a JavaScript Error object; function returns also run applicable finalizers.
 
-For Rust embedding, create `Context`, optionally call `with_fuel`, register a host callback with `add_native`, then call `eval`; callbacks can return `Error::runtime("message")` and the script may catch it. For repeated execution, compile once with `Engine::compile_program` (which verifies once) and pass the shared `Program` to `run_program`; cloning that handle does not copy bytecode or repeat verification. `Value::from`, `Value::string`, `Value::array`, and `Value::map` construct host values without exposing VM reference-counting internals.
+For Rust embedding, create `Context`, optionally call `with_fuel`, register a host callback with `add_native`, then call `eval`; callbacks can return `Error::runtime("message")` and the script may catch it. For repeated execution, compile once with `Engine::compile_program` (which verifies once) and pass the shared `Program` to `run_program`; cloning that handle does not copy bytecode or repeat verification. `Value::from`, `Value::string`, `Value::array`, and `Value::map` construct host values without exposing VM reference-counting internals; `Value::kind()` and `Value::is_nil()` provide stable type checks.
 
 `Context::last_execution()` returns public `ExecutionStats` (`instructions` and `fuel_remaining`) for the latest successful or runtime-failed execution; compile and verification errors leave the previous record unchanged.
 

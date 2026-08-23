@@ -10,7 +10,7 @@
 ## qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
 ## qcoffee --interactive --stats केवलं कार्यितायै वा runtime-दोषयुक्तायै non-empty पङ्क्त्यै instruction तथा fuel लेखं लिखति; parse अथवा verify-दोषे नूतनं लेखं न लिखति।
 ## 'a☕中'[1] '☕' अस्ति, 'a☕中'[1..2] '☕中' अस्ति; string-index Unicode-scalar-अनुसारी अस्ति।
-## for character, index in 'a☕中' then index Unicode-scalar-अङ्कान् [0, 1, 2] ददाति; string-iteration मध्ये by नास्ति।
+## for character, index in 'a☕中' then index Unicode-scalar-अङ्कान् [0, 1, 2] ददाति; string-iteration मध्ये धनात्मक by-क्रमः अस्ति।
 ## [head, tail...] = [1, 2, 3] tail-नाम्नि [2, 3] बध्नाति; array-pattern rest अन्तिमः भवति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
 ## qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
@@ -25,6 +25,7 @@
 ## qdocco --markdown टिप्पणीन्, सीमितं QuickCoffee-कोडं, अन्तिम-मूल्यं च पठनीय Markdown-फलके लिखति।
 ## अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति।
 ## `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
+## Host `Value::kind()` द्वारा प्रकारं विभजति, `Value::is_nil()` द्वारा nil परीक्षते, आन्तरिक-container न पश्यति।
 ## Cargo-वस्तु-विवरणानि अन्तःस्थापकान् repository, docs.rs-API, README, licence च प्रति नयन्ति।
 ## Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
 ## -- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।

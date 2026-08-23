@@ -1,3 +1,5 @@
+//! Test runner for executable QuickCoffee scripts and literate manuals.
+
 use quickcoffee::{Context, Value};
 use std::{
     env, fs,

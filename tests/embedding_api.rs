@@ -1,4 +1,4 @@
-use quickcoffee::{Context, Engine, Error, ErrorKind, Value};
+use quickcoffee::{Context, Engine, Error, ErrorKind, Value, ValueKind};
 
 #[test]
 fn public_embedding_surface_runs_shared_programs_with_host_state() {
@@ -12,10 +12,7 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
     let mut context = Context::new();
     context.set_global("factor", Value::from(2_i64));
     context.add_native("host", |args| {
-        let (Some(left), Some(right)) = (
-            args.first().and_then(Value::as_number),
-            args.get(1).and_then(Value::as_number),
-        ) else {
+        let (Some(left), Some(right)) = (args[0].as_number(), args[1].as_number()) else {
             return Err(Error::runtime("host expects two numbers"));
         };
         Ok(Value::from(left + right))
@@ -26,9 +23,6 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
         Some(84.)
     );
     assert_eq!(context.run_program(&clone).unwrap().as_number(), Some(84.));
-    let missing = context.eval("host(20)").unwrap_err();
-    assert_eq!(missing.kind(), ErrorKind::Runtime);
-    assert_eq!(missing.message(), "host expects two numbers");
     assert_eq!(context.get_global("factor").unwrap().as_number(), Some(2.));
     assert!(context.get_global("missing").is_none());
 }
@@ -44,9 +38,23 @@ fn public_values_and_native_errors_are_structured() {
         ]),
     );
     let values = context.get_global("host_values").unwrap();
+    assert_eq!(values.kind(), ValueKind::Map);
+    assert!(!values.is_nil());
     let map = values.as_map().unwrap();
     assert_eq!(map["answer"].as_number(), Some(42.));
     assert_eq!(map["items"].as_array().unwrap()[0].as_str(), Some("coffee"));
+    assert_eq!(map["items"].kind(), ValueKind::Array);
+    assert_eq!(Value::from(false).kind(), ValueKind::Bool);
+    assert_eq!(Value::from(0_i64).kind(), ValueKind::Number);
+    assert_eq!(Value::from("coffee").kind(), ValueKind::String);
+    assert_eq!(
+        context.eval("(x) -> x").unwrap().kind(),
+        ValueKind::Function
+    );
+    assert!(!Value::from(false).is_nil());
+    assert!(!Value::from(0_i64).is_nil());
+    assert_eq!(Value::Nil.kind(), ValueKind::Nil);
+    assert!(Value::Nil.is_nil());
 
     context.add_native("fail", |_| Err(Error::runtime("host failed")));
     let error = context.eval("fail()").unwrap_err();

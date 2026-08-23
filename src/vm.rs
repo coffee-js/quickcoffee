@@ -11,14 +11,41 @@ use std::{
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
 
+/// Stable type tag for values crossing the embedding boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueKind {
+    /// The sole empty value.
+    Nil,
+    /// A strict boolean.
+    Bool,
+    /// An IEEE-754 number.
+    Number,
+    /// An immutable UTF-8 string.
+    String,
+    /// An immutable array.
+    Array,
+    /// An immutable string-keyed map.
+    Map,
+    /// An opaque bytecode or native function.
+    Function,
+}
+
+/// An immutable value crossing the QuickCoffee/host boundary.
 #[derive(Clone)]
 pub enum Value {
+    /// The sole empty value.
     Nil,
+    /// A strict boolean.
     Bool(bool),
+    /// An IEEE-754 number used by the language.
     Number(f64),
+    /// An immutable UTF-8 string.
     String(Rc<str>),
+    /// An immutable array of values.
     Array(Rc<Vec<Value>>),
+    /// An immutable map with string keys.
     Map(Rc<BTreeMap<String, Value>>),
+    /// An opaque bytecode or native function.
     Function(Rc<Function>),
 }
 impl fmt::Debug for Value {
@@ -66,6 +93,22 @@ impl fmt::Display for Value {
     }
 }
 impl Value {
+    /// Returns a stable type tag without exposing the internal container representation.
+    pub fn kind(&self) -> ValueKind {
+        match self {
+            Self::Nil => ValueKind::Nil,
+            Self::Bool(_) => ValueKind::Bool,
+            Self::Number(_) => ValueKind::Number,
+            Self::String(_) => ValueKind::String,
+            Self::Array(_) => ValueKind::Array,
+            Self::Map(_) => ValueKind::Map,
+            Self::Function(_) => ValueKind::Function,
+        }
+    }
+    /// Returns whether this value is the language's `nil` value.
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Self::Nil)
+    }
     /// Builds a QuickCoffee string without exposing its `Rc<str>` storage.
     pub fn string(value: impl Into<Rc<str>>) -> Self {
         Self::String(value.into())
@@ -87,6 +130,7 @@ impl Value {
                 .collect(),
         ))
     }
+    /// Returns the number, if this value is numeric.
     pub fn as_number(&self) -> Option<f64> {
         if let Self::Number(x) = self {
             Some(*x)
@@ -94,6 +138,7 @@ impl Value {
             None
         }
     }
+    /// Returns the boolean, if this value is boolean.
     pub fn as_bool(&self) -> Option<bool> {
         if let Self::Bool(x) = self {
             Some(*x)
@@ -101,6 +146,7 @@ impl Value {
             None
         }
     }
+    /// Returns the UTF-8 view, if this value is a string.
     pub fn as_str(&self) -> Option<&str> {
         if let Self::String(x) = self {
             Some(x)
@@ -108,6 +154,7 @@ impl Value {
             None
         }
     }
+    /// Returns an immutable slice, if this value is an array.
     pub fn as_array(&self) -> Option<&[Value]> {
         if let Self::Array(values) = self {
             Some(values)
@@ -115,6 +162,7 @@ impl Value {
             None
         }
     }
+    /// Returns an immutable map view, if this value is a map.
     pub fn as_map(&self) -> Option<&BTreeMap<String, Value>> {
         if let Self::Map(values) = self {
             Some(values)
@@ -151,13 +199,17 @@ impl From<&str> for Value {
 /// Stable category for an error crossing the Rust embedding boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
+    /// Lexing or parsing failed.
     Parse,
+    /// Untrusted bytecode failed verification.
     Verify,
+    /// Execution or a host callback failed.
     Runtime,
 }
 /// One-based source line attached to a lexical or parse diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourcePosition {
+    /// One-based line number.
     pub line: usize,
 }
 impl fmt::Display for ErrorKind {
@@ -169,6 +221,7 @@ impl fmt::Display for ErrorKind {
         }
     }
 }
+/// A structured error suitable for CLI display or host-side branching.
 #[derive(Debug, Clone)]
 pub struct Error {
     kind: ErrorKind,
@@ -230,6 +283,7 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+/// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
 /// Opaque callable values are constructed by QuickCoffee or `Context::add_native`.
 pub struct Function {
@@ -266,6 +320,7 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
     p.and_then(|p| lookup(&p, n))
 }
 
+/// A reusable compiler that does not hold execution state.
 #[derive(Clone, Default)]
 pub struct Engine;
 /// A reference-counted compiled program for repeated execution.
@@ -279,6 +334,7 @@ struct ProgramInner {
     chunk: Rc<Chunk>,
     verified: Cell<bool>,
 }
+/// A cheaply cloneable, verified bytecode program for repeated execution.
 #[derive(Clone, Debug)]
 pub struct Program(Rc<ProgramInner>);
 impl From<Chunk> for Program {
@@ -290,6 +346,7 @@ impl From<Chunk> for Program {
     }
 }
 impl Program {
+    /// Verifies the program and caches a successful result.
     pub fn verify(&self) -> Result<(), Error> {
         let result = self.0.chunk.verify();
         if result.is_ok() {
@@ -297,6 +354,7 @@ impl Program {
         }
         result
     }
+    /// Returns a human-readable disassembly of the shared bytecode.
     pub fn disassemble(&self) -> String {
         self.0.chunk.disassemble()
     }
@@ -313,9 +371,11 @@ impl Program {
     }
 }
 impl Engine {
+    /// Creates a stateless compiler.
     pub fn new() -> Self {
         Self
     }
+    /// Compiles and verifies source into an owned bytecode chunk.
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
         compile(source)
     }
@@ -335,6 +395,7 @@ pub struct ExecutionStats {
     /// Fuel left after the execution stopped.
     pub fuel_remaining: u64,
 }
+/// An execution context containing globals, builtins, and a per-run fuel budget.
 pub struct Context {
     engine: Engine,
     global: Env,
@@ -347,6 +408,7 @@ impl Default for Context {
     }
 }
 impl Context {
+    /// Creates a context with standard library builtins and the default fuel budget.
     pub fn new() -> Self {
         let global = env(None);
         let mut x = Self {
@@ -358,6 +420,7 @@ impl Context {
         x.install_builtins();
         x
     }
+    /// Returns a builder-style context with the supplied fuel budget.
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.set_fuel(fuel);
         self
@@ -378,6 +441,7 @@ impl Context {
     pub fn last_execution(&self) -> ExecutionStats {
         self.last_execution
     }
+    /// Installs or replaces an immutable global value visible to later runs.
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
         self.global.borrow_mut().values.insert(name.into(), value);
     }
@@ -385,6 +449,7 @@ impl Context {
     pub fn get_global(&self, name: &str) -> Option<Value> {
         lookup(&self.global, name)
     }
+    /// Registers a host callback as an opaque callable global.
     pub fn add_native<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&[Value]) -> Result<Value, Error> + 'static,
@@ -396,10 +461,12 @@ impl Context {
             })),
         );
     }
+    /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {
         let program = self.engine.compile_program(source)?;
         self.run_program(&program)
     }
+    /// Verifies and executes an owned bytecode chunk.
     pub fn run(&mut self, chunk: Chunk) -> Result<Value, Error> {
         self.run_program(&chunk.into())
     }
@@ -564,6 +631,7 @@ enum IterationKind {
     String {
         values: Rc<Vec<Value>>,
         position: usize,
+        step: usize,
     },
     Map {
         entries: Vec<(String, Value)>,
@@ -793,11 +861,6 @@ impl Vm {
                                 },
                             }),
                             Value::String(value) => {
-                                if step != 1 {
-                                    return Err(Error::runtime(
-                                        "string iteration does not support a by step",
-                                    ));
-                                }
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(
@@ -809,6 +872,7 @@ impl Vm {
                                                 .collect(),
                                         ),
                                         position: 0,
+                                        step,
                                     },
                                 });
                             }
@@ -855,7 +919,11 @@ impl Vm {
                                     }
                                     value
                                 }
-                                IterationKind::String { values, position } => {
+                                IterationKind::String {
+                                    values,
+                                    position,
+                                    step,
+                                } => {
                                     let value = values.get(*position).cloned().map(|value| {
                                         if patterns.len() == 2 {
                                             vec![value, Value::Number(*position as f64)]
@@ -864,7 +932,7 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position += 1;
+                                        *position = position.saturating_add(*step);
                                     }
                                     value
                                 }

@@ -323,12 +323,12 @@ impl Parser {
                             }
                             break;
                         }
-                        let (key, literal_key) = match self.next() {
-                            Token::Ident(key) => (key, false),
+                        let key = match self.next() {
+                            Token::Ident(key) => key,
                             Token::String(key, interpolate)
                                 if !interpolate || !key.contains("#{") =>
                             {
-                                (key, true)
+                                key
                             }
                             _ => {
                                 self.at = saved;
@@ -341,9 +341,6 @@ impl Parser {
                                 return None;
                             };
                             self.pattern_default(pattern).ok()?
-                        } else if literal_key {
-                            self.at = saved;
-                            return None;
                         } else if key == "_" {
                             self.pattern_default(Pattern::Ignore).ok()?
                         } else {
@@ -1147,7 +1144,7 @@ impl Parser {
         let iterable = self.expr(0)?;
         let step = if self.eat(&Token::By) {
             if map {
-                return Err(self.parse_error("by is supported only for array iteration"));
+                return Err(self.parse_error("by is supported only for enumerable iteration"));
             }
             Some(Box::new(self.expr(0)?))
         } else {

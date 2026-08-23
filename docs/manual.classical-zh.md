@@ -89,4 +89,4 @@ QuickCoffee 者，Rust 所为字节码机也，非 JavaScript 之运行时。其
 
 一逻辑行中，函调用可略括，如 `implicit_answer = implicit_add 20, 22`；遇比较或布局之界，仍宜明括。
 
-`qtest --json` 各试篇出定 JSON，`qtest --tap` 出 TAP 13；`qcoffee --fingerprint FILE` 不行其文而出定式字节码键；`qbench --json` 记编、验、行之时，皆有语义护栏；`qdocco --markdown` 出可阅文学编程 Markdown。嵌者可呼 `Context::set_fuel` 改复用境之限，并行 `cargo run --example embed` 观宿主全例。
+`qtest --json` 各试篇出定 JSON，`qtest --tap` 出 TAP 13；`qcoffee --fingerprint FILE` 不行其文而出定式字节码键；`qbench --json` 记编、验、行之时，皆有语义护栏；`qdocco --markdown` 出可阅文学编程 Markdown。嵌者可呼 `Context::set_fuel` 改复用境之限，以 `Value::kind()`、`Value::is_nil()` 别值之类，并行 `cargo run --example embed` 观宿主全例。

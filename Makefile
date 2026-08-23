@@ -16,7 +16,7 @@ clippy:
 	cargo clippy --locked --all-targets -- -D warnings
 
 api-doc:
-	RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+	RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --locked --no-deps
 
 doc-check:
 	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.zh-CN.qc
