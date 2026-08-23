@@ -139,6 +139,45 @@ fn execution_stats_classify_hot_vm_operations() {
 }
 
 #[test]
+fn execution_stats_count_managed_value_and_environment_allocations() {
+    let mut context = Context::new();
+    assert_eq!(
+        context
+            .eval("make = (value) -> [value]\nmake(42)")
+            .unwrap()
+            .as_array()
+            .and_then(|values| values[0].as_number()),
+        Some(42.)
+    );
+    let stats = context.last_execution();
+    assert_eq!(stats.value_allocations, 2);
+    assert_eq!(stats.environment_allocations, 1);
+
+    context.add_native("host_array", |_| Ok(Value::array(vec![Value::from(1_i64)])));
+    assert_eq!(
+        context
+            .eval("host_array()")
+            .unwrap()
+            .as_array()
+            .map(<[Value]>::len),
+        Some(1)
+    );
+    let stats = context.last_execution();
+    assert_eq!(stats.value_allocations, 0);
+    assert_eq!(stats.environment_allocations, 0);
+
+    assert_eq!(
+        context
+            .eval("keys({a: 1, b: 2})")
+            .unwrap()
+            .as_array()
+            .map(<[Value]>::len),
+        Some(2)
+    );
+    assert_eq!(context.last_execution().value_allocations, 3);
+}
+
+#[test]
 fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
     let mut context = Context::new().with_fuel(1_000).with_max_call_depth(3);
     assert_eq!(context.max_call_depth(), 3);

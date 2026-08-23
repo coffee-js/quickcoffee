@@ -26,6 +26,8 @@ fn named_static_imports_and_exports_keep_module_globals_private() {
     let stats = context.last_execution();
     assert!(stats.name_loads > 0);
     assert!(stats.calls > 0);
+    assert!(stats.value_allocations > 0);
+    assert!(stats.environment_allocations > 0);
 }
 
 #[test]

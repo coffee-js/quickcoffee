@@ -6,7 +6,7 @@ QuickCoffee manual
 
 Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 qcoffee - reads a QuickCoffee program from standard input.
-qcoffee --stats writes instruction, remaining-fuel, name, call, container, iterator, and exception-path counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
+qcoffee --stats writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
 qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
@@ -25,6 +25,7 @@ Engine::compile_program verifies once; Context::run_program reuses the immutable
 Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
 qbench --json emits one timing record per guarded workload; --iterations controls sample count.
+Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by --iterations or --repeat.
 qbench --compare-qjs PATH emits a separate qcompare CLI comparison using the caller-supplied QuickJS path; it includes startup, parsing, compilation, and execution. Reports should use --repeat 11; each *_mad_ns field is the median absolute deviation from the median.
 Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.

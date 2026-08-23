@@ -198,6 +198,8 @@ fn execute_module(
     stats.container_ops += execution.container_ops;
     stats.iterator_ops += execution.iterator_ops;
     stats.exception_ops += execution.exception_ops;
+    stats.value_allocations += execution.value_allocations;
+    stats.environment_allocations += execution.environment_allocations;
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

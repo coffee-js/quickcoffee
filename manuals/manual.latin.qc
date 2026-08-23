@@ -5,7 +5,7 @@
 ## Indices negativi in seriebus et textu Unicode extremum elementum petunt.
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
-## qcoffee --stats numeros instructionum, alimenti reliqui, nominum, vocationum, vasorum, iterationum et errorum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
+## qcoffee --stats numeros instructionum, alimenti reliqui, viarum calidarum, valorum curatorum allocatarum et ambituum lexicalium allocatarum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 ## Moduli hospitis import/export nominata habent; Engine::compile_module et Context::run_module fontem solum per ModuleLoader hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
@@ -26,6 +26,7 @@
 ## Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
 ## qcoffee --fingerprint FILE eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
 ## qbench --json unam mensurae lineam pro unoquoque onere custodito emittit; --iterations numerum exemplorum regit.
+## Campi profile_* cuiusque lineae qbench ex uno cursu non mensurato veniunt et vias calidas allocationesque sine multiplicatione per --iterations aut --repeat referunt.
 ## qbench --compare-qjs PATH comparationem qcompare CLI separatam per viam QuickJS ab invocatore datam emittit; initium, analysin, compilationem et cursum continet. Relationes --repeat 11 utantur; quisque campus *_mad_ns deviationem absolutam medianam dat.
 ## Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.

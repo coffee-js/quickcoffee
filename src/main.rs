@@ -141,7 +141,7 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                 if report_stats {
                     let execution = context.last_execution();
                     eprintln!(
-                        "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={}",
+                        "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
                         execution.instructions,
                         execution.fuel_remaining,
                         execution.name_loads,
@@ -149,7 +149,9 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                         execution.calls,
                         execution.container_ops,
                         execution.iterator_ops,
-                        execution.exception_ops
+                        execution.exception_ops,
+                        execution.value_allocations,
+                        execution.environment_allocations
                     );
                 }
                 match result {
@@ -385,7 +387,7 @@ fn main() -> ExitCode {
     if stats {
         let execution = context.last_execution();
         eprintln!(
-            "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={}",
+            "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
             execution.instructions,
             execution.fuel_remaining,
             execution.name_loads,
@@ -393,7 +395,9 @@ fn main() -> ExitCode {
             execution.calls,
             execution.container_ops,
             execution.iterator_ops,
-            execution.exception_ops
+            execution.exception_ops,
+            execution.value_allocations,
+            execution.environment_allocations
         );
     }
     match result {
