@@ -7,8 +7,6 @@ use std::{
     process::ExitCode,
 };
 
-const EXECUTION_MODE_ALTERNATIVES: &str = "source inputs (-e SOURCE, FILE, and -), --check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives";
-
 fn usage() {
     eprintln!(
         "Usage: qcoffee [--fuel N] [--stats] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
@@ -130,7 +128,9 @@ fn main() -> ExitCode {
             },
             "--dump-bytecode" => {
                 if source.is_some() || dump || check || fingerprint || stats {
-                    eprintln!("{EXECUTION_MODE_ALTERNATIVES}");
+                    eprintln!(
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                    );
                     return ExitCode::from(2);
                 }
                 dump = true;
@@ -155,7 +155,9 @@ fn main() -> ExitCode {
             }
             "--check" => {
                 if source.is_some() || dump || check || fingerprint || stats {
-                    eprintln!("{EXECUTION_MODE_ALTERNATIVES}");
+                    eprintln!(
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                    );
                     return ExitCode::from(2);
                 }
                 check = true;
@@ -175,7 +177,9 @@ fn main() -> ExitCode {
             }
             "--fingerprint" => {
                 if source.is_some() || dump || check || fingerprint || stats {
-                    eprintln!("{EXECUTION_MODE_ALTERNATIVES}");
+                    eprintln!(
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                    );
                     return ExitCode::from(2);
                 }
                 fingerprint = true;
@@ -232,7 +236,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     if stats && (dump || check || fingerprint) {
-        eprintln!("{EXECUTION_MODE_ALTERNATIVES}");
+        eprintln!(
+            "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+        );
         return ExitCode::from(2);
     }
     let engine = Engine::new();

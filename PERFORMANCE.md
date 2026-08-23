@@ -543,6 +543,8 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 `qbench --json` 现在包含 `signed-by-iteration`，并在每轮编译、验证和执行后检查 `3333`。该负载不把数组复制到宿主侧，反向位置由 VM 的有符号步长直接推进；运行基准时应与 `stepped-iteration` 一起比较编译、验证和执行三个阶段。
 
+本次可复现实测（Apple arm64、Darwin 25.5.0、`rustc 1.94.0`，release，命令 `cargo run --locked --release --bin qbench -- --json --iterations 100`）得到 `signed-by-iteration` 一条记录：编译总计 `618750 ns`，验证总计 `28917 ns`，执行总计 `2363209 ns`，期望值为 `3333`。这是单次开发机样本，只用于确认工作负载已纳入语义护栏与性能采集；跨版本比较仍须按本报告口径重复至少三次并取中位数。
+
 ## RFC 0074 映射展开
 
 在同一 Darwin arm64 开发机上，`cargo bench --bench core` 的 `map-spread` workload（20,000 次）单次样本为：编译 91.995 ms，验证 2.767 ms，执行 48.784 ms。映射展开为每个显式项生成单项映射，再由 `MergeMaps` 合并；后续键覆盖前值。
