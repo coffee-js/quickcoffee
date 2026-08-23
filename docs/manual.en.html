@@ -21,6 +21,7 @@
 <p>qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.</p>
 <p>Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.</p>
 <p>cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.</p>
+<p>Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.</p>
 <p>Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.</p>
 <p>Arguments after -- are exposed as the ordinary string array argv.</p>
 <p>This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.</p>
