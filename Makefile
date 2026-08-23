@@ -1,4 +1,4 @@
-.PHONY: fmt test clippy api-doc docs doc-check check bench
+.PHONY: fmt test clippy api-doc docs doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -30,3 +30,6 @@ check: fmt test clippy api-doc doc-check
 
 bench:
 	cargo bench --bench core
+
+qbench:
+	cargo run --release --bin qbench -- --json
