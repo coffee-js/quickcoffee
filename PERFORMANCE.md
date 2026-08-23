@@ -138,6 +138,16 @@ for character, index in 'a☕中x' by 2 then sum += index
 sum
 ```
 
+signed-by-iteration（20,000 次）：
+
+```coffee
+sum = 0
+for n, index in [1...100] by -3 then sum += n + index
+sum
+```
+
+该负载验证 RFC 0100 的反向数组步进与实际下标绑定；期望值为 `3333`。它与正向 `stepped-iteration` 负载并列，避免性能报告只覆盖顺序遍历。
+
 for-collection（10,000 次）：
 
 ```coffee
@@ -528,6 +538,10 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 ## RFC 0076 负索引
 
 负索引在数组上做一次长度归一化，在字符串上按 Unicode 标量计数后定位；两者均保持越界错误，不复制序列。`negative-indexing` workload（20,000 次）单次样本为：编译 75.609 ms，验证 2.750 ms，执行 33.463 ms。
+
+## RFC 0100 有符号步长
+
+`qbench --json` 现在包含 `signed-by-iteration`，并在每轮编译、验证和执行后检查 `3333`。该负载不把数组复制到宿主侧，反向位置由 VM 的有符号步长直接推进；运行基准时应与 `stepped-iteration` 一起比较编译、验证和执行三个阶段。
 
 ## RFC 0074 映射展开
 

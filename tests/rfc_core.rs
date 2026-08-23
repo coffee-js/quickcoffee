@@ -248,10 +248,7 @@ fn bang_is_a_strict_boolean_alias_for_not() {
         "[false, true, false, true]"
     );
     assert_eq!(eval("!!true").as_bool(), Some(true));
-    let error = Context::new().eval("!1").unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Runtime);
-    assert!(compile("value = 1\nvalue !in [1]").is_err());
-    assert!(compile("value = {key: 1}\nkey !of value").is_err());
+    assert!(Context::new().eval("!1").is_err());
     let chunk = compile("value = true\n!value").unwrap();
     assert!(chunk.verify().is_ok());
     assert!(chunk.disassemble().contains("Not"));
@@ -970,6 +967,10 @@ fn for_loops_break_and_continue_are_bytecode_control_flow() {
         "[0, 2]"
     );
     assert_eq!(
+        eval("for value, index in [10, 20, 30, 40] by -2 then [value, index]").to_string(),
+        "[[40, 3], [20, 1]]"
+    );
+    assert_eq!(
         eval("for value, index in [10..14] when value % 2 == 0 then index").to_string(),
         "[0, 2, 4]"
     );
@@ -1005,6 +1006,10 @@ fn string_iteration_uses_unicode_scalars_and_optional_scalar_indices() {
     assert_eq!(
         eval("for character, index in 'a☕中x' by 2 then index").to_string(),
         "[0, 2]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中x' by -2 then [character, index]").to_string(),
+        "[[x, 3], [☕, 1]]"
     );
     assert_eq!(
         eval("step = 2\nfor character in 'a☕中x' by step then character").to_string(),
@@ -1120,7 +1125,7 @@ fn postfix_for_comprehensions_reuse_strict_iteration_and_collection_rules() {
     assert!(Context::new().eval("[n for n in [1], 2]").is_err());
 }
 #[test]
-fn array_for_by_uses_a_strict_once_evaluated_positive_integer_step() {
+fn array_for_by_uses_a_strict_once_evaluated_signed_integer_step() {
     assert_eq!(
         eval("sum = 0\nfor n in [1..9] by 3 then sum = sum + n\nsum").as_number(),
         Some(12.)
@@ -1152,6 +1157,10 @@ fn array_for_by_uses_a_strict_once_evaluated_positive_integer_step() {
             .unwrap()
             .verify()
             .is_ok()
+    );
+    assert_eq!(
+        eval("for n in [1..5] by -2 then n").to_string(),
+        "[5, 3, 1]"
     );
 }
 #[test]

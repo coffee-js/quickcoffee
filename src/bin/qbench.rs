@@ -35,6 +35,11 @@ const WORKLOADS: &[Workload] = &[
         source: "sum = 0\nfor character, index in 'a☕中x' by 2 then sum += index\nsum",
         expected: "2",
     },
+    Workload {
+        name: "signed-by-iteration",
+        source: "sum = 0\nfor n, index in [1...100] by -3 then sum += n + index\nsum",
+        expected: "3333",
+    },
 ];
 
 fn usage() {

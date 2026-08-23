@@ -15,7 +15,7 @@
 <p>qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。</p>
 <p>qcoffee --interactive --stats 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。</p>
 <p>'a☕中'[1] 即 '☕'，'a☕中'[1..2]' 得 '☕中'；字符串索引循 Unicode 标量。</p>
-<p>for character, index in 'a☕中' then index，得 [0, 1, 2]；字符串循 Unicode 标量，亦受正整数 by。</p>
+<p>for character, index in 'a☕中' then index，得 [0, 1, 2]；字符串循 Unicode 标量，by 可正可负，负者自末起。</p>
 <p>do (name, other) -&gt; ... 即调用之，转外层同名之值；do -&gt; ... 仍零参。</p>
 <p>[head, tail...] = [1, 2, 3]，tail 得 [2, 3]；数组之 rest 必居末。</p>
 <p>qtest --fuel N 者，为各可行文别限其指令之数。</p>
@@ -59,7 +59,7 @@
 <p>loop body 者，如 while true 恒行；以 break 出之，犹受 fuel 限。</p>
 <p>for 为收集之式：轮体诸值成新数组，when 与 continue 弗收，break 存既得之首。</p>
 <p>for 所系可为严式：for [left, right] in pairs，每项全合乃易名。</p>
-<p>数组之环可书 by step；步惟求一遍，须正有限整数，映射环弗用之。</p>
+<p>数组之环可书 by step；步惟求一遍，须非零有限整数，负者自末起，映射环弗用之。</p>
 <p>数组之环亦可系从一始之下标：for value, index in items then value + index。</p>
 <p>后置之推导亦循严收集：value * 2 for value in items，或括以 [value * 2 for value in items]。</p>
 <p># 此段有无效 ` 文，机不求之</p>

@@ -6,7 +6,7 @@
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
-## for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept positive by steps.
+## for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept non-zero signed by steps.
 ## do (name, other) -> ... immediately calls and forwards same-named outer values; do -> ... remains zero-argument.
 ## [head, tail...] = [1, 2, 3] binds tail to [2, 3]; array-pattern rest must be final.
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
@@ -56,7 +56,7 @@
 ## loop body is infinite while true; break exits it and fuel still bounds it.
 ## A for expression collects body values; when and continue omit values, and break keeps the collected prefix.
 ## for bindings may use strict patterns: for [left, right] in pairs binds each pair atomically.
-## An array for loop may use by step; the positive finite integer step is evaluated once, and maps exclude it.
+## An array for loop may use by step; the non-zero finite integer step is evaluated once, negative steps start at the last item, and maps exclude it.
 ## Array for may bind a zero-based index too: for value, index in items then value + index.
 ## Postfix comprehensions use the same strict collector: value * 2 for value in items, or [value * 2 for value in items].
 ## Functions capture lexical scope; y = 2 defaults when omitted or nil, and a final rest parameter is tail....

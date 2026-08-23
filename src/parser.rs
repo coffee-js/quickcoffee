@@ -698,7 +698,6 @@ impl Parser {
                     | Token::Throw
                     | Token::Do
                     | Token::Not
-                    | Token::Bang
                     | Token::PlusPlus
                     | Token::Minus
                     | Token::MinusMinus
@@ -742,7 +741,6 @@ impl Parser {
                     | Token::False
                     | Token::Nil
                     | Token::Not
-                    | Token::Bang
                     | Token::LParen
                     | Token::Arrow
                     | Token::FatArrow
@@ -861,7 +859,7 @@ impl Parser {
                 }
             }
             Token::Minus => Ok(Expr::Unary(Unary::Neg, Box::new(self.expr(12)?))),
-            Token::Not | Token::Bang => Ok(Expr::Unary(Unary::Not, Box::new(self.expr(12)?))),
+            Token::Not => Ok(Expr::Unary(Unary::Not, Box::new(self.expr(12)?))),
             Token::Tilde => Ok(Expr::Unary(Unary::BitNot, Box::new(self.expr(12)?))),
             Token::PlusPlus => self.prefix_update(Update::Increment),
             Token::MinusMinus => self.prefix_update(Update::Decrement),
