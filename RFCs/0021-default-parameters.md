@@ -1,5 +1,7 @@
 # RFC 0021：函数默认参数
 
+- 状态：已采纳
+
 ## 决议
 
 函数形参可在名称后写 `= expression`：`(prefix, separator = '-', values...) -> expression`。带默认值的形参必须位于所有必选形参之后，`name...` rest 形参仍必须最后，且不可带默认值。
