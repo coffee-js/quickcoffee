@@ -47,7 +47,7 @@ Ordo scribitur `for item in items then expressio`; ligamen pattern strictum esse
 
 Eadem collectio formam postfixam CoffeeScript habet: `value * 2 for value in items`, vel `[value * 2 for value in items]`. Bracteae solum terminum comprehensionis indicant nec seriem interiorem addunt; `by`, `when`, maps, patterna, `break`, et `continue` regulas formae praefixae servant.
 
-Spatium integrorum `[1..3]` finem includit atque `[1, 2, 3]` facit; `[1...3]` finem excludit atque `[1, 2]` facit. Fines integri finiti esse debent.
+Spatium integrorum `[1..3]` finem includit atque `[1, 2, 3]` facit; `[1...3]` finem excludit atque `[1, 2]` facit; descendens `[3..1]` `[3, 2, 1]` facit. Fines integri finiti esse debent.
 
 Suffixum `value?` tantum non-nil probat: `nil?` false est, `false?` et `0?` true sunt; errorem nominis non ligati non celat neque recessus `left ? right` est.
 

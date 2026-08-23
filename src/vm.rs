@@ -1205,19 +1205,21 @@ fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> 
     }
     let start = start as i64;
     let end = end as i64;
-    let end = if inclusive {
-        end.checked_add(1)
-            .ok_or_else(|| Error::runtime("inclusive range end is too large"))?
+    let start_i = i128::from(start);
+    let end_i = i128::from(end);
+    let (count, direction) = if start <= end {
+        let limit = if inclusive { end_i + 1 } else { end_i };
+        (limit - start_i, 1_i128)
     } else {
-        end
+        let limit = if inclusive { end_i - 1 } else { end_i };
+        (start_i - limit, -1_i128)
     };
-    let count = (i128::from(end) - i128::from(start)).max(0);
     if count > MAX_RANGE_ITEMS {
         return Err(Error::runtime("range is too large"));
     }
     Ok(Value::Array(Rc::new(
-        (start..end)
-            .map(|value| Value::Number(value as f64))
+        (0..count as usize)
+            .map(|offset| Value::Number((start_i + offset as i128 * direction) as f64))
             .collect(),
     )))
 }

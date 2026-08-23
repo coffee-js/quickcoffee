@@ -1130,8 +1130,11 @@ fn maps_ranges_and_indexing() {
     );
     assert!(Context::new().eval("{'name'}").is_err());
     assert_eq!(eval("range(2, 5)[1]").as_number(), Some(3.));
+    assert_eq!(eval("range(5, 2)").to_string(), "[5, 4, 3]");
     assert_eq!(eval("[2..4]").to_string(), "[2, 3, 4]");
     assert_eq!(eval("[2...4]").to_string(), "[2, 3]");
+    assert_eq!(eval("[4..2]").to_string(), "[4, 3, 2]");
+    assert_eq!(eval("[4...2]").to_string(), "[4, 3]");
     assert!(Context::new().eval("[1.5..3]").is_err());
     assert!(Context::new().eval("[0...1000001]").is_err());
     let mut cx = Context::new();
@@ -1300,6 +1303,32 @@ fn map_destructuring_supports_renaming_and_is_atomic() {
     assert!(cx.eval("{stable, absent} = {stable: 1}").is_err());
     assert_eq!(cx.eval("stable").unwrap().as_number(), Some(9.));
     assert!(cx.eval("absent").is_err());
+}
+#[test]
+fn map_destructuring_accepts_literal_string_keys() {
+    assert_eq!(
+        eval("{\"first-name\": first} = {\"first-name\": 'Ada'}\nfirst").as_str(),
+        Some("Ada")
+    );
+    assert_eq!(
+        eval("{'answer': value} = {answer: 42}\nvalue").as_number(),
+        Some(42.)
+    );
+    assert!(
+        Context::new()
+            .eval("{\"first-name\"} = {\"first-name\": 'Ada'}")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("{\"missing-key\": value} = {other: 1}")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("{\"#{missing}\": value} = {other: 1}")
+            .is_err()
+    );
 }
 #[test]
 fn nested_destructuring_is_strict_and_atomic() {

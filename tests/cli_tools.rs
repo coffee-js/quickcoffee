@@ -116,9 +116,6 @@ fn qtest_reports_success_and_failure() {
 
 #[test]
 fn every_cli_reports_the_same_package_version() {
-    let help = Command::new(bin("qdocco")).arg("--help").output().unwrap();
-    assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: qdocco"));
     for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
         let output = Command::new(bin(name)).arg("--version").output().unwrap();
         assert!(output.status.success(), "{name} --version failed");

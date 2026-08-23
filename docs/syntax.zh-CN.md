@@ -11,8 +11,10 @@
 | 字面量 | 十进制、十六进制 `0xff`、二进制 `0b1010`、八进制 `0o755` 与科学计数法数字、字符串、双引号 `#{expr}` 插值、保留换行的 `"""…"""` 插值 heredoc 与 `'''…'''` 字面 heredoc、`true`/`yes`/`on`、`false`/`no`/`off`、`nil`、数组与 `[head, items...]` 展开、整数区间 `[1..3]`（含上界）/`[1...3]`（不含上界）、映射、`{name}` 简写与映射展开 `{...base, key: value}` | 正则、JS 插值、`undefined` |
 | 运算 | 算术、严格有符号 32 位位运算 `&`、`|`、`^`、`~`、`<<`、`>>`、`>>>` 及其名称复合赋值、名称复合赋值 `name += value`、`-=`, `*=`, `/=`, `%=`, `**=`、名称前后置更新 `++`/`--`、比较（`==`/`is`、`!=`/`isnt`，可短路成链 `a < b < c`）、`and`/`or`、`not`、仅对 `nil` 回退的 `left ? right`、后缀非 nil 测试 `value?`、仅名称的存在性赋值 `name ?= value`、数组成员 `value in array` / `value not in array`、映射自身键 `key of map` / `key not of map`、数组索引与严格切片 `a[start..end]` / `a[start...end]`、映射成员访问、nil 安全后缀 `a?.name`、`a?[i]`、`a?[start..end]`、`f?(args)` | 成员/索引/解构复合赋值、成员/索引/解构 `?=`、字符串/映射切片、隐式截断、未声明名称检查 |
 | 控制 | `if`/`unless`、后置条件、`while … then …`、`until … then …`、语句后置 `body while/until condition`、前置或后置列表推导 `for value[, index] in xs [by step] [when condition] then …` / `value for value in xs`、`switch`/`when`、`try`/`catch`/`finally`、`throw`、函数内 `return`、`break`、`continue` | JS Error 对象、顶层 `return`、映射 `for` 的 `by` |
-| 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, from: to, ...metadata} = map` 的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、`=>` 同义箭头、`do` 立即调用 | 无括号默认/rest/解构参数、生成器 |
+| 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, "first-name": first, ...metadata} = map`（标识符或字面字符串键）的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、`=>` 同义箭头、`do` 立即调用 | 动态 computed 映射键、无括号默认/rest/解构参数、生成器 |
 | OO/模块 | 无原型工厂类 `class Name(args) -> expression` | 继承、`this`、`new`、import/export |
+
+整数区间支持升序与降序：`[2..4]` 为 `[2, 3, 4]`，`[4..2]` 为 `[4, 3, 2]`；排除上界形式相应省略终点（`[4...2]` 为 `[4, 3]`）。边界必须是有限整数，过长区间仍报错。
 
 字符串索引与严格切片按 Unicode 标量边界：`'a☕中'[1]` 为 `'☕'`，`'a☕中'[1..2]` 为 `'☕中'`；负索引从末项计数（`items[-1]`），越界仍报错；字符串 `for` 仍不支持 `by`。
 
