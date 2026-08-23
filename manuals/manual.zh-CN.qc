@@ -24,6 +24,7 @@
 ## Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
 ## qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 ## qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
+## qbench --compare-qjs PATH 以调用者提供的 QuickJS 路径输出独立 qcompare CLI 对比；它包括启动、解析、编译与执行，不与 qbench 进程内计时混比。
 ## 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
 ## qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
 ## 嵌入方可在运行之间调用 Context::set_fuel、set_max_call_depth 与 set_cancellation_token；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。

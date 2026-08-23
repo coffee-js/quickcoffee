@@ -732,6 +732,11 @@ fn qbench_json_is_guarded_and_machine_readable() {
         .output()
         .unwrap();
     assert_eq!(invalid_repeat.status.code(), Some(2));
+    let invalid_compare_iterations = Command::new(bin("qbench"))
+        .args(["--compare-qjs", "qjs", "--compare-iterations", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid_compare_iterations.status.code(), Some(2));
     let listed = Command::new(bin("qbench")).arg("--list").output().unwrap();
     assert!(listed.status.success());
     assert_eq!(
@@ -760,6 +765,11 @@ fn qbench_json_is_guarded_and_machine_readable() {
         .output()
         .unwrap();
     assert_eq!(list_conflict.status.code(), Some(2));
+    let compare_conflict = Command::new(bin("qbench"))
+        .args(["--list", "--compare-qjs", "qjs"])
+        .output()
+        .unwrap();
+    assert_eq!(compare_conflict.status.code(), Some(2));
 }
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
