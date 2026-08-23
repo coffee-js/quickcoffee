@@ -1,15 +1,41 @@
 //! Release benchmark runner with semantic guards and machine-readable timing output.
 
 use quickcoffee::{Context, Engine};
-use std::{env, process::ExitCode, time::Instant};
+use std::{
+    env,
+    process::{Command, ExitCode},
+    time::Instant,
+};
 
 const OUTPUT_SCHEMA: &str = "quickcoffee.qbench.v1";
+const COMPARISON_SCHEMA: &str = "quickcoffee.qcompare.v1";
 
 struct Workload {
     name: &'static str,
     source: &'static str,
     expected: &'static str,
 }
+struct ComparisonWorkload {
+    name: &'static str,
+    quickcoffee: &'static str,
+    quickjs: &'static str,
+    expected: &'static str,
+}
+
+const COMPARISON_WORKLOADS: &[ComparisonWorkload] = &[
+    ComparisonWorkload {
+        name: "scalar-loop",
+        quickcoffee: "sum = 0\ni = 0\nwhile i < 1000000\n  sum += i\n  i++\nsum",
+        quickjs: "let sum = 0; for (let i = 0; i < 1000000; i++) sum += i; console.log(sum);",
+        expected: "499999500000",
+    },
+    ComparisonWorkload {
+        name: "function-loop",
+        quickcoffee: "increment = (value) -> value + 1\nsum = 0\ni = 0\nwhile i < 250000\n  sum = increment(sum)\n  i++\nsum",
+        quickjs: "const increment = value => value + 1; let sum = 0; for (let i = 0; i < 250000; i++) sum = increment(sum); console.log(sum);",
+        expected: "250000",
+    },
+];
 
 const WORKLOADS: &[Workload] = &[
     Workload {
@@ -206,8 +232,81 @@ const WORKLOADS: &[Workload] = &[
 
 fn usage() {
     eprintln!(
-        "Usage: qbench [--iterations N] [--repeat N] [--only NAME] [--json]\n       qbench --list\n       qbench --version"
+        "Usage: qbench [--iterations N] [--repeat N] [--only NAME] [--json]\n       qbench --compare-qjs PATH [--compare-iterations N] [--repeat N] [--json]\n       qbench --list\n       qbench --version"
     );
+}
+
+fn cli_binary(name: &str) -> Result<std::path::PathBuf, String> {
+    let current = env::current_exe().map_err(|error| error.to_string())?;
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    let path = current.with_file_name(file);
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(format!(
+            "{} is not beside qbench; build or install both CLI binaries",
+            path.display()
+        ))
+    }
+}
+
+fn run_checked(command: &mut Command, expected: &str) -> Result<(), String> {
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    if String::from_utf8_lossy(&output.stdout).trim() != expected {
+        return Err(format!(
+            "expected {expected}, got {}",
+            String::from_utf8_lossy(&output.stdout).trim()
+        ));
+    }
+    Ok(())
+}
+
+fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Result<(), String> {
+    let qcoffee = cli_binary("qcoffee")?;
+    for workload in COMPARISON_WORKLOADS {
+        let mut quickcoffee_samples = Vec::with_capacity(repeat);
+        let mut quickjs_samples = Vec::with_capacity(repeat);
+        for _ in 0..repeat {
+            let start = Instant::now();
+            for _ in 0..iterations {
+                run_checked(
+                    Command::new(&qcoffee).args(["--fuel", "20000000", "-e", workload.quickcoffee]),
+                    workload.expected,
+                )?;
+            }
+            quickcoffee_samples.push(start.elapsed().as_nanos());
+
+            let start = Instant::now();
+            for _ in 0..iterations {
+                run_checked(
+                    Command::new(path).args(["-e", workload.quickjs]),
+                    workload.expected,
+                )?;
+            }
+            quickjs_samples.push(start.elapsed().as_nanos());
+        }
+        let quickcoffee_ns = median(&mut quickcoffee_samples);
+        let quickjs_ns = median(&mut quickjs_samples);
+        if json {
+            println!(
+                "{{\"schema\":\"{COMPARISON_SCHEMA}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"quickcoffee_cli_ns\":{},\"quickjs_cli_ns\":{}}}",
+                workload.name, iterations, repeat, workload.expected, quickcoffee_ns, quickjs_ns
+            );
+        } else {
+            println!(
+                "schema={COMPARISON_SCHEMA} {} iterations={} repeat={} quickcoffee_cli_ns={} quickjs_cli_ns={} expected={}",
+                workload.name, iterations, repeat, quickcoffee_ns, quickjs_ns, workload.expected
+            );
+        }
+    }
+    Ok(())
 }
 
 fn json_escape(value: &str) -> String {
@@ -225,6 +324,8 @@ fn main() -> ExitCode {
     let mut json = false;
     let mut only = None;
     let mut list = false;
+    let mut compare_qjs_path = None;
+    let mut compare_iterations = 1;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -237,6 +338,20 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--list" => list = true,
+            "--compare-qjs" => match args.next() {
+                Some(path) if !path.is_empty() => compare_qjs_path = Some(path),
+                _ => {
+                    eprintln!("--compare-qjs requires a qjs executable path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--compare-iterations" => match args.next().and_then(|value| value.parse().ok()) {
+                Some(value) if value > 0 => compare_iterations = value,
+                _ => {
+                    eprintln!("--compare-iterations requires a positive integer");
+                    return ExitCode::from(2);
+                }
+            },
             "--json" => json = true,
             "--only" => match args.next() {
                 Some(value) if !value.is_empty() => only = Some(value),
@@ -266,14 +381,27 @@ fn main() -> ExitCode {
         }
     }
     if list {
-        if only.is_some() {
-            eprintln!("--list cannot be combined with --only");
+        if only.is_some() || compare_qjs_path.is_some() {
+            eprintln!("--list cannot be combined with execution modes");
             return ExitCode::from(2);
         }
         for workload in WORKLOADS {
             println!("{}", workload.name);
         }
         return ExitCode::SUCCESS;
+    }
+    if let Some(path) = compare_qjs_path {
+        if only.is_some() {
+            eprintln!("--compare-qjs cannot be combined with --only");
+            return ExitCode::from(2);
+        }
+        return match compare_qjs(&path, compare_iterations, repeat, json) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("QuickJS comparison failed: {error}");
+                ExitCode::from(1)
+            }
+        };
     }
     let workloads: Vec<&Workload> = match only.as_deref() {
         Some(name) => match WORKLOADS.iter().find(|workload| workload.name == name) {

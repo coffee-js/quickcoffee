@@ -23,6 +23,15 @@ make qbench
 cargo run --locked --release --bin qbench -- --json --iterations 100 --repeat 3
 ```
 
+与官方 QuickJS 的同机 CLI 对比使用独立的 `qcompare.v1` schema，不和上述进程内 `qbench.v1` 字段混用。先构建全部 CLI，再由调用者显式提供 QuickJS 路径：
+
+```sh
+cargo build --locked --release --bins
+target/release/qbench --compare-qjs /path/to/qjs --compare-iterations 1 --repeat 11 --json
+```
+
+当前比较负载是双方可等价表达并校验结果的标量循环和函数调用；每个读数包含 CLI 启动、解析、编译与执行。它用于量级判断和回归观察，不是 JavaScript 兼容性声明，也不替代独立的预编译热执行剖析。
+
 调试单一回归时，先用 `qbench --list` 查看确定性的内建负载名，再用 `qbench --only NAME` 只运行该负载；不指定 `--only` 始终运行完整集合，持续门禁口径不变。
 
 `qbench` 为每个内建负载输出一行 JSON，分别记录编译、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
