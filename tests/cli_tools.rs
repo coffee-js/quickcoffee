@@ -185,6 +185,42 @@ fn qtest_reports_success_and_failure() {
             "qtest skipped {fixture}"
         );
     }
+    let filtered = Command::new(bin("qtest"))
+        .args(["--filter", "stdlib", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert!(filtered.status.success());
+    assert_eq!(String::from_utf8_lossy(&filtered.stdout).lines().count(), 1);
+    assert!(String::from_utf8_lossy(&filtered.stdout).contains("stdlib.qc"));
+    let single_file = Command::new(bin("qtest"))
+        .args(["--filter", "arithmetic.qc", "tests/scripts/arithmetic.qc"])
+        .output()
+        .unwrap();
+    assert!(single_file.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&single_file.stdout).lines().count(),
+        1
+    );
+    assert!(String::from_utf8_lossy(&single_file.stdout).contains("arithmetic.qc"));
+    let listed = Command::new(bin("qtest"))
+        .args(["--list", "--filter", "stdlib", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout),
+        "tests/scripts/stdlib.qc\n"
+    );
+    let missing_filter = Command::new(bin("qtest"))
+        .args(["--filter", "does-not-exist", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert_eq!(missing_filter.status.code(), Some(2));
+    let list_conflict = Command::new(bin("qtest"))
+        .args(["--list", "--json", "tests/scripts"])
+        .output()
+        .unwrap();
+    assert_eq!(list_conflict.status.code(), Some(2));
     let bad = Command::new(bin("qtest"))
         .arg("tests/fixtures/failure.qc")
         .output()
@@ -471,6 +507,82 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 }
 
 #[test]
+fn qcoffee_json_reports_values_and_structured_errors() {
+    let value = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "{answer: 42, ok: true}"])
+        .output()
+        .unwrap();
+    assert!(value.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&value.stdout),
+        "{\"ok\":true,\"value\":{\"answer\":42,\"ok\":true}}\n"
+    );
+    assert!(value.stderr.is_empty());
+
+    let function = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "(x) -> x"])
+        .output()
+        .unwrap();
+    assert!(function.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&function.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"function\"}}\n"
+    );
+
+    let nil = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "nil"])
+        .output()
+        .unwrap();
+    assert!(nil.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&nil.stdout),
+        "{\"ok\":true,\"value\":null}\n"
+    );
+
+    let parse_error = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "@"])
+        .output()
+        .unwrap();
+    assert!(!parse_error.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&parse_error.stdout),
+        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"unexpected character '@'\",\"line\":1}\n"
+    );
+    assert!(parse_error.stderr.is_empty());
+
+    let runtime_error = Command::new(bin("qcoffee"))
+        .args(["--json", "--fuel", "10", "-e", "while true then 1"])
+        .output()
+        .unwrap();
+    assert!(!runtime_error.status.success());
+    let runtime_stdout = String::from_utf8_lossy(&runtime_error.stdout);
+    assert!(runtime_stdout.starts_with("{\"ok\":false,\"kind\":\"runtime\""));
+    assert!(runtime_stdout.contains("fuel exhausted"));
+    assert!(runtime_stdout.ends_with("\"line\":null}\n"));
+
+    let missing = Command::new(bin("qcoffee"))
+        .args(["--json", "qcoffee-file-that-does-not-exist.qc"])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(
+        missing_stdout.starts_with(
+            "{\"ok\":false,\"stage\":\"read\",\"kind\":\"io\",\"message\":\"read error:"
+        )
+    );
+    assert!(missing_stdout.ends_with("\",\"line\":null}\n"));
+    assert!(missing.stderr.is_empty());
+
+    let reverse_conflict = Command::new(bin("qcoffee"))
+        .args(["--check", "tests/scripts/arithmetic.qc", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(reverse_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&reverse_conflict.stderr).contains("--json"));
+}
+
+#[test]
 fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
     let temp = std::env::temp_dir().join(format!("qcoffee-fingerprint-{}.qc", std::process::id()));
     let other = std::env::temp_dir().join(format!(
@@ -524,6 +636,10 @@ fn qbench_json_is_guarded_and_machine_readable() {
     let lines: Vec<_> = stdout.lines().collect();
     let expected_names = [
         "loop-core",
+        "stdlib-abs",
+        "stdlib-sum",
+        "stdlib-min-max",
+        "stdlib-range-sum",
         "closures-and-ranges",
         "map-spread",
         "negative-indexing",

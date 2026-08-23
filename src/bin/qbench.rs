@@ -18,6 +18,26 @@ const WORKLOADS: &[Workload] = &[
         expected: "100",
     },
     Workload {
+        name: "stdlib-abs",
+        source: "abs(-42)",
+        expected: "42",
+    },
+    Workload {
+        name: "stdlib-sum",
+        source: "sum([1, 2, 3, 4])",
+        expected: "10",
+    },
+    Workload {
+        name: "stdlib-min-max",
+        source: "min([3, 1, 2]) + max([3, 1, 2])",
+        expected: "4",
+    },
+    Workload {
+        name: "stdlib-range-sum",
+        source: "sum(range(1, 100))",
+        expected: "4950",
+    },
+    Workload {
         name: "closures-and-ranges",
         source: "base = 1\nadd = (n) -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
         expected: "1274",

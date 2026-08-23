@@ -17,6 +17,9 @@
 ## qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
 ## qtest --json प्रत्येकस्य लेखस्य स्थिरं JSON फलम् एकस्मिन् पङ्क्तौ लिखति; --stats stderr मध्ये एव।
 ## qtest --tap TAP 13 तथा नियत-सङ्ख्याङ्कितानि फलानि लिखति; --json च --tap च परस्परं निषिद्धे।
+## qtest --filter TEXT मार्ग-साम्येन परीक्षां चिनोति; qtest --list चयनित-पत्राणि केवलं गणयति, न चालयति।
+
+## qcoffee --json एकस्मिन् प्रयोगे JSON-मूल्यं वा संरचितं दोषं एकया पङ्क्त्या ददाति, CI-होष्ट्रयोः उपयोगाय।
 ## host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
 ## Engine::compile_program एकवारं verify करोति; Context::run_program पुनःचालने अपरिवर्तनीय-सत्यापित-bytecode पुनरुपयुङ्क्ते।
 ## Program::fingerprint होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
@@ -24,7 +27,7 @@
 ## qbench --json प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; --iterations नमूना-सङ्ख्यां नियच्छति।
 ## बीजाङ्काः Rust-debug-रूपं विना स्पष्ट-नियत-bytecode-संकेतेन निर्मीयन्ते, अतः साधन-रूपपरिवर्तनं सञ्चय-कुञ्जीं न परिवर्तयति।
 ## qdocco --markdown टिप्पणीन्, सीमितं QuickCoffee-कोडं, अन्तिम-मूल्यं च पठनीय Markdown-फलके लिखति।
-## अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति।
+## अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति; with_global तथा with_native क्रमिक-संयोजनाय स्तः।
 ## `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
 ## Host `Value::kind()` द्वारा प्रकारं विभजति, `Value::is_nil()` द्वारा nil परीक्षते, आन्तरिक-container न पश्यति।
 ## Cargo-वस्तु-विवरणानि अन्तःस्थापकान् repository, docs.rs-API, README, licence च प्रति नयन्ति।

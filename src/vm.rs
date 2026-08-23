@@ -445,6 +445,14 @@ impl Context {
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
         self.global.borrow_mut().values.insert(name.into(), value);
     }
+    /// Returns this context after installing an immutable global value.
+    ///
+    /// This builder-style form is equivalent to [`Context::set_global`] and
+    /// is convenient when configuring an embedding context inline.
+    pub fn with_global(mut self, name: impl Into<String>, value: Value) -> Self {
+        self.set_global(name, value);
+        self
+    }
     /// Reads a global value without exposing the VM environment or running code.
     pub fn get_global(&self, name: &str) -> Option<Value> {
         lookup(&self.global, name)
@@ -460,6 +468,16 @@ impl Context {
                 inner: FunctionKind::Native(Rc::new(f)),
             })),
         );
+    }
+    /// Returns this context after registering a host callback as a global.
+    ///
+    /// This builder-style form is equivalent to [`Context::add_native`].
+    pub fn with_native<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(&[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.add_native(name, f);
+        self
     }
     /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {

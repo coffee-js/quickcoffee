@@ -17,6 +17,9 @@
 ## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 ## qtest --json unam lineam JSON pro unoquoque documento scribit ad usum CI; --stats in stderr manet.
 ## qtest --tap versiones TAP 13 et numeros certos scribit; --json et --tap simul prohibentur.
+## qtest --filter TEXT itinera congruentia eligit; qtest --list tantum documenta electa enumerat sine exsecutione.
+
+## qcoffee --json unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
 ## Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
 ## Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
@@ -24,7 +27,7 @@
 ## qbench --json unam mensurae lineam pro unoquoque onere custodito emittit; --iterations numerum exemplorum regit.
 ## Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
 ## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
-## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis.
+## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis; `with_global` et `with_native` configurationem concatenatam praebent.
 ## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
 ## Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
 ## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.

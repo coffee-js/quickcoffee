@@ -17,7 +17,7 @@ package-metadata:
 	cargo metadata --locked --no-deps --format-version 1 >/dev/null
 
 package:
-	cargo publish --dry-run --locked
+	cargo publish --dry-run --locked --allow-dirty
 
 clippy:
 	cargo clippy --locked --all-targets -- -D warnings
@@ -38,6 +38,11 @@ docs: doc-check
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.en.qc -o docs/manual.en.html
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.qc -o docs/manual.latin.html
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.html
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.zh-CN.qc -o docs/manual.zh-CN.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.classical-zh.qc -o docs/manual.classical-zh.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.en.qc -o docs/manual.en.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.latin.qc -o docs/manual.latin.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.md
 
 check: fmt test release-test examples package-metadata package qbench-check clippy api-doc doc-check
 
