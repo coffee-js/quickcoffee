@@ -716,7 +716,7 @@ fn lex_line(
                     chars.next();
                     out.push(Token::NotEq)
                 } else {
-                    return Err(Error::parse("expected '=' after '!'").at_line(line_number));
+                    out.push(Token::Not)
                 }
             }
             '<' => {

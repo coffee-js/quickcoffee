@@ -31,6 +31,7 @@
 ## # 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
 ## 标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。
 ## yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
+## ! 是严格 Bool 的 not 别名；!= 仍为严格不等。
 ## 严格或数值比较可成链，保留中间值且前段失败会短路。
 ## 标准库皆为普通函数：print、len、type、range、str、keys、values、join、split 与 assert。
 ## 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
