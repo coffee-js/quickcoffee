@@ -1,0 +1,47 @@
+# CoffeeScript 2016 feature matrix / 特性矩阵
+
+QuickCoffee is inspired by CoffeeScript 1.12.7, the final CoffeeScript 1.x release, but it is not a CoffeeScript-to-JavaScript compatibility layer. This matrix compares every section in the official [CoffeeScript 1.x Language Reference](https://coffeescript.org/v1/) with QuickCoffee's current contract.
+
+QuickCoffee 受 CoffeeScript 1.12.7（CoffeeScript 1.x 的最终版本）启发，但不是 CoffeeScript 到 JavaScript 的兼容层。下表逐项对照官方 [CoffeeScript 1.x Language Reference](https://coffeescript.org/v1/) 与 QuickCoffee 当前契约。
+
+## Status / 状态
+
+- **Implement / 实现**: the recognizable surface form is supported under QuickCoffee's strict value model.
+- **Adapt / 改写**: some recognizable syntax is supported, but JavaScript-dependent semantics or part of the section is deliberately different.
+- **Reject / 拒绝**: the feature is outside the language contract; QuickCoffee never silently falls back to JavaScript semantics.
+
+The status describes the whole reference section. Read the decision column for mixed sections. RFCs and executable tests remain normative; this matrix is the review index.
+
+状态针对整个官方章节；混合章节的具体边界见“QuickCoffee decision”。RFC 与可执行测试仍是规范性依据，本矩阵是 review 索引。
+
+## Matrix / 矩阵
+
+| CoffeeScript 1.x reference section | Status | QuickCoffee decision | Evidence |
+|---|---|---|---|
+| Functions | Implement | `->`, lexical closures, implicit final values, defaults, rest parameters, destructuring parameters, `return`, `do`, and constrained same-line implicit calls are supported. Arity and types stay strict. | [RFC 0001](../RFCs/0001-language-core.md), [RFC 0013](../RFCs/0013-rest-parameters.md), [RFC 0021](../RFCs/0021-default-parameters.md), [RFC 0026](../RFCs/0026-destructuring-parameters.md), [RFC 0065](../RFCs/0065-implicit-calls.md) |
+| Objects and Arrays | Adapt | Arrays are immutable values. JavaScript objects become prototype-free `Map` values with shorthand, indentation, multiline entries, and spread. There is no `undefined`, prototype, computed property behavior, or JavaScript object identity model. | [RFC 0001](../RFCs/0001-language-core.md), [RFC 0018](../RFCs/0018-map-shorthand.md), [RFC 0063](../RFCs/0063-multiline-collections.md), [RFC 0074](../RFCs/0074-map-spread.md) |
+| Lexical Scoping and Variable Safety | Adapt | Closures use explicit VM lexical environments. Unbound reads are errors; host globals are explicit capabilities. QuickCoffee has neither JavaScript `var` hoisting nor a browser/global-object escape hatch. | [RFC 0001](../RFCs/0001-language-core.md), [RFC 0041](../RFCs/0041-embedding-global-read.md) |
+| If, Else, Unless, and Conditional Assignment | Implement | Indented and inline `if`/`else`, `unless`, postfix conditions, and conditional expressions are supported. Conditions must be Bool; JavaScript truthiness is rejected. | [RFC 0001](../RFCs/0001-language-core.md), [RFC 0009](../RFCs/0009-indentation-blocks.md) |
+| Splats… | Implement | Final rest parameters, splat calls, array splats, and final array-pattern rest are supported with strict arity and container checks. | [RFC 0013](../RFCs/0013-rest-parameters.md), [RFC 0020](../RFCs/0020-splat-expansion.md), [RFC 0071](../RFCs/0071-array-pattern-rest.md) |
+| Loops and Comprehensions | Adapt | Array, Unicode-string, range, and own-map comprehensions support `when`, `by`, indices, patterns, postfix form, `break`, and `continue`. Maps have no inherited keys; generators and `for ... from` are rejected. `while`, `until`, and `loop` return `nil`, not collected arrays. | [RFC 0004](../RFCs/0004-iteration-control.md), [RFC 0014](../RFCs/0014-range-literals.md), [RFC 0054](../RFCs/0054-postfix-comprehensions.md), [RFC 0070](../RFCs/0070-string-iteration.md) |
+| Array Slicing and Splicing with Ranges | Adapt | Strict inclusive/exclusive array and Unicode-string slices are supported, including negative bounds. Bounds are required and never clipped. Slice assignment/splicing is rejected because collections are immutable. | [RFC 0037](../RFCs/0037-array-slices.md), [RFC 0072](../RFCs/0072-string-indexing.md), [RFC 0076](../RFCs/0076-negative-indexing.md) |
+| Everything is an Expression (at least, as much as possible) | Adapt | Functions, assignment, conditionals, comprehensions, `switch`, and `try` produce values. `while`, `until`, and `loop` deliberately produce `nil`; QuickCoffee does not emulate JavaScript statement lowering. | [RFC 0001](../RFCs/0001-language-core.md), [RFC 0004](../RFCs/0004-iteration-control.md), [RFC 0010](../RFCs/0010-switch-when.md), [RFC 0011](../RFCs/0011-exceptions.md) |
+| Operators and Aliases | Adapt | Arithmetic, comparison, `is`/`isnt`, `and`/`or`/`not`, membership, floor division/modulo, and strict signed-32-bit bitwise operations are supported. JavaScript coercion and JavaScript-only operators such as `typeof`, `instanceof`, `delete`, and `new` are rejected. | [RFC 0016](../RFCs/0016-membership.md), [RFC 0024](../RFCs/0024-coffeescript-keyword-aliases.md), [RFC 0056](../RFCs/0056-floor-division-modulo.md), [RFC 0057](../RFCs/0057-strict-bitwise.md) |
+| The Existential Operator | Adapt | `value?`, nil fallback, name-only `?=`, and nil-safe member/index/slice/call suffixes are supported. Only `nil` is absent; an unbound read remains an error and there is no `undefined`. | [RFC 0015](../RFCs/0015-existential-fallback.md), [RFC 0022](../RFCs/0022-soak-access.md), [RFC 0038](../RFCs/0038-existence-tests.md) |
+| Classes, Inheritance, and Super | Adapt | `class Name(args) -> expression` is only a named, prototype-free factory. `this`, `new`, constructors, methods, inheritance, `extends`, and `super` are rejected. | [RFC 0006](../RFCs/0006-prototype-free-classes.md) |
+| Destructuring Assignment | Adapt | Strict, recursive, atomic array/map patterns support defaults, rest, ignores, and literal map keys. Computed keys, partial matches, mutable object assignment, and JavaScript coercion are rejected. | [RFC 0008](../RFCs/0008-array-destructuring.md), [RFC 0012](../RFCs/0012-map-destructuring.md), [RFC 0023](../RFCs/0023-nested-destructuring.md), [RFC 0073](../RFCs/0073-pattern-defaults.md) |
+| Bound Functions, Generator Functions | Adapt | `=>` is a readable synonym for `->` because the runtime has no `this`; it does not bind a receiver. `yield`, generator functions, `yield from`, and `for ... from` are rejected. | [RFC 0001](../RFCs/0001-language-core.md), [project scope](../RFCs/0000-project-scope.md) |
+| Embedded JavaScript | Reject | Backtick JavaScript and all pass-through evaluation are lexical errors. The VM never executes JavaScript source. | [project scope](../RFCs/0000-project-scope.md), [RFC 0001](../RFCs/0001-language-core.md) |
+| Switch/When/Else | Implement | `switch`/`when`/`else` is an expression with strict equality, one selected branch, and no fallthrough or coercion. | [RFC 0010](../RFCs/0010-switch-when.md) |
+| Try/Catch/Finally | Adapt | `try`, `catch`, `finally`, and `throw` are supported for QuickCoffee runtime errors. There is no JavaScript `Error` object, stack object, or catchable resource-exhaustion escape. | [RFC 0011](../RFCs/0011-exceptions.md), [RFC 0049](../RFCs/0049-host-runtime-errors.md) |
+| Chained Comparisons | Implement | Comparison chains short-circuit and evaluate each middle operand once under strict QuickCoffee comparison rules. | [RFC 0025](../RFCs/0025-chained-comparisons.md) |
+| String Interpolation, Block Strings, and Block Comments | Adapt | Double-quoted interpolation, multiline strings, heredocs, escapes, line comments, and non-nesting block comments are supported. Interpolation evaluates QuickCoffee expressions only; comments are not preserved as generated JavaScript because there is no JS output. | [RFC 0007](../RFCs/0007-string-interpolation.md), [RFC 0032](../RFCs/0032-block-comments.md), [RFC 0040](../RFCs/0040-heredocs.md), [RFC 0061](../RFCs/0061-string-escapes.md) |
+| Tagged Template Literals | Reject | Tagged templates depend on JavaScript call and template-object semantics and are outside the value model. | [project scope](../RFCs/0000-project-scope.md) |
+| Block Regular Expressions | Reject | Regular expressions, including `///` heregexes and interpolation, are outside the language contract. | [project scope](../RFCs/0000-project-scope.md) |
+| Modules | Adapt | Embedders can compile static named imports/exports and resolve them only through a host `ModuleLoader`. Default, namespace, side-effect, re-export, dynamic, CLI filesystem, package, and network loading are not supported. | [RFC 0119](../RFCs/0119-embedded-module-core.md), [issue #75](https://github.com/coffee-js/quickcoffee/issues/75) |
+
+## Maintenance rule / 维护规则
+
+A language change that affects one of these sections must update the row, its RFC evidence, and executable acceptance tests in the same change. A new CoffeeScript-derived surface form must be classified before implementation. Features outside this matrix remain unsupported until an RFC deliberately adds and classifies them.
+
+影响上述章节的语言变更，必须在同一变更中更新对应行、RFC 证据及可执行验收测试。新增 CoffeeScript 衍生语法必须先分类再实现。矩阵之外的特性保持不支持，直至 RFC 明确纳入并分类。
