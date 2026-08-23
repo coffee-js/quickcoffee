@@ -83,11 +83,11 @@ fn public_values_and_native_errors_are_structured() {
 }
 
 #[test]
-fn source_diagnostics_expose_labels_without_inventing_unknown_columns() {
+fn source_diagnostics_expose_primary_labels_and_precise_columns() {
     let error = Engine::new().compile("value = 1\n@").unwrap_err();
     let position = error.position().expect("parse error has a position");
     assert_eq!(position.line, 2);
-    assert_eq!(position.column, None);
+    assert_eq!(position.column, Some(1));
 
     let [label] = error.labels() else {
         panic!("parse error must have one primary label");
@@ -95,7 +95,13 @@ fn source_diagnostics_expose_labels_without_inventing_unknown_columns() {
     assert_eq!(label.kind, DiagnosticLabelKind::Primary);
     assert_eq!(label.span.source_name, None);
     assert_eq!(label.span.start, position);
-    assert_eq!(label.span.end, None);
+    assert_eq!(
+        label.span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(2),
+        })
+    );
     assert_eq!(label.message, None);
 
     let runtime = Error::runtime("host failed");

@@ -27,6 +27,8 @@ RFC 0047 只公开从一开始计数的源码行。编辑器、CLI、模块宿�
 3. parse、verify、runtime 与 resource 错误在来源已知时附加 span；
 4. CLI 和嵌入 API 增加版本化的结构化输出，同时保持旧 `line` 消费方可用。
 
+RFC 0127 完成第一步中可与原始物理行一一对应的 lexer token 与 parser 错误范围；被预处理改写的 token 仍保持列未知，AST、bytecode 与运行期传播尚未完成。
+
 字节码指纹在 span 未进入规范编码前不得改变。任何无法可靠定位的错误宁可没有标签，也不得伪造列或来源名。
 
 ## 验收
