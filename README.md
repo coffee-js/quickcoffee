@@ -6,7 +6,7 @@ QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本
 构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
 后续大需求、里程碑和拆分规则见 [ROADMAP.md](ROADMAP.md)。
 当前业务适用范围、语言缺口与 QuickJS 性能对照见 [docs/readiness.zh-CN.md](docs/readiness.zh-CN.md)。
-与 CoffeeScript 1.12.7 官方语言参考的逐项差异见[特性矩阵](docs/coffeescript-2016-matrix.md)。
+与 CoffeeScript 1.12.7 官方语言参考的逐项差异见 [特性矩阵](docs/coffeescript-2016-matrix.md)。
 
 ```coffee
 square = (x) -> x * x

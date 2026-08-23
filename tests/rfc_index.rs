@@ -108,14 +108,18 @@ fn coffeescript_feature_matrix_covers_the_official_language_reference() {
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), sections.len(), "matrix has an unexpected row");
     for row in rows {
-        let columns = row.split('|').map(str::trim).collect::<Vec<_>>();
-        assert_eq!(columns.len(), 6, "matrix row must have four columns: {row}");
+        let columns = row
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(columns.len(), 4, "matrix row must have four columns: {row}");
         assert!(
-            matches!(columns[2], "Implement" | "Adapt" | "Reject"),
+            matches!(columns[1], "Implement" | "Adapt" | "Reject"),
             "matrix row has an invalid status: {row}"
         );
         assert!(
-            columns[4].contains("(../RFCs/"),
+            columns[3].contains("(../RFCs/"),
             "matrix row must link normative RFC evidence: {row}"
         );
     }
