@@ -13,6 +13,9 @@
 ## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 ## qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.
 ## qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.
+## qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.
+
+## qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
 ## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
@@ -20,7 +23,7 @@
 ## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
-## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.
+## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.
 ## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 ## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.

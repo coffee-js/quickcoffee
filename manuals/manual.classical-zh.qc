@@ -22,6 +22,9 @@
 ## qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 ## qtest --json 每篇出一行 JSON，便于 CI 取用；--stats 仍书于标准错误。
 ## qtest --tap 出 TAP 13 及定次之记录；--json 与 --tap 不可并用。
+## qtest --filter TEXT 依路径择篇；qtest --list 但列所择之篇而不行其文。
+
+## qcoffee --json 一行以 JSON 载其值或错状，俾 CI 与宿主取用。
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
 ## Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。
 ## Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。
@@ -29,7 +32,7 @@
 ## qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。
 ## 指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。
 ## qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
-## 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失。
+## 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。
 ## cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 ## 宿主可用 Value::kind() 别其类，Value::is_nil() 验 nil，不窥其内容器。
 ## Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。

@@ -14,6 +14,9 @@
 ## qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 ## qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写标准错误。
 ## qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
+## qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。
+
+## qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
 ## Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 ## Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 ## Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
@@ -21,7 +24,7 @@
 ## qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
 ## 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
 ## qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
-## 嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值。
+## 嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。
 ## cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
 ## 宿主可用 Value::kind() 分流类型，用 Value::is_nil() 判断 nil，无须检查内部容器。
 ## Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。

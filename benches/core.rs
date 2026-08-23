@@ -18,6 +18,30 @@ fn main() {
             expected: "100",
         },
         Workload {
+            name: "stdlib-abs",
+            source: "abs(-42)",
+            iterations: 20_000,
+            expected: "42",
+        },
+        Workload {
+            name: "stdlib-sum",
+            source: "sum([1, 2, 3, 4])",
+            iterations: 20_000,
+            expected: "10",
+        },
+        Workload {
+            name: "stdlib-min-max",
+            source: "min([3, 1, 2]) + max([3, 1, 2])",
+            iterations: 20_000,
+            expected: "4",
+        },
+        Workload {
+            name: "stdlib-range-sum",
+            source: "sum(range(1, 100))",
+            iterations: 10_000,
+            expected: "4950",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,
