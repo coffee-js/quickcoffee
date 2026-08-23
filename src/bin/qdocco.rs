@@ -3,6 +3,7 @@
 use quickcoffee::{Context, Engine, Value};
 use std::{
     env,
+    ffi::OsString,
     fmt::Write as _,
     fs,
     io::{self, Write},
@@ -22,12 +23,11 @@ fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
 fn write_output(destination: &Path, document: &str) -> io::Result<()> {
     let file_name = destination
         .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("qdocco-output");
-    let temporary = destination.with_file_name(format!(
-        ".{file_name}.quickcoffee-{}.tmp",
-        std::process::id()
-    ));
+        .unwrap_or_else(|| std::ffi::OsStr::new("qdocco-output"));
+    let mut temporary_name = OsString::from(".");
+    temporary_name.push(file_name);
+    temporary_name.push(format!(".quickcoffee-{}.tmp", std::process::id()));
+    let temporary = destination.with_file_name(temporary_name);
     let mut created = false;
     let result = (|| {
         let mut file = fs::OpenOptions::new()
@@ -38,7 +38,20 @@ fn write_output(destination: &Path, document: &str) -> io::Result<()> {
         file.write_all(document.as_bytes())?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, destination)
+        #[cfg(windows)]
+        if destination.exists() {
+            fs::remove_file(destination)?;
+        }
+        fs::rename(&temporary, destination)?;
+        #[cfg(unix)]
+        {
+            let parent = destination
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
     })();
     if result.is_err() && created {
         let _ = fs::remove_file(&temporary);
