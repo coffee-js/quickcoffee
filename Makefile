@@ -17,7 +17,7 @@ package-metadata:
 	cargo metadata --locked --no-deps --format-version 1 >/dev/null
 
 package:
-	cargo publish --dry-run --locked
+	cargo publish --dry-run --locked --allow-dirty
 
 clippy:
 	cargo clippy --locked --all-targets -- -D warnings
