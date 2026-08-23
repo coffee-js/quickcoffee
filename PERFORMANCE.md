@@ -30,9 +30,35 @@ cargo build --locked --release --bins
 target/release/qbench --compare-qjs /path/to/qjs --compare-iterations 1 --repeat 11 --json
 ```
 
-当前比较负载是双方可等价表达并校验结果的标量循环和函数调用。既有 `quickcoffee_cli_ns` 与 `quickjs_cli_ns` 继续表示包含启动、解析、编译和执行的端到端子进程总耗时，不由其他阶段相减得出。
+当前比较集合包含双方可等价表达并校验结果的标量循环、函数调用、数组构造/索引/遍历、固定自身键映射读取、不可变映射更新、Unicode 标量遍历与标量索引。既有 `quickcoffee_cli_ns` 与 `quickjs_cli_ns` 继续表示包含启动、解析、编译和执行的端到端子进程总耗时，不由其他阶段相减得出。
 
 RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_startup_ns` / `quickjs_startup_ns` 通过各自 `--quit` 测进程启动；`*_compile_ns` 在进程内重复编译函数或程序；`*_hot_ns` 复用已编译函数或已验证 `Program` 与运行上下文，并在每次执行后校验最终值。每个阶段都是一轮 `--compare-iterations` 的总耗时，并配有对 `--repeat` 样本计算的 `*_mad_ns`。QuickJS 阶段由 `qjs --std` 内的 `os.now()` 自计时，因此字段使用纳秒单位不代表底层时钟具有纳秒分辨率。它用于量级判断和回归观察，不是 JavaScript 兼容性声明。
+
+### RFC 0120 / issue #79 集合与 Unicode 对照扩展
+
+新增五条记录保持稳定名称和期望值：
+
+| 负载 | 主要操作 | 期望值 | 等价边界 |
+|---|---|---:|---|
+| `array-build-index-iterate` | 单数组构造和下标循环 | 1498500 | 两端各构造 `0..999` 一份数组，并以相同的显式下标循环读取 |
+| `map-own-lookup` | 固定自身键重复读取 | 100000 | 只读字面量自身键，不依赖原型 |
+| `map-functional-update` | spread 后覆盖一个键 | 507502 | 两端每轮都产生新映射/对象，不使用原地更新 |
+| `unicode-scalar-iterate` | Unicode 标量遍历与下标绑定 | 15000 | JavaScript 使用字符串 `for...of`，两端都按标量枚举 |
+| `unicode-scalar-index` | 重复 Unicode 标量索引 | 22000 | QuickJS 在计时函数内先用 `Array.from` 解码标量；这是显式语义适配，不代表底层索引同构 |
+
+2026-08-24 在同一 Apple arm64（T6000、Darwin 25.5.0）、`rustc 1.94.0` release、官方 QuickJS 2026-06-04 上运行 `--compare-iterations 1 --repeat 11 --json`。下表为预编译热执行中位数与 MAD；完整启动、编译、热执行和 CLI 数据保存在 #79，避免把持续变化的阶段数据复制成多个规划源：
+
+| 负载 | QuickCoffee hot ms（MAD） | QuickJS hot ms（MAD） | 比例 | 审阅目标 |
+|---|---:|---:|---:|---|
+| `scalar-loop` | 514.995（1.629） | 14.108（0.087） | 36.50× | 未达 10× |
+| `function-loop` | 203.200（0.970） | 5.732（0.021） | 35.45× | 观测项 |
+| `array-build-index-iterate` | 0.649（0.006） | 0.069（0.002） | 9.41× | 达到 20× |
+| `map-own-lookup` | 9.269（0.114） | 0.321（0.005） | 28.87× | 未达 20× |
+| `map-functional-update` | 1.617（0.030） | 0.171（0.002） | 9.46× | 达到 20× |
+| `unicode-scalar-iterate` | 3.770（0.033） | 0.962（0.011） | 3.92× | 达到 20× |
+| `unicode-scalar-index` | 10.529（0.049） | 1.639（0.022） | 6.42× | 达到 20×（含上述适配） |
+
+因此集合目标已经可以测量，但尚未整体达成；固定键映射读取是新增负载中最明确的热点。该结论只适用于同机同源码的当前实验，不把启动占优或 Unicode 适配解释为语言兼容或引擎总体性能。
 
 调试单一回归时，先用 `qbench --list` 查看确定性的内建负载名，再用 `qbench --only NAME` 只运行该负载；不指定 `--only` 始终运行完整集合，持续门禁口径不变。
 

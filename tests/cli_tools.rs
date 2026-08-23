@@ -868,6 +868,11 @@ fi
 case "$2" in
   *1000000*) printf '499999500000\n' ;;
   *250000*) printf '250000\n' ;;
+  *array-build-index-iterate*) printf '1498500\n' ;;
+  *map-own-lookup*) printf '100000\n' ;;
+  *map-functional-update*) printf '507502\n' ;;
+  *unicode-scalar-iterate*) printf '15000\n' ;;
+  *unicode-scalar-index*) printf '22000\n' ;;
   *) exit 1 ;;
 esac
 "#,
@@ -895,7 +900,29 @@ esac
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.lines().count(), 2);
+    let expected = [
+        ("scalar-loop", "499999500000"),
+        ("function-loop", "250000"),
+        ("array-build-index-iterate", "1498500"),
+        ("map-own-lookup", "100000"),
+        ("map-functional-update", "507502"),
+        ("unicode-scalar-iterate", "15000"),
+        ("unicode-scalar-index", "22000"),
+    ];
+    assert_eq!(stdout.lines().count(), expected.len());
+    for (name, value) in expected {
+        let name_field = format!("\"name\":\"{name}\"");
+        let lines = stdout
+            .lines()
+            .filter(|line| line.contains(&name_field))
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "missing or duplicate workload {name}");
+        assert!(
+            lines[0].contains(&format!("\"expected\":\"{value}\"")),
+            "workload {name} did not retain expected value {value}: {}",
+            lines[0]
+        );
+    }
     for line in stdout.lines() {
         for field in [
             "\"schema\":\"quickcoffee.qcompare.v1\"",
