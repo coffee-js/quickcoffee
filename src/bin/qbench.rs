@@ -31,7 +31,7 @@ const WORKLOADS: &[Workload] = &[
 ];
 
 fn usage() {
-    eprintln!("Usage: qbench [--iterations N] [--json]");
+    eprintln!("Usage: qbench [--iterations N] [--json]\n       qbench --version");
 }
 
 fn json_escape(value: &str) -> String {
@@ -44,6 +44,10 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--version" => {
+                println!("qbench {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
             "--help" | "-h" => {
                 usage();
                 return ExitCode::SUCCESS;

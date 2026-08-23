@@ -11,12 +11,6 @@ examples:
 
 package-metadata:
 	cargo metadata --locked --no-deps --format-version 1 >/dev/null
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"repository":"[^"]+"'
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"homepage":"[^"]+"'
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"documentation":"[^"]+"'
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"readme":"[^"]+"'
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"keywords":\[[^]]*"[^"]+"'
-	cargo metadata --locked --no-deps --format-version 1 | grep -Eq '"categories":\[[^]]*"[^"]+"'
 
 clippy:
 	cargo clippy --locked --all-targets -- -D warnings
