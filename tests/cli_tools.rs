@@ -23,9 +23,17 @@ fn qdocco_renders_escaped_source_and_checks() {
     let page = fs::read_to_string(&output).unwrap();
     assert!(page.contains("&lt;Guide&gt;"));
     assert!(page.contains("Final value: <code>3</code>"));
+    let non_test_document = Command::new(bin("qdocco"))
+        .args(["--check", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(non_test_document.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&non_test_document.stderr).contains("expected true"));
+    let check_input = temp.join("check.qc");
+    fs::write(&check_input, "true\n").unwrap();
     assert!(
         Command::new(bin("qdocco"))
-            .args(["--check", input.to_str().unwrap()])
+            .args(["--check", check_input.to_str().unwrap()])
             .status()
             .unwrap()
             .success()
@@ -344,7 +352,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(json.status.success());
     let stdout = String::from_utf8_lossy(&json.stdout);
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines.len(), 5);
+    assert!(stdout.contains("\"name\":\"stepped-string-iteration\""));
     for line in lines {
         assert!(line.starts_with('{') && line.ends_with('}'));
         for field in [

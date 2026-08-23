@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! CoffeeScript-inspired parser, compiler, bytecode VM, and embedding API.
 //! The public API intentionally exposes values and native functions, never JS-like objects.
 
@@ -9,7 +11,7 @@ mod vm;
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
 pub use vm::{
     Context, Engine, Error, ErrorKind, ExecutionStats, Function, NativeFunction, Program,
-    SourcePosition, Value,
+    SourcePosition, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.

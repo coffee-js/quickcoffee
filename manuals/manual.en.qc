@@ -6,7 +6,7 @@
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
-## for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and reject by.
+## for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept positive by steps.
 ## [head, tail...] = [1, 2, 3] binds tail to [2, 3]; array-pattern rest must be final.
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
 ## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
@@ -21,6 +21,7 @@
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
 ## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.
 ## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
+## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.

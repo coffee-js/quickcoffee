@@ -1,3 +1,5 @@
+//! Release benchmark runner with semantic guards and machine-readable timing output.
+
 use quickcoffee::{Context, Engine};
 use std::{env, process::ExitCode, time::Instant};
 
@@ -27,6 +29,11 @@ const WORKLOADS: &[Workload] = &[
         name: "negative-indexing",
         source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
         expected: "31",
+    },
+    Workload {
+        name: "stepped-string-iteration",
+        source: "sum = 0\nfor character, index in 'a☕中x' by 2 then sum += index\nsum",
+        expected: "2",
     },
 ];
 

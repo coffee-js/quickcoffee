@@ -1,4 +1,6 @@
-use quickcoffee::{Context, Engine};
+//! Literate-programming renderer and checker for QuickCoffee sources.
+
+use quickcoffee::{Context, Engine, Value};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 fn usage() {
@@ -104,6 +106,10 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if check && !matches!(&result, Value::Bool(true)) {
+        eprintln!("qdocco check failed: final value was {result}, expected true");
+        return ExitCode::from(1);
+    }
     if !check {
         let destination =
             output.unwrap_or_else(|| input.with_extension(if markdown { "md" } else { "html" }));
