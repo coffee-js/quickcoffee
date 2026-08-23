@@ -1592,7 +1592,8 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         constants: vec![],
         code: vec![Instruction::Constant(9), Instruction::Return],
     };
-    assert!(bad_constant.verify().is_err());
+    let bad_constant_error = bad_constant.verify().unwrap_err();
+    assert!(!format!("{bad_constant_error:?}").contains("verification_site"));
     assert!(Context::new().run(bad_constant).is_err());
     let bad_program = Program::from(Chunk {
         constants: vec![],

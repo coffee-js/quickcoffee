@@ -6,7 +6,7 @@ Embedding diagnostics expose ordered primary/secondary labels through `Error::la
 
 Lowering-time errors for `break`, `continue`, and `return`, single-file misuse of module directives, and duplicate module exports retain the triggering keyword span. These validation spans do not alter public bytecode; transformed input continues to degrade to a reliable line rather than a guessed column.
 
-Compiled `Program` values keep a private source-map sidecar for top-level expressions, nested/default-parameter chunks, assignment/destructuring statements, modules, runtime failures, host-call failures, and resource stops. It is excluded from bytecode fingerprints and disassembly, and error-path lookup adds no successful-instruction VM work. Raw host-built `Chunk` values remain deliberately unattributed; untrusted-bytecode verifier locations and multi-label call stacks are still pending.
+Compiled `Program` values keep a private source-map sidecar for top-level expressions, nested/default-parameter chunks, assignment/destructuring statements, modules, verifier failures, runtime failures, host-call failures, and resource stops. It is excluded from bytecode fingerprints and disassembly, and source-map lookup happens only on compile/VM error paths. Runtime errors retain a primary failure label followed by nearest-to-outermost `called from here` secondary QuickCoffee call sites. Raw host-built `Chunk` values remain deliberately unattributed.
 
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 

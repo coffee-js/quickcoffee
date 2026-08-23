@@ -243,6 +243,80 @@ fn compiled_program_source_maps_attribute_runtime_and_resource_errors() {
 }
 
 #[test]
+fn runtime_errors_keep_ordered_secondary_quickcoffee_call_sites() {
+    const NAME: &str = "virtual://runtime/call-stack.qc";
+    let error = Context::new()
+        .eval_named(NAME, "outer = -> inner()\ninner = -> missing\nouter()")
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.to_string(), "runtime error: unknown name 'missing'");
+    assert_eq!(error.labels().len(), 3);
+
+    let primary = &error.labels()[0];
+    assert_eq!(primary.kind, quickcoffee::DiagnosticLabelKind::Primary);
+    assert_eq!(primary.span.source_name.as_deref(), Some(NAME));
+    assert_eq!(primary.span.start.line, 2);
+    assert_eq!(primary.span.start.column, Some(12));
+
+    let inner_call = &error.labels()[1];
+    assert_eq!(inner_call.kind, quickcoffee::DiagnosticLabelKind::Secondary);
+    assert_eq!(inner_call.message.as_deref(), Some("called from here"));
+    assert_eq!(inner_call.span.source_name.as_deref(), Some(NAME));
+    assert_eq!(inner_call.span.start.line, 1);
+    assert_eq!(inner_call.span.start.column, Some(12));
+
+    let outer_call = &error.labels()[2];
+    assert_eq!(outer_call.kind, quickcoffee::DiagnosticLabelKind::Secondary);
+    assert_eq!(outer_call.message.as_deref(), Some("called from here"));
+    assert_eq!(outer_call.span.source_name.as_deref(), Some(NAME));
+    assert_eq!(outer_call.span.start.line, 3);
+    assert_eq!(outer_call.span.start.column, Some(1));
+
+    let mut retained = Context::new();
+    retained
+        .eval_named("virtual://definitions.qc", "fail = -> missing")
+        .unwrap();
+    let cross_eval = retained
+        .eval_named("virtual://caller.qc", "fail()")
+        .unwrap_err();
+    assert_eq!(cross_eval.labels().len(), 2);
+    assert_eq!(
+        cross_eval.labels()[0].span.source_name.as_deref(),
+        Some("virtual://definitions.qc")
+    );
+    assert_eq!(
+        cross_eval.labels()[1].span.source_name.as_deref(),
+        Some("virtual://caller.qc")
+    );
+    assert_eq!(
+        cross_eval.labels()[1].kind,
+        quickcoffee::DiagnosticLabelKind::Secondary
+    );
+
+    let resource = Context::new()
+        .with_fuel(12)
+        .eval_named(NAME, "spin = -> while true then 1\nspin()")
+        .unwrap_err();
+    assert_eq!(resource.kind(), ErrorKind::Resource);
+    assert!(resource.labels().len() >= 2);
+    assert_eq!(resource.labels()[0].span.source_name.as_deref(), Some(NAME));
+    assert_eq!(
+        resource.labels()[1].kind,
+        quickcoffee::DiagnosticLabelKind::Secondary
+    );
+    assert_eq!(resource.labels()[1].span.source_name.as_deref(), Some(NAME));
+    assert_eq!(resource.labels()[1].span.start.line, 2);
+
+    assert_eq!(
+        Context::new()
+            .eval("try missing catch error then 42")
+            .unwrap()
+            .as_number(),
+        Some(42.)
+    );
+}
+
+#[test]
 fn raw_chunks_do_not_invent_source_attribution() {
     let error = Context::new()
         .run(quickcoffee::Chunk {

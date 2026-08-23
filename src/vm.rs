@@ -269,12 +269,28 @@ impl fmt::Display for ErrorKind {
     }
 }
 /// A structured error suitable for CLI display or host-side branching.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Error {
     kind: ErrorKind,
     message: String,
     labels: Vec<DiagnosticLabel>,
     resource_limit: Option<ResourceLimit>,
+    verification_site: Option<VerificationSite>,
+}
+#[derive(Debug, Clone, Copy)]
+struct VerificationSite {
+    chunk: Option<usize>,
+    instruction: usize,
+}
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field("message", &self.message)
+            .field("labels", &self.labels)
+            .field("resource_limit", &self.resource_limit)
+            .finish()
+    }
 }
 impl Error {
     pub(crate) fn parse(m: impl Into<String>) -> Self {
@@ -283,6 +299,7 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            verification_site: None,
         }
     }
     pub(crate) fn verify(m: impl Into<String>) -> Self {
@@ -291,6 +308,7 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            verification_site: None,
         }
     }
     /// Creates a runtime error for a host callback to return across the VM boundary.
@@ -300,6 +318,7 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            verification_site: None,
         }
     }
     fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
@@ -308,6 +327,7 @@ impl Error {
             message: message.into(),
             labels: Vec::new(),
             resource_limit: Some(limit),
+            verification_site: None,
         }
     }
     /// Returns the machine-readable category without requiring display-text parsing.
@@ -371,6 +391,37 @@ impl Error {
             }
         }
         self
+    }
+    pub(crate) fn with_secondary_span(mut self, span: Option<SourceSpan>) -> Self {
+        if let Some(span) = span {
+            self.labels.push(DiagnosticLabel {
+                kind: DiagnosticLabelKind::Secondary,
+                span,
+                message: Some("called from here".to_owned()),
+            });
+        }
+        self
+    }
+    pub(crate) fn at_instruction(mut self, instruction: usize) -> Self {
+        if self.verification_site.is_none() {
+            self.verification_site = Some(VerificationSite {
+                chunk: None,
+                instruction,
+            });
+        }
+        self
+    }
+    pub(crate) fn with_verification_chunk(mut self, chunk: usize) -> Self {
+        if let Some(site) = &mut self.verification_site {
+            if site.chunk.is_none() {
+                site.chunk = Some(chunk);
+            }
+        }
+        self
+    }
+    pub(crate) fn verification_site(&self) -> Option<(usize, usize)> {
+        self.verification_site
+            .and_then(|site| site.chunk.map(|chunk| (chunk, site.instruction)))
     }
 }
 impl fmt::Display for Error {
@@ -578,7 +629,7 @@ impl Engine {
         };
         let ast = parser::parse(source).map_err(attach_name)?;
         let (chunk, source_map) = bytecode::compile_mapped(&ast).map_err(attach_name)?;
-        chunk.verify().map_err(attach_name)?;
+        bytecode::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
         Ok(Program::from_compiled(chunk, source_map, source_name))
     }
 }
@@ -1063,6 +1114,14 @@ impl Vm {
             .and_then(|debug_info| debug_info.span(&frame.chunk, pc))
     }
 
+    fn with_call_stack(mut error: Error, frames: &[Frame], include_current_call: bool) -> Error {
+        let skip = usize::from(!include_current_call);
+        for frame in frames.iter().rev().skip(skip) {
+            error = error.with_secondary_span(Self::source_span(frame, frame.pc.saturating_sub(1)));
+        }
+        error
+    }
+
     fn record_value_allocations(&mut self, count: u64) {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
@@ -1169,20 +1228,18 @@ impl Vm {
                 let span = frames
                     .last()
                     .and_then(|frame| Self::source_span(frame, frame.pc));
-                return Err(Error::resource(
-                    ResourceLimit::Cancellation,
-                    "execution cancelled by host",
-                )
-                .with_span_if_missing(span));
+                let error =
+                    Error::resource(ResourceLimit::Cancellation, "execution cancelled by host")
+                        .with_span_if_missing(span);
+                return Err(Self::with_call_stack(error, &frames, false));
             }
             if self.fuel == 0 {
                 let span = frames
                     .last()
                     .and_then(|frame| Self::source_span(frame, frame.pc));
-                return Err(
-                    Error::resource(ResourceLimit::Fuel, "execution fuel exhausted")
-                        .with_span_if_missing(span),
-                );
+                let error = Error::resource(ResourceLimit::Fuel, "execution fuel exhausted")
+                    .with_span_if_missing(span);
+                return Err(Self::with_call_stack(error, &frames, false));
             }
             self.fuel -= 1;
             self.instructions += 1;
@@ -1686,10 +1743,12 @@ impl Vm {
                 Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
                     Ok(()) => {}
                     Err(error) => {
+                        let include_current_call = !error.labels().is_empty();
                         let span = frames
                             .last()
                             .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
                         let error = error.with_span_if_missing(span);
+                        let error = Self::with_call_stack(error, &frames, include_current_call);
                         if !handle_error(self, &mut frames, &error) {
                             return Err(error);
                         }
@@ -1700,6 +1759,7 @@ impl Vm {
                         .last()
                         .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
                     let error = error.with_span_if_missing(span);
+                    let error = Self::with_call_stack(error, &frames, false);
                     if !handle_error(self, &mut frames, &error) {
                         return Err(error);
                     }
