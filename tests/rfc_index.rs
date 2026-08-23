@@ -23,6 +23,10 @@ fn rfc_numbers_and_index_references_are_consistent() {
             source.contains("状态：") || source.contains("Status:"),
             "RFC {name} needs a status field"
         );
+        assert!(
+            !source.contains("状态：实现中") && !source.contains("Status: Implementing"),
+            "RFC {name} is still marked as implementing; completed scope RFCs must be adopted"
+        );
         numbered.push((number, name.to_owned()));
     }
 

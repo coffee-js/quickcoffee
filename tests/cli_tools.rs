@@ -55,6 +55,23 @@ fn qdocco_renders_escaped_source_and_checks() {
     assert!(document.contains("## Notes\n\n<Guide>"));
     assert!(document.contains("````quickcoffee\n1 + 2\n````"));
     assert!(document.contains("## Final value\n\n`3`"));
+    let fenced_input = temp.join("fenced.qc");
+    let fenced_output = temp.join("fenced.md");
+    fs::write(&fenced_input, "## Fence\n# ````\ntrue\n").unwrap();
+    assert!(
+        Command::new(bin("qdocco"))
+            .args([
+                "--markdown",
+                fenced_input.to_str().unwrap(),
+                "-o",
+                fenced_output.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fenced_document = fs::read_to_string(&fenced_output).unwrap();
+    assert!(fenced_document.contains("`````quickcoffee\n# ````\ntrue\n`````"));
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])
         .output()
@@ -352,8 +369,9 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(json.status.success());
     let stdout = String::from_utf8_lossy(&json.stdout);
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 5);
+    assert_eq!(lines.len(), 6);
     assert!(stdout.contains("\"name\":\"stepped-string-iteration\""));
+    assert!(stdout.contains("\"name\":\"signed-by-iteration\""));
     for line in lines {
         assert!(line.starts_with('{') && line.ends_with('}'));
         for field in [

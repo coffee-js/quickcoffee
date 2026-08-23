@@ -18,14 +18,14 @@ for character, index in 'a☕中' then index
 
 第二绑定是从零开始的 Unicode 标量下标，而不是 UTF-8 字节偏移。每轮模式匹配成功后才写入绑定；字符串为空时产生空数组。后置推导和语句位置的丢弃循环同样适用。
 
-字符串迭代也接受 `by step`。步长只求值一次，必须是正有限整数；它跳过 Unicode 标量而不是 UTF-8 字节，第二绑定仍是实际的标量下标：
+字符串迭代也接受 `by step`。步长只求值一次，必须是非零有限有符号整数；正步长从首项开始，负步长从末项开始。它跳过 Unicode 标量而不是 UTF-8 字节，第二绑定仍是实际的标量下标：
 
 ```coffee
 for character, index in 'a☕中x' by 2 then [character, index]
 # => [[a, 0], [中, 2]]
 ```
 
-由于迭代对象可在运行时求值，`for value in dynamic by step` 在运行时按实际数组或字符串类型采用同一正整数步长。映射仍使用 `of`，不受本 RFC 影响。
+由于迭代对象可在运行时求值，`for value in dynamic by step` 在运行时按实际数组或字符串类型采用同一非零有限有符号步长。映射仍使用 `of`，不受本 RFC 影响。
 
 非数组、非字符串的 `in` 迭代对象仍是运行时错误；字符串的 `of` 迭代仍是映射类型错误。该功能不暴露 JavaScript 的 UTF-16 code unit、迭代器对象或原型链。
 

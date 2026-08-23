@@ -10,7 +10,7 @@
 ## qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।
 ## qcoffee --interactive --stats केवलं कार्यितायै वा runtime-दोषयुक्तायै non-empty पङ्क्त्यै instruction तथा fuel लेखं लिखति; parse अथवा verify-दोषे नूतनं लेखं न लिखति।
 ## 'a☕中'[1] '☕' अस्ति, 'a☕中'[1..2] '☕中' अस्ति; string-index Unicode-scalar-अनुसारी अस्ति।
-## for character, index in 'a☕中' then index Unicode-scalar-अङ्कान् [0, 1, 2] ददाति; string-iteration मध्ये धनात्मक by-क्रमः अस्ति।
+## for character, index in 'a☕中' then index Unicode-scalar-अङ्कान् [0, 1, 2] ददाति; string-iteration मध्ये शून्य-वर्जित signed by-क्रमः अस्ति।
 ## do (name, other) -> ... तत्क्षणं आह्वयति, बहिः समाननाम-मूल्यानि ददाति; do -> ... निरवयवम् अस्ति।
 ## [head, tail...] = [1, 2, 3] tail-नाम्नि [2, 3] बध्नाति; array-pattern rest अन्तिमः भवति।
 ## qtest --fuel N प्रत्येक executable-document पृथक् instruction-budget ददाति।
@@ -60,7 +60,7 @@
 ## loop body अनन्तः while true; break निर्गमं करोति, fuel सीमा तिष्ठति।
 ## for-expression शरीर-मूल्यानि नूतने array मध्ये सञ्चिनोति; when तथा continue त्यजतः, break सञ्चित-पूर्वभागं रक्षति।
 ## for-binding strict-pattern भवति: for [left, right] in pairs प्रत्येक-pair पूर्णतया बध्नाति।
-## array-for by step उपयुज्यते; positive finite integer step एकवारं मूल्यते, map तु न।
+## array-for by step उपयुज्यते; non-zero finite integer step एकवारं मूल्यते, negative क्रमः अन्तिम-पदात् आरभते, map तु न।
 ## array-for शून्यात् गणितं index अपि बध्नाति: for value, index in items then value + index।
 ## postfix-comprehension समानं strict-collection वहति: value * 2 for value in items, अथवा [value * 2 for value in items]।
 base = 40

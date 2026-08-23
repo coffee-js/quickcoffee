@@ -626,12 +626,12 @@ enum IterationKind {
     Array {
         values: Rc<Vec<Value>>,
         position: usize,
-        step: usize,
+        step: i64,
     },
     String {
         values: Rc<Vec<Value>>,
         position: usize,
-        step: usize,
+        step: i64,
     },
     Map {
         entries: Vec<(String, Value)>,
@@ -853,25 +853,40 @@ impl Vm {
                     Instruction::IterStartEnumerable => {
                         let step = array_iteration_step(pop(frame)?)?;
                         match pop(frame)? {
-                            Value::Array(values) => frame.iterators.push(Iteration {
-                                kind: IterationKind::Array {
-                                    values,
-                                    position: 0,
-                                    step,
-                                },
-                            }),
+                            Value::Array(values) => {
+                                // Negative steps traverse from the final element so the
+                                // optional index remains the actual array position.
+                                let position = if step < 0 {
+                                    values.len().saturating_sub(1)
+                                } else {
+                                    0
+                                };
+                                frame.iterators.push(Iteration {
+                                    kind: IterationKind::Array {
+                                        values,
+                                        position,
+                                        step,
+                                    },
+                                });
+                            }
                             Value::String(value) => {
+                                let values: Rc<Vec<Value>> = Rc::new(
+                                    value
+                                        .chars()
+                                        .map(|character| {
+                                            Value::String(Rc::from(character.to_string()))
+                                        })
+                                        .collect(),
+                                );
+                                let position = if step < 0 {
+                                    values.len().saturating_sub(1)
+                                } else {
+                                    0
+                                };
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
-                                        values: Rc::new(
-                                            value
-                                                .chars()
-                                                .map(|character| {
-                                                    Value::String(Rc::from(character.to_string()))
-                                                })
-                                                .collect(),
-                                        ),
-                                        position: 0,
+                                        values,
+                                        position,
                                         step,
                                     },
                                 });
@@ -915,7 +930,7 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position = position.saturating_add(*step);
+                                        advance_position(position, *step);
                                     }
                                     value
                                 }
@@ -932,7 +947,7 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position = position.saturating_add(*step);
+                                        advance_position(position, *step);
                                     }
                                     value
                                 }
@@ -1291,14 +1306,31 @@ fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> 
             .collect(),
     )))
 }
-fn array_iteration_step(value: Value) -> Result<usize, Error> {
+fn array_iteration_step(value: Value) -> Result<i64, Error> {
     let Value::Number(step) = value else {
-        return Err(Error::runtime("for by step must be a positive integer"));
+        return Err(Error::runtime(
+            "for by step must be a non-zero finite integer",
+        ));
     };
-    if !step.is_finite() || step.fract() != 0. || step < 1. || step > usize::MAX as f64 {
-        return Err(Error::runtime("for by step must be a positive integer"));
+    if !step.is_finite()
+        || step.fract() != 0.
+        || step == 0.
+        || step < i64::MIN as f64
+        || step > i64::MAX as f64
+    {
+        return Err(Error::runtime(
+            "for by step must be a non-zero finite integer",
+        ));
     }
-    Ok(step as usize)
+    Ok(step as i64)
+}
+fn advance_position(position: &mut usize, step: i64) {
+    if step >= 0 {
+        *position = position.saturating_add(step as usize);
+    } else {
+        let amount = step.unsigned_abs() as usize;
+        *position = position.checked_sub(amount).unwrap_or(usize::MAX);
+    }
 }
 fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
