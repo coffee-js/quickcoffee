@@ -409,11 +409,11 @@ fn main() -> ExitCode {
     }
     let engine = Engine::new();
     let compiled = match source_name.as_deref() {
-        Some(source_name) => engine.compile_named(source_name, &source),
-        None => engine.compile(&source),
+        Some(source_name) => engine.compile_program_named(source_name, &source),
+        None => engine.compile_program(&source),
     };
-    let chunk = match compiled {
-        Ok(c) => c,
+    let program = match compiled {
+        Ok(program) => program,
         Err(e) => {
             if json {
                 println!("{}", json_error(&e));
@@ -424,14 +424,14 @@ fn main() -> ExitCode {
         }
     };
     if dump {
-        print!("{}", chunk.disassemble());
+        print!("{}", program.disassemble());
         return ExitCode::SUCCESS;
     }
     if check {
         return ExitCode::SUCCESS;
     }
     if fingerprint {
-        println!("{:016x}", chunk.fingerprint());
+        println!("{:016x}", program.fingerprint());
         return ExitCode::SUCCESS;
     }
     let mut context = Context::new().with_fuel(fuel);
@@ -439,7 +439,7 @@ fn main() -> ExitCode {
         "argv",
         Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
     );
-    let result = context.run(chunk);
+    let result = context.run_program(&program);
     if stats {
         let execution = context.last_execution();
         eprintln!(

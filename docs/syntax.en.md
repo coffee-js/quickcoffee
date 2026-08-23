@@ -4,7 +4,9 @@ For a section-by-section comparison with the CoffeeScript 1.12.7 language refere
 
 Embedding diagnostics expose ordered primary/secondary labels through `Error::labels()`. A `SourceSpan` carries an optional opaque source name, a start coordinate, and an optional exclusive end; columns are one-based Unicode scalar positions. Lexer and parser errors carry precise ranges when their physical line was not rewritten by preprocessing; synthetic or rewritten input remains line-only rather than inventing a column. `compile_named`, `compile_program_named`, and `Context::eval_named` preserve a host-supplied name verbatim on existing labels; named modules and CLI file input do the same. Anonymous calls remain unnamed, and `Error::position()` remains the compatibility accessor for the primary start.
 
-Lowering-time errors for `break`, `continue`, and `return`, single-file misuse of module directives, and duplicate module exports retain the triggering keyword span. General bytecode and runtime attribution is still pending; transformed input continues to degrade to a reliable line rather than a guessed column.
+Lowering-time errors for `break`, `continue`, and `return`, single-file misuse of module directives, and duplicate module exports retain the triggering keyword span. These validation spans do not alter public bytecode; transformed input continues to degrade to a reliable line rather than a guessed column.
+
+Compiled `Program` values keep a private source-map sidecar for top-level expressions, nested/default-parameter chunks, assignment/destructuring statements, modules, runtime failures, host-call failures, and resource stops. It is excluded from bytecode fingerprints and disassembly, and error-path lookup adds no successful-instruction VM work. Raw host-built `Chunk` values remain deliberately unattributed; untrusted-bytecode verifier locations and multi-label call stacks are still pending.
 
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 

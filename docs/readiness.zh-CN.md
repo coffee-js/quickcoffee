@@ -1,6 +1,6 @@
 # QuickCoffee 0.2 前业务适用性与性能基线
 
-本文件是 2026-08-24 在 `main`（RFC 0000–0129）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
+本文件是 2026-08-24 在 `main`（RFC 0000–0130）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
 
 后续拆分由 [#65：语言业务适用性](https://github.com/coffee-js/quickcoffee/issues/65) 与 [#66：QuickJS 量级性能收敛](https://github.com/coffee-js/quickcoffee/issues/66) 跟踪。
 

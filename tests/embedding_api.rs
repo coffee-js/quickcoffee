@@ -133,6 +133,142 @@ fn named_embedding_sources_preserve_opaque_names_without_changing_anonymous_call
 }
 
 #[test]
+fn compiled_program_source_maps_attribute_runtime_and_resource_errors() {
+    const NAME: &str = "virtual://runtime/invoice.qc";
+    let mut context = Context::new();
+
+    let top_level = context
+        .eval_named(NAME, "value = 1\nvalue + 'x'")
+        .unwrap_err();
+    assert_eq!(top_level.kind(), ErrorKind::Runtime);
+    let span = &top_level.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some(NAME));
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(6),
+        })
+    );
+    assert_eq!(top_level.to_string(), "runtime error: expected number");
+
+    let unicode = context
+        .eval_named(NAME, "状态 = 1\n状态 + 'x'")
+        .unwrap_err();
+    let span = &unicode.labels()[0].span;
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(3),
+        })
+    );
+
+    let rewritten = context
+        .eval_named(NAME, "record =\n  key: 1 + 'x'")
+        .unwrap_err();
+    let span = &rewritten.labels()[0].span;
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, None);
+    assert_eq!(span.end, None);
+
+    let function = context
+        .eval_named(NAME, "fail = (value) ->\n  value + 'x'\nfail(1)")
+        .unwrap_err();
+    let span = &function.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some(NAME));
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, Some(3));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(8),
+        })
+    );
+
+    let default = context
+        .eval_named(NAME, "f = (value = missing) -> value\nf()")
+        .unwrap_err();
+    let span = &default.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some(NAME));
+    assert_eq!(span.start.line, 1);
+    assert_eq!(span.start.column, Some(14));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 1,
+            column: Some(21),
+        })
+    );
+
+    let destructure = context.eval_named(NAME, "[left, right] = [1]").unwrap_err();
+    let span = &destructure.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some(NAME));
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(span.end.unwrap().column, Some(2));
+
+    context.add_native("host_fail", |_| Err(Error::runtime("host failed")));
+    let native = context.eval_named(NAME, "host_fail()").unwrap_err();
+    let span = &native.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some(NAME));
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(span.end.unwrap().column, Some(10));
+
+    context.set_fuel(4);
+    let resource = context.eval_named(NAME, "while true then 1").unwrap_err();
+    assert_eq!(resource.kind(), ErrorKind::Resource);
+    assert_eq!(resource.labels()[0].span.source_name.as_deref(), Some(NAME));
+    assert_eq!(resource.labels()[0].span.start.line, 1);
+
+    let anonymous = Context::new().eval("missing").unwrap_err();
+    assert_eq!(anonymous.labels()[0].span.source_name, None);
+    assert_eq!(anonymous.labels()[0].span.start.column, Some(1));
+
+    let mut retained = Context::new();
+    retained
+        .eval_named("virtual://definitions.qc", "fail = (value) -> value + 'x'")
+        .unwrap();
+    let retained_error = retained
+        .eval_named("virtual://caller.qc", "fail(1)")
+        .unwrap_err();
+    assert_eq!(
+        retained_error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://definitions.qc")
+    );
+}
+
+#[test]
+fn raw_chunks_do_not_invent_source_attribution() {
+    let error = Context::new()
+        .run(quickcoffee::Chunk {
+            constants: vec![],
+            code: vec![
+                quickcoffee::Instruction::Load("missing".to_owned()),
+                quickcoffee::Instruction::Return,
+            ],
+        })
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert!(error.labels().is_empty());
+}
+
+#[test]
+fn program_source_maps_do_not_change_bytecode_views() {
+    let source = "square = (value) -> value * value\nsquare(7)";
+    let chunk = Engine::new().compile(source).unwrap();
+    let program = Engine::new()
+        .compile_program_named("virtual://square.qc", source)
+        .unwrap();
+    assert_eq!(program.fingerprint(), chunk.fingerprint());
+    assert_eq!(program.disassemble(), chunk.disassemble());
+}
+
+#[test]
 fn public_fuel_and_execution_stats_bound_untrusted_programs() {
     let mut context = Context::new().with_fuel(8);
     let error = context.eval("while true then 1").unwrap_err();

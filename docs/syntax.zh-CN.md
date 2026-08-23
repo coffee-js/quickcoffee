@@ -4,7 +4,9 @@
 
 嵌入诊断通过 `Error::labels()` 暴露有序的 primary/secondary 标签。`SourceSpan` 包含可选的不透明来源名、起点与可选的不含终点；列从 1 开始按 Unicode 标量计数。物理行未被预处理改写时，lexer/parser 错误携带精确范围；合成或已改写输入保持行级位置，不虚构列。`compile_named`、`compile_program_named` 与 `Context::eval_named` 会把宿主给出的名称原样保存在已有 label，命名模块和 CLI 文件输入亦同；匿名调用仍无名称。`Error::position()` 继续作为 primary 起点的兼容访问器。
 
-`break`、`continue`、`return` 的 lowering 上下文错误、单文件误用模块指令及重复模块导出会保留触发关键字 span。一般 bytecode 与运行期归因仍待后续完成；预处理改写输入继续降级为可靠行号，而不猜测列。
+`break`、`continue`、`return` 的 lowering 上下文错误、单文件误用模块指令及重复模块导出会保留触发关键字 span。这些验证 span 不改变公开字节码；预处理改写输入继续降级为可靠行号，而不猜测列。
+
+编译后的 `Program` 以私有 source-map sidecar 保存顶层表达式、嵌套/默认参数 chunk、assignment/destructuring statement、模块、运行期错误、宿主调用错误与资源停止位置。sidecar 不进入字节码指纹和反汇编，且只在错误慢路径查询，不给成功 VM instruction 增加工作。宿主构造的裸 `Chunk` 刻意保持无来源；不可信 bytecode verifier 位置和多标签调用栈仍待后续完成。
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 

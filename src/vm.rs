@@ -1,6 +1,6 @@
 use crate::{
-    bytecode::{Chunk, Constant, Instruction, Pattern},
-    compile,
+    bytecode::{self, Chunk, ChunkSourceMap, CompiledSourceMap, Constant, Instruction, Pattern},
+    compile, parser,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -364,18 +364,27 @@ impl Error {
         }
         self
     }
+    pub(crate) fn with_span_if_missing(mut self, span: Option<SourceSpan>) -> Self {
+        if self.labels.is_empty() {
+            if let Some(span) = span {
+                self = self.at_span(span);
+            }
+        }
+        self
+    }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(position) = self.position() {
-            write!(
-                f,
-                "{} error (line {}): {}",
-                self.kind, position.line, self.message
-            )
-        } else {
-            write!(f, "{} error: {}", self.kind, self.message)
+        if self.kind == ErrorKind::Parse {
+            if let Some(position) = self.position() {
+                return write!(
+                    f,
+                    "{} error (line {}): {}",
+                    self.kind, position.line, self.message
+                );
+            }
         }
+        write!(f, "{} error: {}", self.kind, self.message)
     }
 }
 impl std::error::Error for Error {}
@@ -413,6 +422,7 @@ enum FunctionKind {
         required: usize,
         rest: Option<String>,
         chunk: Rc<Chunk>,
+        debug_info: Option<Rc<ProgramDebugInfo>>,
         env: Env,
     },
     Native {
@@ -454,6 +464,36 @@ pub struct Engine;
 struct ProgramInner {
     chunk: Rc<Chunk>,
     verified: Cell<bool>,
+    debug_info: Option<Rc<ProgramDebugInfo>>,
+}
+#[derive(Debug)]
+struct ProgramDebugInfo {
+    source_name: Option<Rc<str>>,
+    instruction_spans: BTreeMap<usize, ChunkSourceMap>,
+}
+impl ProgramDebugInfo {
+    fn new(chunk: &Rc<Chunk>, source_map: CompiledSourceMap, source_name: Option<&str>) -> Self {
+        let mut instruction_spans = BTreeMap::new();
+        instruction_spans.insert(Rc::as_ptr(chunk) as usize, source_map.top);
+        for (nested, source_map) in source_map.nested {
+            instruction_spans.insert(Rc::as_ptr(&nested) as usize, source_map);
+        }
+        Self {
+            source_name: source_name.map(Rc::from),
+            instruction_spans,
+        }
+    }
+    fn span(&self, chunk: &Rc<Chunk>, pc: usize) -> Option<SourceSpan> {
+        let source_map = self.instruction_spans.get(&(Rc::as_ptr(chunk) as usize))?;
+        let span_id = *source_map.instructions.get(pc)?;
+        if span_id == 0 {
+            return None;
+        }
+        let span = *source_map.spans.get(span_id as usize - 1)?;
+        let mut span = span.into_source_span();
+        span.source_name = self.source_name.as_deref().map(str::to_owned);
+        Some(span)
+    }
 }
 /// A cheaply cloneable, verified bytecode program for repeated execution.
 #[derive(Clone, Debug)]
@@ -463,10 +503,24 @@ impl From<Chunk> for Program {
         Self(Rc::new(ProgramInner {
             chunk: Rc::new(chunk),
             verified: Cell::new(false),
+            debug_info: None,
         }))
     }
 }
 impl Program {
+    pub(crate) fn from_compiled(
+        chunk: Chunk,
+        source_map: CompiledSourceMap,
+        source_name: Option<&str>,
+    ) -> Self {
+        let chunk = Rc::new(chunk);
+        let debug_info = Rc::new(ProgramDebugInfo::new(&chunk, source_map, source_name));
+        Self(Rc::new(ProgramInner {
+            chunk,
+            verified: Cell::new(true),
+            debug_info: Some(debug_info),
+        }))
+    }
     /// Verifies the program and caches a successful result.
     pub fn verify(&self) -> Result<(), Error> {
         let result = self.0.chunk.verify();
@@ -507,17 +561,25 @@ impl Engine {
     }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
-        let program: Program = self.compile(source)?.into();
-        program.verify()?;
-        Ok(program)
+        self.compile_program_source(None, source)
     }
     /// Compiles named source into cheaply cloneable shared bytecode.
     pub fn compile_program_named(&self, source_name: &str, source: &str) -> Result<Program, Error> {
-        let program: Program = self.compile_named(source_name, source)?.into();
-        program
-            .verify()
-            .map_err(|error| error.with_source_name(source_name))?;
-        Ok(program)
+        self.compile_program_source(Some(source_name), source)
+    }
+    fn compile_program_source(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<Program, Error> {
+        let attach_name = |error: Error| match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        };
+        let ast = parser::parse(source).map_err(attach_name)?;
+        let (chunk, source_map) = bytecode::compile_mapped(&ast).map_err(attach_name)?;
+        chunk.verify().map_err(attach_name)?;
+        Ok(Program::from_compiled(chunk, source_map, source_name))
     }
 }
 /// Public counters for the most recent bytecode execution in a context.
@@ -709,7 +771,7 @@ impl Context {
         self.run_program(&program)
     }
     /// Compiles, verifies, and executes source while attaching an opaque
-    /// host-provided name to source labels produced during compilation.
+    /// host-provided name to compile-time and runtime source labels.
     pub fn eval_named(&mut self, source_name: &str, source: &str) -> Result<Value, Error> {
         let program = self.engine.compile_program_named(source_name, source)?;
         self.run_program(&program)
@@ -736,6 +798,7 @@ impl Context {
             exception_ops: 0,
             value_allocations: 0,
             environment_allocations: 0,
+            initial_debug_info: program.0.debug_info.clone(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -942,6 +1005,7 @@ struct Frame {
     stack: Vec<Value>,
     iterators: Vec<Iteration>,
     handlers: Vec<Handler>,
+    debug_info: Option<Rc<ProgramDebugInfo>>,
     env: Env,
 }
 struct Handler {
@@ -984,6 +1048,7 @@ struct Vm {
     exception_ops: u64,
     value_allocations: u64,
     environment_allocations: u64,
+    initial_debug_info: Option<Rc<ProgramDebugInfo>>,
 }
 enum Step {
     Continue,
@@ -991,6 +1056,13 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn source_span(frame: &Frame, pc: usize) -> Option<SourceSpan> {
+        frame
+            .debug_info
+            .as_ref()
+            .and_then(|debug_info| debug_info.span(&frame.chunk, pc))
+    }
+
     fn record_value_allocations(&mut self, count: u64) {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
@@ -1025,7 +1097,12 @@ impl Vm {
             _ => {}
         }
     }
-    fn eval_default(&mut self, chunk: Rc<Chunk>, env: Env) -> Result<Value, Error> {
+    fn eval_default(
+        &mut self,
+        chunk: Rc<Chunk>,
+        env: Env,
+        debug_info: Option<Rc<ProgramDebugInfo>>,
+    ) -> Result<Value, Error> {
         let mut nested = Vm {
             fuel: self.fuel,
             instructions: self.instructions,
@@ -1041,6 +1118,7 @@ impl Vm {
             exception_ops: self.exception_ops,
             value_allocations: self.value_allocations,
             environment_allocations: self.environment_allocations,
+            initial_debug_info: debug_info,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -1079,6 +1157,7 @@ impl Vm {
             stack: vec![],
             iterators: vec![],
             handlers: vec![],
+            debug_info: self.initial_debug_info.clone(),
             env: global,
         }];
         loop {
@@ -1087,16 +1166,23 @@ impl Vm {
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
+                let span = frames
+                    .last()
+                    .and_then(|frame| Self::source_span(frame, frame.pc));
                 return Err(Error::resource(
                     ResourceLimit::Cancellation,
                     "execution cancelled by host",
-                ));
+                )
+                .with_span_if_missing(span));
             }
             if self.fuel == 0 {
-                return Err(Error::resource(
-                    ResourceLimit::Fuel,
-                    "execution fuel exhausted",
-                ));
+                let span = frames
+                    .last()
+                    .and_then(|frame| Self::source_span(frame, frame.pc));
+                return Err(
+                    Error::resource(ResourceLimit::Fuel, "execution fuel exhausted")
+                        .with_span_if_missing(span),
+                );
             }
             self.fuel -= 1;
             self.instructions += 1;
@@ -1139,9 +1225,14 @@ impl Vm {
                         let mut bindings = vec![];
                         let env = frame.env.clone();
                         let snapshot = env.borrow().values.clone();
-                        if let Err(error) =
-                            bind_pattern(self, &pattern, Some(&value), &mut bindings, &env)
-                        {
+                        if let Err(error) = bind_pattern(
+                            self,
+                            &pattern,
+                            Some(&value),
+                            &mut bindings,
+                            &env,
+                            frame.debug_info.as_ref(),
+                        ) {
                             env.borrow_mut().values = snapshot;
                             return Err(error);
                         }
@@ -1405,6 +1496,7 @@ impl Vm {
                                         Some(value),
                                         &mut bindings,
                                         &env,
+                                        frame.debug_info.as_ref(),
                                     ) {
                                         frame.env.borrow_mut().values = snapshot;
                                         return Err(error);
@@ -1537,12 +1629,14 @@ impl Vm {
                             rest,
                             chunk,
                         } => {
+                            let debug_info = frame.debug_info.clone();
                             frame.stack.push(Value::Function(Rc::new(Function {
                                 inner: FunctionKind::Bytecode {
                                     params: params.clone(),
                                     required: *required,
                                     rest: rest.clone(),
                                     chunk: chunk.clone(),
+                                    debug_info,
                                     env: frame.env.clone(),
                                 },
                             })));
@@ -1592,12 +1686,20 @@ impl Vm {
                 Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
                     Ok(()) => {}
                     Err(error) => {
+                        let span = frames
+                            .last()
+                            .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
+                        let error = error.with_span_if_missing(span);
                         if !handle_error(self, &mut frames, &error) {
                             return Err(error);
                         }
                     }
                 },
                 Err(error) => {
+                    let span = frames
+                        .last()
+                        .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
+                    let error = error.with_span_if_missing(span);
                     if !handle_error(self, &mut frames, &error) {
                         return Err(error);
                     }
@@ -1633,6 +1735,7 @@ fn call(
                 required,
                 rest,
                 chunk,
+                debug_info,
                 env: captured,
             } => {
                 if vm.call_depth >= vm.max_call_depth {
@@ -1658,9 +1761,14 @@ fn call(
                     let value = args.get(index).cloned().unwrap_or(Value::Nil);
                     let mut bindings = vec![];
                     let snapshot = local.borrow().values.clone();
-                    if let Err(error) =
-                        bind_pattern(vm, pattern, Some(&value), &mut bindings, &local)
-                    {
+                    if let Err(error) = bind_pattern(
+                        vm,
+                        pattern,
+                        Some(&value),
+                        &mut bindings,
+                        &local,
+                        debug_info.as_ref(),
+                    ) {
                         local.borrow_mut().values = snapshot;
                         return Err(error);
                     }
@@ -1682,6 +1790,7 @@ fn call(
                     stack: vec![],
                     iterators: vec![],
                     handlers: vec![],
+                    debug_info: debug_info.clone(),
                     env: local,
                 });
                 vm.call_depth += 1;
@@ -1894,6 +2003,7 @@ fn bind_pattern(
     value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
     env: &Env,
+    debug_info: Option<&Rc<ProgramDebugInfo>>,
 ) -> Result<(), Error> {
     match pattern {
         Pattern::Ignore => value.map_or_else(
@@ -1919,9 +2029,9 @@ fn bind_pattern(
         Pattern::Default { pattern, default } => {
             let value = match value {
                 Some(value) if !matches!(value, Value::Nil) => value.clone(),
-                _ => vm.eval_default(default.clone(), env.clone())?,
+                _ => vm.eval_default(default.clone(), env.clone(), debug_info.cloned())?,
             };
-            bind_pattern(vm, pattern, Some(&value), bindings, env)
+            bind_pattern(vm, pattern, Some(&value), bindings, env, debug_info)
         }
         Pattern::Array(patterns) => {
             let Some(Value::Array(values)) = value else {
@@ -1961,7 +2071,7 @@ fn bind_pattern(
                     }
                     break;
                 }
-                bind_pattern(vm, pattern, values.get(index), bindings, env)?;
+                bind_pattern(vm, pattern, values.get(index), bindings, env, debug_info)?;
             }
             Ok(())
         }
@@ -1970,13 +2080,15 @@ fn bind_pattern(
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields {
-                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
-                    if map.contains_key(key) {
-                        error
-                    } else {
-                        Error::runtime(format!("map key '{key}' not found"))
-                    }
-                })?;
+                bind_pattern(vm, pattern, map.get(key), bindings, env, debug_info).map_err(
+                    |error| {
+                        if map.contains_key(key) {
+                            error
+                        } else {
+                            Error::runtime(format!("map key '{key}' not found"))
+                        }
+                    },
+                )?;
             }
             Ok(())
         }
@@ -1985,13 +2097,15 @@ fn bind_pattern(
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields.iter() {
-                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
-                    if map.contains_key(key) {
-                        error
-                    } else {
-                        Error::runtime(format!("map key '{key}' not found"))
-                    }
-                })?;
+                bind_pattern(vm, pattern, map.get(key), bindings, env, debug_info).map_err(
+                    |error| {
+                        if map.contains_key(key) {
+                            error
+                        } else {
+                            Error::runtime(format!("map key '{key}' not found"))
+                        }
+                    },
+                )?;
             }
             let explicit_fields: BTreeSet<&str> =
                 fields.iter().map(|(field, _)| field.as_str()).collect();

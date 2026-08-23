@@ -56,6 +56,28 @@ fn module_loading_caches_dependencies_and_reports_missing_names() {
 }
 
 #[test]
+fn runtime_errors_in_dependency_functions_keep_the_dependency_name() {
+    let main = Engine::new()
+        .compile_module(
+            "main",
+            "import { fail } from 'dependency'\nexport result = fail(1)",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert(
+        "dependency",
+        "fail = (value) -> value + 'x'\nexport { fail }",
+    );
+    let error = Context::new().run_module(&main, &loader).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("dependency")
+    );
+    assert_eq!(error.labels()[0].span.start.line, 1);
+}
+
+#[test]
 fn module_cycles_are_rejected_and_resources_cover_dependencies() {
     let engine = Engine::new();
     let main = engine
@@ -85,6 +107,10 @@ fn module_directives_are_not_accepted_by_single_file_compilation() {
         .compile_program_named("virtual://single.qc", "value = 1\nexport answer = 42")
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Verify);
+    assert_eq!(
+        error.to_string(),
+        "verify error: module directives require Engine::compile_module"
+    );
     let span = &error.labels()[0].span;
     assert_eq!(span.source_name.as_deref(), Some("virtual://single.qc"));
     assert_eq!(span.start.line, 2);

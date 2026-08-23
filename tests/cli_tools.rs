@@ -556,6 +556,18 @@ fn qcoffee_json_file_errors_include_the_opaque_input_path() {
     assert!(stdout.contains(&format!("\"source\":\"{path}\"")));
     assert!(stdout.ends_with(",\"line\":2}\n"));
     assert!(output.stderr.is_empty());
+
+    fs::write(&temp, "value = 1\nvalue + 'x'\n").unwrap();
+    let runtime = Command::new(bin("qcoffee"))
+        .args(["--json", path])
+        .output()
+        .unwrap();
+    assert!(!runtime.status.success());
+    let stdout = String::from_utf8_lossy(&runtime.stdout);
+    assert!(stdout.contains("\"kind\":\"runtime\""));
+    assert!(stdout.contains(&format!("\"source\":\"{path}\"")));
+    assert!(stdout.ends_with(",\"line\":2}\n"));
+    assert!(runtime.stderr.is_empty());
     let _ = fs::remove_file(temp);
 }
 
@@ -611,7 +623,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     let resource_stdout = String::from_utf8_lossy(&resource_error.stdout);
     assert!(resource_stdout.starts_with("{\"ok\":false,\"kind\":\"resource\""));
     assert!(resource_stdout.contains("fuel exhausted"));
-    assert!(resource_stdout.ends_with("\"line\":null}\n"));
+    assert!(resource_stdout.ends_with("\"line\":1}\n"));
 
     let missing = Command::new(bin("qcoffee"))
         .args(["--json", "qcoffee-file-that-does-not-exist.qc"])
