@@ -532,6 +532,34 @@ impl Context {
             }
             Ok(Value::String(Rc::from(xs[0].to_string())))
         });
+        self.add_native("abs", |xs| {
+            if xs.len() != 1 {
+                return Err(Error::runtime("abs expects one number"));
+            }
+            let value = number(xs[0].clone())?;
+            if !value.is_finite() {
+                return Err(Error::runtime("abs expects a finite number"));
+            }
+            Ok(Value::Number(value.abs()))
+        });
+        self.add_native("sum", |xs| {
+            let values = numeric_array(xs, "sum")?;
+            Ok(Value::Number(values.into_iter().sum()))
+        });
+        self.add_native("min", |xs| {
+            let values = numeric_array(xs, "min")?;
+            let Some(value) = values.into_iter().reduce(f64::min) else {
+                return Err(Error::runtime("min expects a non-empty array"));
+            };
+            Ok(Value::Number(value))
+        });
+        self.add_native("max", |xs| {
+            let values = numeric_array(xs, "max")?;
+            let Some(value) = values.into_iter().reduce(f64::max) else {
+                return Err(Error::runtime("max expects a non-empty array"));
+            };
+            Ok(Value::Number(value))
+        });
         self.add_native("keys", |xs| {
             if xs.len() != 1 {
                 return Err(Error::runtime("keys expects one argument"));
@@ -1149,13 +1177,14 @@ impl Vm {
                         return Ok(value);
                     }
                 }
-                Ok(Step::Call { callee, args }) => {
-                    if let Err(error) = call(self, &mut frames, callee, args)
-                        && !handle_error(&mut frames, &error)
-                    {
-                        return Err(error);
+                Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if !handle_error(&mut frames, &error) {
+                            return Err(error);
+                        }
                     }
-                }
+                },
                 Err(error) => {
                     if !handle_error(&mut frames, &error) {
                         return Err(error);
@@ -1271,6 +1300,27 @@ fn numbers(xs: &[Value]) -> Result<(f64, f64), Error> {
         return Err(Error::runtime("expected two numbers"));
     }
     Ok((number(xs[0].clone())?, number(xs[1].clone())?))
+}
+fn numeric_array(xs: &[Value], name: &str) -> Result<Vec<f64>, Error> {
+    if xs.len() != 1 {
+        return Err(Error::runtime(format!("{name} expects one array")));
+    }
+    let Value::Array(values) = &xs[0] else {
+        return Err(Error::runtime(format!("{name} expects an array")));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let value = number(value.clone())?;
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(Error::runtime(format!(
+                    "{name} expects finite numeric elements"
+                )))
+            }
+        })
+        .collect()
 }
 fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> {
     if !start.is_finite()

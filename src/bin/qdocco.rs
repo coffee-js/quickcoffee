@@ -2,7 +2,9 @@
 
 use quickcoffee::{Context, Engine, Value};
 use std::{
-    env, fs,
+    env,
+    fmt::Write as _,
+    fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -83,10 +85,10 @@ fn split_source(source: &str) -> (String, String) {
 }
 fn render(source: &str, result: &str) -> String {
     let (prose_text, code) = split_source(source);
-    let prose = prose_text
-        .lines()
-        .map(|line| format!("<p>{}</p>\n", escape(line)))
-        .collect::<String>();
+    let prose = prose_text.lines().fold(String::new(), |mut prose, line| {
+        writeln!(prose, "<p>{}</p>", escape(line)).expect("writing to a string cannot fail");
+        prose
+    });
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>QuickCoffee document</title><style>body{{font:16px system-ui;display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:2rem}}pre{{background:#f5f5f5;padding:1rem;white-space:pre-wrap}}footer{{grid-column:1/-1}}</style><main><h1>Notes</h1>{prose}</main><main><h1>Code</h1><pre><code>{}</code></pre></main><footer>Final value: <code>{}</code></footer>",
         escape(&code),

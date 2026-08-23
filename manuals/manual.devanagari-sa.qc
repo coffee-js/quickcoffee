@@ -36,7 +36,7 @@
 ## yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
 ## ! strict-Bool not-पर्यायः अस्ति; != strict-असाम्यमेव तिष्ठति।
 ## chained-comparison मध्ये मध्य-मूल्य एकवारं, पूर्व-false चेत् short-circuit भवति।
-## सामान्य-library साधारण-function रूपेण print, len, type, range, str, keys, values, join, split, assert ददाति।
+## सामान्य-library साधारण-function रूपेण print, len, type, range, str, abs, sum, min, max, keys, values, join, split, assert ददाति; संख्या-संग्रहाः केवलं finite-संख्याः गृह्णन्ति।
 ## कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।
 ## bare-name lambda left, right -> left + right भवति; default, rest, pattern तु parentheses गृह्णन्ति।
 ## return expression केवलं वर्तमान-कार्यं समाप्तं करोति; केवलः return nil फलति, loop शुद्धीकरोति, finally च चलयति।
