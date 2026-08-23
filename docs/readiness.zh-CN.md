@@ -1,6 +1,6 @@
 # QuickCoffee 0.2 前业务适用性与性能基线
 
-本文件是 2026-08-23 在 `main`（RFC 0000–0124）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。它把下一阶段的工作拆成可审阅、可测量的目标。
+本文件是 2026-08-23 在 `main`（RFC 0000–0124）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
 
 后续拆分由 [#65：语言业务适用性](https://github.com/coffee-js/quickcoffee/issues/65) 与 [#66：QuickJS 量级性能收敛](https://github.com/coffee-js/quickcoffee/issues/66) 跟踪。
 
@@ -8,9 +8,9 @@
 
 QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的规则、校验、配置变换、数据整形和受限插件任务。其核心表达式、严格集合、函数/闭包、模式解构、列表推导、异常控制流、Unicode 字符串和资源边界已经足以承载这类业务逻辑。
 
-它尚不适合独立承担多文件服务、长期作业编排或需要丰富通用库的应用：没有模块系统、包解析、异步/并发、正则、日期时间、JSON 编解码、文件/网络能力或宿主对象能力模型。这些不是遗漏的 JavaScript 兼容项；其中 I/O、时钟、随机和网络应保持为宿主显式注入的 capability，而非语言隐式全局。
+它尚不适合独立承担多文件服务、长期作业编排或需要丰富通用库的应用：嵌入 API 已有宿主控制的静态模块核心，但没有 CLI 路径策略、模块包、图指纹或循环初始化；异步/并发、正则、日期时间、JSON 编解码、文件/网络能力和宿主对象能力模型也尚未交付。这些不是遗漏的 JavaScript 兼容项；其中 I/O、时钟、随机和网络应保持为宿主显式注入的 capability，而非语言隐式全局。
 
-性能方面，当前 VM 尚未达到与 QuickJS 相近的量级。相同机器上的纯数值热循环显示 QuickCoffee 约慢 **42 倍**；这足以把字节码热路径优化列为 0.2 的最高优先级，但不足以外推到字符串、集合、异常或真实宿主调用。
+性能方面，当前 VM 尚未达到与 QuickJS 相近的量级。RFC 0124 的同机 11 样本验证显示预编译标量与函数热循环约慢 **36–38 倍**；启动已经相近、编译约慢两倍，因此下一阶段集中于 VM 查名、调用与分配热路径。该结果不足以外推到字符串、集合、异常或真实宿主调用。
 
 ## 业务任务矩阵
 
@@ -19,57 +19,25 @@ QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的�
 | 规则计算、定价、资格校验 | 可用 | 严格数值/布尔、`if`/`switch`、函数、错误与 fuel 已具备；宿主负责输入输出。 |
 | 配置归并、表单/事件整形 | 可用 | 不可变数组/Map、spread、严格解构、`for`/推导足够；大型输入仍缺容器长度与内存预算。 |
 | 受限模板或策略插件 | 条件可用 | `Context` 可注入受控函数并有 fuel、深度与取消；尚缺 capability table、内存预算和稳定的上下文隔离模型。 |
-| 多文件业务领域脚本 | 不可用 | `import`/`export`、模块图、加载器、循环依赖与缓存契约尚未定义。 |
+| 多文件业务领域脚本 | 不可用 | 嵌入宿主已有静态模块图核心；CLI 加载、模块包、图指纹和初始化契约尚未定义。 |
 | I/O、HTTP、任务调度、异步业务 | 不可用 | 不提供异步语法/事件循环；这些能力也不能作为隐式标准库加入。 |
 | 文本处理/协议解析 | 条件可用 | 字符串与集合可处理基础场景；没有正则、JSON、字节序列或流式 API。 |
 | 面向对象业务模型 | 条件可用 | `class` 是无原型工厂；可用 Map 与闭包表达数据和显式方法，但没有继承、`this` 或 `new`。 |
 
-## 语言工作优先级
+## 语言规划入口
 
-1. **模块与加载器（路线图 B）**：先写 RFC，定义静态 `import`/`export`、模块初始化、循环依赖、`ModuleLoader` 和 CLI 路径安全。它解除单文件限制，但不授予文件或网络权限。
-2. **能力化标准库（路线图 E）**：先定 `RuntimeBuilder`/`ContextBuilder`、`TryFrom<Value>`/`IntoValue` 和 capability table；JSON、时间、随机、日志等应先以宿主能力形式进入，而非复制 JavaScript 全局。
-3. **面向业务的数据文本基元**：在前两项稳定后，分别 RFC 化 JSON 兼容数据模型、正则或受限模式匹配、日期时间策略。每项必须说明确定性、资源上限和跨平台语义。
-4. **前端诊断与特性矩阵（路线图 A）**：在增加语法前先给 CoffeeScript 2016 的每项特性标注“实现、改写或拒绝”，并提供文件名、范围与多错误诊断。
+- [#74](https://github.com/coffee-js/quickcoffee/issues/74)：CoffeeScript 2016 特性矩阵与源码范围诊断。
+- [#75](https://github.com/coffee-js/quickcoffee/issues/75)：模块包、受限 CLI 加载与模块图指纹。
+- [#76](https://github.com/coffee-js/quickcoffee/issues/76)：内存预算与运行时隔离。
+- [#77](https://github.com/coffee-js/quickcoffee/issues/77)：嵌入 API 0.2 与显式宿主能力。
+- [#78](https://github.com/coffee-js/quickcoffee/issues/78)：确定性的业务数据与文本基元。
 
 明确非目标仍是：JavaScript 原型链、`this`、隐式转换、`eval`、反引号 JavaScript 和为了兼容而引入的隐式宿主能力。
 
-## QuickJS 对照基线
+## QuickJS 对照判断
 
-### 环境与命令
+RFC 0120–0124 已建立双方等价负载、语义护栏、11+ 样本中位数/MAD、VM 事件剖析以及启动/编译/预编译热执行阶段分离。测量协议与解释边界保存在 [PERFORMANCE.md](../PERFORMANCE.md)；最新机器、工具链、样本和完成状态保存在 [#66](https://github.com/coffee-js/quickcoffee/issues/66)。
 
-- Apple Silicon arm64，Darwin 25.5.0（T6000）
-- QuickCoffee `0.1.0`，`rustc 1.94.0`，release 二进制
-- 官方 QuickJS `2026-06-04`，Apple clang `21.0.0`，`-O2` 构建
-- 两者均只执行无 I/O 的数值循环，并验证最终和为 `49,999,995,000,000`
+2026-08-23 的合并后验证在 Apple arm64 上使用官方 QuickJS 2026-06-04 与 release QuickCoffee：标量热执行约慢 `37.54×`，函数热执行约慢 `36.54×`。这说明差距位于 VM 热路径，而不是 CLI 启动。集合目标仍缺可等价测量负载，由 [#79](https://github.com/coffee-js/quickcoffee/issues/79) 跟踪；局部槽位与符号 intern 由 [#80](https://github.com/coffee-js/quickcoffee/issues/80) 跟踪。
 
-QuickCoffee：
-
-```sh
-qcoffee --fuel 1000000000 -e 'sum = 0
-i = 0
-while i < 10000000
-  sum += i
-  i++
-sum'
-```
-
-QuickJS：
-
-```sh
-qjs -e 'let sum = 0; for (let i = 0; i < 10000000; i++) sum += i; if (sum !== 49999995000000) throw Error()'
-```
-
-`/usr/bin/time -p` 的单次端到端读数分别为 **5.48 s** 与 **0.13 s**，即约 **42×**。QuickCoffee 的燃料必须显式提高；默认 1,000,000 fuel 会在该测试中按设计中止。该比值包含各自 CLI 启动、解析、编译与执行，且 QuickJS 的短读数受计时分辨率影响，故它是方向性基线，不是发布门槛。
-
-同一构建下 `qbench --json --iterations 100 --repeat 5` 的 QuickCoffee 执行中位数还显示热路径集中在循环、值分派、查名和分配：`loop-core` 3.52 ms、`array-slices` 11.18 ms、`nested-destructuring` 23.46 ms、`return-cleanup` 184.30 ms（均为 100 次程序执行总计）。RFC 0122/0123 又为每条记录加入一次不计时执行的确定性热点与托管分配剖析：`loop-core` 有 203 次查名、102 次存名且无托管分配，`closures-and-ranges` 有 49 次调用和 49 次词法环境分配。该 `qbench.v1` 套件只用于 QuickCoffee 自身回归；RFC 0124 的独立 `qcompare.v1` 则用双方可等价表达的负载分离报告启动、编译、预编译热执行和 CLI 总耗时。
-
-官方 QuickJS 将自身定位为小型可嵌入的 ES2025 引擎，使用引用计数和 cycle removal；其功能范围远大于 QuickCoffee，因此只把它作为性能参照，不作为语义或 API 模板。[QuickJS 官方说明](https://bellard.org/quickjs/)
-
-## 性能收敛计划
-
-1. RFC 0124 已在独立跨运行时 harness 中分离 CLI 启动、编译和预编译热执行，并为双方等价的标量循环与调用负载输出至少 11 次样本建议、中位数与 MAD；下一步扩展数组/字符串等价负载，并记录 CPU 固定与预热环境。
-2. 确定性的指令类别、查名、托管值和词法环境分配事件已由 RFC 0122/0123 接入 qbench；下一步补充采样耗时与分配字节证据，再选择优化。
-3. 按路线图 C 先实现局部槽位和符号 intern，再评估紧凑编码与短指令。每一项保留未优化路径差分执行、字节码验证和 fuel 等价测试。
-4. 首个可审阅目标不是承诺一次赶平，而是在同机 scalar-loop 热执行上降至 QuickJS 的 **10× 内**，集合负载降至 **20× 内**；达成后再以完整噪声模型决定是否把阈值作为 CI 告警。
-
-在采样剖析和同机目标达成前，不应宣称 QuickCoffee 已达到 QuickJS 量级。
+首个审阅目标保持为同机 scalar-loop 预编译热执行进入 QuickJS 的 `10×` 内、集合负载进入 `20×` 内。目标达成且噪声模型稳定前，不应宣称 QuickCoffee 已达到 QuickJS 量级。
