@@ -50,17 +50,43 @@ fn escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
-fn render(source: &str, result: &str) -> String {
+fn prose_text(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let text = trimmed.strip_prefix("##")?;
+    (!text.starts_with('#')).then_some(text)
+}
+fn split_source(source: &str) -> (String, String) {
     let mut prose = String::new();
     let mut code = String::new();
+    let mut in_block_comment = false;
     for line in source.lines() {
-        if let Some(text) = line.trim_start().strip_prefix("##") {
-            prose.push_str(&format!("<p>{}</p>\n", escape(text.trim())))
+        let trimmed = line.trim_start();
+        if in_block_comment {
+            code.push_str(line);
+            code.push('\n');
+            if trimmed.contains("###") {
+                in_block_comment = false;
+            }
+        } else if let Some(after_marker) = trimmed.strip_prefix("###") {
+            code.push_str(line);
+            code.push('\n');
+            in_block_comment = !after_marker.contains("###");
+        } else if let Some(text) = prose_text(line) {
+            prose.push_str(text.trim());
+            prose.push('\n');
         } else {
             code.push_str(line);
             code.push('\n');
         }
     }
+    (prose, code)
+}
+fn render(source: &str, result: &str) -> String {
+    let (prose_text, code) = split_source(source);
+    let prose = prose_text
+        .lines()
+        .map(|line| format!("<p>{}</p>\n", escape(line)))
+        .collect::<String>();
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>QuickCoffee document</title><style>body{{font:16px system-ui;display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:2rem}}pre{{background:#f5f5f5;padding:1rem;white-space:pre-wrap}}footer{{grid-column:1/-1}}</style><main><h1>Notes</h1>{prose}</main><main><h1>Code</h1><pre><code>{}</code></pre></main><footer>Final value: <code>{}</code></footer>",
         escape(&code),
@@ -68,20 +94,7 @@ fn render(source: &str, result: &str) -> String {
     )
 }
 fn render_markdown(source: &str, result: &str) -> String {
-    let mut prose = String::new();
-    let mut code = String::new();
-    for line in source.lines() {
-        if let Some(text) = line.trim_start().strip_prefix("##") {
-            let text = text.trim();
-            if !text.is_empty() {
-                prose.push_str(text);
-                prose.push('\n');
-            }
-        } else {
-            code.push_str(line);
-            code.push('\n');
-        }
-    }
+    let (prose, code) = split_source(source);
     let fence = markdown_fence(source);
     format!(
         "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}quickcoffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"

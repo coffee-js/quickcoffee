@@ -66,8 +66,6 @@
 <p>Arithmetic also has floor division // and dividend-dependent modulo %%: -7 // 5 is -2, while -7 %% 5 is 3.</p>
 <p>return expression exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.</p>
 <p>Parameters may use strict nested array/map patterns; defaults and rest stay name-only.</p>
-<p># invalid ` source is safely ignored here</p>
-<p>#</p>
 </main><main><h1>Code</h1><pre><code>base = 20
 add = (x) -&gt;
   result = x + base
@@ -136,5 +134,7 @@ default_value == 42
 heredoc = &quot;&quot;&quot;answer #{add(22)}
 next&quot;&quot;&quot;
 heredoc == 'answer 42\nnext'
+### invalid ` source is safely ignored here
+###
 42 == 42
 </code></pre></main><footer>Final value: <code>true</code></footer>

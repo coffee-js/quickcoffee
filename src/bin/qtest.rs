@@ -14,26 +14,24 @@ fn collect(
     visited_directories: &mut HashSet<PathBuf>,
     visited_files: &mut HashSet<PathBuf>,
 ) -> Result<(), String> {
-    let metadata = fs::metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     if metadata.is_file() {
-        let canonical =
-            fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
         if visited_files.insert(canonical) {
             files.push(path.to_path_buf());
         }
         return Ok(());
     }
     if metadata.is_dir() {
-        let canonical =
-            fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
         if !visited_directories.insert(canonical) {
             return Ok(());
         }
     }
     let mut entries: Vec<_> = fs::read_dir(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?
+        .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+        .map_err(|error| error.to_string())?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let child = entry.path();
