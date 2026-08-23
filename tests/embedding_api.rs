@@ -103,6 +103,25 @@ fn checked_compilation_does_not_split_failed_control_flow_continuations() {
 }
 
 #[test]
+fn checked_compilation_handles_many_independent_errors_in_one_pass() {
+    let source = (0..1_024)
+        .map(|index| format!("broken{index} = [1 2]\n"))
+        .collect::<String>();
+    let errors = Engine::new()
+        .check_program(&source)
+        .expect_err("every malformed top-level statement should be reported");
+    assert_eq!(errors.len(), 1_024);
+    assert_eq!(errors[0].position().map(|position| position.line), Some(1));
+    assert_eq!(
+        errors
+            .last()
+            .and_then(|error| error.position())
+            .map(|position| position.line),
+        Some(1_024)
+    );
+}
+
+#[test]
 fn builder_embedding_surface_chains_host_configuration() {
     let program = Engine::new()
         .compile_program("host(20, 22) * factor")

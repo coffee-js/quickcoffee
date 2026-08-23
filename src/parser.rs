@@ -160,12 +160,7 @@ type ForHeader = (
 
 pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
     let (tokens, spans) = lex_spanned(source)?;
-    Parser {
-        tokens,
-        spans,
-        at: 0,
-    }
-    .program()
+    Parser::new(tokens, spans).program()
 }
 /// Parses source while collecting independently recoverable statement errors.
 ///
@@ -174,12 +169,7 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
 /// compiler and embedding callers.
 pub(crate) fn parse_recover(source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
     let (tokens, spans) = lex_spanned(source).map_err(|error| vec![error])?;
-    Parser {
-        tokens,
-        spans,
-        at: 0,
-    }
-    .program_recover()
+    Parser::new(tokens, spans).program_recover()
 }
 pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
     let statements = parse(source)?;
@@ -210,9 +200,29 @@ pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
 struct Parser {
     tokens: Vec<Token>,
     spans: Vec<TokenSpan>,
+    layout_depths: Vec<usize>,
     at: usize,
 }
 impl Parser {
+    fn new(tokens: Vec<Token>, spans: Vec<TokenSpan>) -> Self {
+        let mut layout_depths = Vec::with_capacity(tokens.len() + 1);
+        let mut layout_depth = 0usize;
+        layout_depths.push(layout_depth);
+        for token in &tokens {
+            match token {
+                Token::Indent => layout_depth += 1,
+                Token::Dedent => layout_depth = layout_depth.saturating_sub(1),
+                _ => {}
+            }
+            layout_depths.push(layout_depth);
+        }
+        Self {
+            tokens,
+            spans,
+            layout_depths,
+            at: 0,
+        }
+    }
     fn parse_error(&self, message: impl Into<String>) -> Error {
         self.parse_error_at(self.at, message)
     }
@@ -307,14 +317,7 @@ impl Parser {
     /// part of the failed statement, so they are skipped rather than reported
     /// as synthetic top-level errors.
     fn recover_statement_boundary(&mut self) {
-        let mut layout_depth =
-            self.tokens[..self.at]
-                .iter()
-                .fold(0usize, |depth, token| match token {
-                    Token::Indent => depth + 1,
-                    Token::Dedent => depth.saturating_sub(1),
-                    _ => depth,
-                });
+        let mut layout_depth = self.layout_depths[self.at];
         let mut continuation_header = false;
         loop {
             match self.peek() {
@@ -1532,11 +1535,7 @@ impl Parser {
                 .or_else(|| self.spans.last())
                 .map_or(1, |span| span.line);
             spans.fill(TokenSpan::line_only(source_line));
-            let mut expression_parser = Parser {
-                tokens,
-                spans,
-                at: 0,
-            };
+            let mut expression_parser = Parser::new(tokens, spans);
             let expression = expression_parser.expr(0)?;
             if !matches!(expression_parser.peek(), Token::Semi | Token::Eof) {
                 return Err(self.parse_error("interpolation must contain one expression"));
