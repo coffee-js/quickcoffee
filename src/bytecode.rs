@@ -1590,30 +1590,23 @@ impl Compiler {
             }
             Expr::Do(function) => {
                 self.expr(function)?;
-                match function.as_ref() {
-                    Expr::Function(params, rest, _) => {
-                        if rest.is_some()
-                            || params.iter().any(|param| {
-                                !matches!(&param.pattern, AstPattern::Bind(_))
-                                    || param.default.is_some()
-                            })
-                        {
-                            return Err(Error::verify(
-                                "do function forwarding requires plain required name parameters",
-                            ));
-                        }
-                        for param in params {
-                            let AstPattern::Bind(name) = &param.pattern else {
-                                unreachable!("validated plain name parameter");
-                            };
-                            self.emit(Instruction::Load(name.clone()));
-                        }
-                        self.emit(Instruction::Call(params.len()));
-                    }
-                    _ => {
-                        self.emit(Instruction::Call(0));
-                    }
+                let forwarded = match function.as_ref() {
+                    Expr::Function(params, rest, _) if rest.is_none() => params
+                        .iter()
+                        .map(|param| match &param.pattern {
+                            AstPattern::Bind(name) if param.default.is_none() => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>(),
+                    _ => Some(vec![]),
+                };
+                let names = forwarded.ok_or_else(|| {
+                    Error::verify("do function forwarding requires plain required name parameters")
+                })?;
+                for name in &names {
+                    self.emit(Instruction::Load(name.clone()));
                 }
+                self.emit(Instruction::Call(names.len()));
             }
         }
         Ok(())
