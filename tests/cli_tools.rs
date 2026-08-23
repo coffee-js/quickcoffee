@@ -539,8 +539,18 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(text.status.success());
     let text_stdout = String::from_utf8_lossy(&text.stdout);
     assert!(!text_stdout.starts_with('{'));
-    assert!(text_stdout.contains("schema=quickcoffee.qbench.v1"));
-    assert!(text_stdout.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
+    let text_lines: Vec<_> = text_stdout.lines().collect();
+    assert!(!text_lines.is_empty());
+    for line in text_lines {
+        assert!(
+            line.contains("schema=quickcoffee.qbench.v1"),
+            "missing schema in {line}"
+        );
+        assert!(
+            line.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))),
+            "missing version in {line}"
+        );
+    }
     assert!(text_stdout.contains("repeat=1"));
     let repeated = Command::new(bin("qbench"))
         .args(["--json", "--iterations", "1", "--repeat", "3"])
