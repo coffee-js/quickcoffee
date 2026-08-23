@@ -337,12 +337,14 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+    let fail_path = temp.join("a-fail.qc");
+    let pass_path = temp.join("b-pass.qc");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
-            temp.display(),
-            temp.display()
+            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
+            fail_path.display(),
+            pass_path.display()
         )
     );
     let reversed = Command::new(bin("qtest"))
@@ -358,9 +360,9 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(
         String::from_utf8_lossy(&reversed.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
-            temp.display(),
-            temp.display()
+            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
+            fail_path.display(),
+            pass_path.display()
         )
     );
     let conflict = Command::new(bin("qtest"))
@@ -463,6 +465,12 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(
         String::from_utf8_lossy(&conflicting_source.stderr).contains("execution-mode alternatives")
     );
+    let reverse_conflict = Command::new(bin("qcoffee"))
+        .args(["--check", temp.to_str().unwrap(), "-e", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(reverse_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&reverse_conflict.stderr).contains("-e cannot"));
 
     let repeated_dump = Command::new(bin("qcoffee"))
         .args([

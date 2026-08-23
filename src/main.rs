@@ -189,9 +189,9 @@ fn main() -> ExitCode {
             "--stats" => stats = true,
             "--json" => json = true,
             "-e" => match args.next() {
-                Some(s) if source.is_none() => source = Some(s),
+                Some(s) if source.is_none() && !dump && !check && !fingerprint => source = Some(s),
                 Some(_) => {
-                    eprintln!("only one source input is allowed");
+                    eprintln!("-e cannot be combined with another source or execution mode");
                     return ExitCode::from(2);
                 }
                 None => {
@@ -200,9 +200,13 @@ fn main() -> ExitCode {
                 }
             },
             "--dump-bytecode" => {
-                if source.is_some() || dump || check || fingerprint || stats || json {
+                if json {
+                    eprintln!("--json cannot be combined with --dump-bytecode");
+                    return ExitCode::from(2);
+                }
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
+                        "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -227,9 +231,13 @@ fn main() -> ExitCode {
                 }
             }
             "--check" => {
-                if source.is_some() || dump || check || fingerprint || stats || json {
+                if json {
+                    eprintln!("--json cannot be combined with --check");
+                    return ExitCode::from(2);
+                }
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
+                        "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -253,9 +261,13 @@ fn main() -> ExitCode {
                 }
             }
             "--fingerprint" => {
-                if source.is_some() || dump || check || fingerprint || stats || json {
+                if json {
+                    eprintln!("--json cannot be combined with --fingerprint");
+                    return ExitCode::from(2);
+                }
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
-                        "--check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
+                        "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
