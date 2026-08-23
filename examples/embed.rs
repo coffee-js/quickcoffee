@@ -5,7 +5,7 @@ fn main() -> Result<(), Error> {
     context.set_global("factor", Value::from(2_i64));
     context.add_native("host_add", |args| {
         if args.len() != 2 {
-            return Err(Error::runtime("host_add: wrong number of arguments"));
+            return Err(Error::runtime("host_add expects two numbers"));
         }
         let (Some(left), Some(right)) = (args[0].as_number(), args[1].as_number()) else {
             return Err(Error::runtime("host_add expects two numbers"));
