@@ -359,8 +359,19 @@ impl Context {
         x
     }
     pub fn with_fuel(mut self, fuel: u64) -> Self {
-        self.fuel = fuel;
+        self.set_fuel(fuel);
         self
+    }
+    /// Sets the instruction budget used by the next and subsequent runs.
+    ///
+    /// A context keeps its globals and registered native functions, so an
+    /// embedding host can adjust a budget between runs without rebuilding it.
+    pub fn set_fuel(&mut self, fuel: u64) {
+        self.fuel = fuel;
+    }
+    /// Returns the instruction budget configured for each new run.
+    pub fn fuel(&self) -> u64 {
+        self.fuel
     }
     /// Returns counters from the most recent successful or failed execution.
     /// Compilation and verification errors do not replace the previous record.
