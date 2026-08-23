@@ -393,6 +393,13 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert_eq!(quit_conflict.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&quit_conflict.stderr).contains("--quit cannot"));
 
+    let prefixed_quit_conflict = Command::new(bin("qcoffee"))
+        .args(["--fuel", "1", "--quit"])
+        .output()
+        .unwrap();
+    assert_eq!(prefixed_quit_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&prefixed_quit_conflict.stderr).contains("--quit cannot"));
+
     let evaluation = Command::new(bin("qcoffee"))
         .args(["-e", "1 + 2"])
         .output()

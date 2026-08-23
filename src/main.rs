@@ -165,20 +165,9 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 fn main() -> ExitCode {
-    let raw_args: Vec<_> = env::args().skip(1).collect();
-    if raw_args
-        .first()
-        .is_some_and(|argument| argument == "--quit")
-    {
-        if raw_args.len() != 1 {
-            eprintln!("--quit cannot be combined with execution options or a source");
-            return ExitCode::from(2);
-        }
-        let _context = Context::new();
-        return ExitCode::SUCCESS;
-    }
-    let mut args = raw_args.into_iter();
+    let mut args = env::args().skip(1);
     let mut fuel = 1_000_000u64;
+    let mut fuel_set = false;
     let mut source = None;
     let mut dump = false;
     let mut fingerprint = false;
@@ -186,8 +175,13 @@ fn main() -> ExitCode {
     let mut stats = false;
     let mut json = false;
     let mut interactive = false;
+    let mut quit = false;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
+        if quit {
+            eprintln!("--quit cannot be combined with execution options or a source");
+            return ExitCode::from(2);
+        }
         match arg.as_str() {
             "--" => {
                 script_args.extend(args);
@@ -203,7 +197,10 @@ fn main() -> ExitCode {
             }
             "--interactive" | "-i" => interactive = true,
             "--fuel" => match args.next().and_then(|s| s.parse().ok()) {
-                Some(n) => fuel = n,
+                Some(n) => {
+                    fuel = n;
+                    fuel_set = true;
+                }
                 None => {
                     eprintln!("--fuel requires a non-negative integer");
                     return ExitCode::from(2);
@@ -211,6 +208,21 @@ fn main() -> ExitCode {
             },
             "--stats" => stats = true,
             "--json" => json = true,
+            "--quit" => {
+                if fuel_set
+                    || source.is_some()
+                    || dump
+                    || fingerprint
+                    || check
+                    || stats
+                    || json
+                    || interactive
+                {
+                    eprintln!("--quit cannot be combined with execution options or a source");
+                    return ExitCode::from(2);
+                }
+                quit = true;
+            }
             "-e" => match args.next() {
                 Some(s) if source.is_none() && !dump && !check && !fingerprint => source = Some(s),
                 Some(_) => {
@@ -341,6 +353,10 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         }
+    }
+    if quit {
+        let _context = Context::new();
+        return ExitCode::SUCCESS;
     }
     if json && (dump || check || fingerprint) {
         eprintln!(
