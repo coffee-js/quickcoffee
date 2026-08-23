@@ -1,5 +1,6 @@
 use quickcoffee::{
-    CancellationToken, Context, Engine, Error, ErrorKind, ResourceLimit, Value, ValueKind,
+    CancellationToken, Context, DiagnosticLabelKind, Engine, Error, ErrorKind, ResourceLimit,
+    Value, ValueKind,
 };
 
 #[test]
@@ -79,6 +80,27 @@ fn public_values_and_native_errors_are_structured() {
     let error = context.eval("fail()").unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Runtime);
     assert_eq!(error.message(), "host failed");
+}
+
+#[test]
+fn source_diagnostics_expose_labels_without_inventing_unknown_columns() {
+    let error = Engine::new().compile("value = 1\n@").unwrap_err();
+    let position = error.position().expect("parse error has a position");
+    assert_eq!(position.line, 2);
+    assert_eq!(position.column, None);
+
+    let [label] = error.labels() else {
+        panic!("parse error must have one primary label");
+    };
+    assert_eq!(label.kind, DiagnosticLabelKind::Primary);
+    assert_eq!(label.span.source_name, None);
+    assert_eq!(label.span.start, position);
+    assert_eq!(label.span.end, None);
+    assert_eq!(label.message, None);
+
+    let runtime = Error::runtime("host failed");
+    assert!(runtime.position().is_none());
+    assert!(runtime.labels().is_empty());
 }
 
 #[test]

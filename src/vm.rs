@@ -222,11 +222,41 @@ pub enum ResourceLimit {
     /// The embedding host cancelled the current execution.
     Cancellation,
 }
-/// One-based source line attached to a lexical or parse diagnostic.
+/// A source coordinate attached to a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourcePosition {
     /// One-based line number.
     pub line: usize,
+    /// One-based Unicode scalar column, or `None` when only the line is known.
+    pub column: Option<usize>,
+}
+/// A half-open source range, or a line-only location when [`Self::end`] is absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceSpan {
+    /// Opaque source name supplied by a CLI, module loader, or embedding host.
+    pub source_name: Option<String>,
+    /// Inclusive start coordinate.
+    pub start: SourcePosition,
+    /// Exclusive end coordinate, or `None` when the diagnostic is line-only.
+    pub end: Option<SourcePosition>,
+}
+/// Role of a source label in a structured diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticLabelKind {
+    /// The source range that caused the error.
+    Primary,
+    /// A related source range that provides additional context.
+    Secondary,
+}
+/// A display-independent source annotation attached to an [`Error`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticLabel {
+    /// Whether this is the primary cause or related context.
+    pub kind: DiagnosticLabelKind,
+    /// Source range associated with this label.
+    pub span: SourceSpan,
+    /// Optional detail specific to this range, separate from [`Error::message`].
+    pub message: Option<String>,
 }
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -243,7 +273,7 @@ impl fmt::Display for ErrorKind {
 pub struct Error {
     kind: ErrorKind,
     message: String,
-    position: Option<SourcePosition>,
+    labels: Vec<DiagnosticLabel>,
     resource_limit: Option<ResourceLimit>,
 }
 impl Error {
@@ -251,7 +281,7 @@ impl Error {
         Self {
             kind: ErrorKind::Parse,
             message: m.into(),
-            position: None,
+            labels: Vec::new(),
             resource_limit: None,
         }
     }
@@ -259,7 +289,7 @@ impl Error {
         Self {
             kind: ErrorKind::Verify,
             message: m.into(),
-            position: None,
+            labels: Vec::new(),
             resource_limit: None,
         }
     }
@@ -268,7 +298,7 @@ impl Error {
         Self {
             kind: ErrorKind::Runtime,
             message: m.into(),
-            position: None,
+            labels: Vec::new(),
             resource_limit: None,
         }
     }
@@ -276,7 +306,7 @@ impl Error {
         Self {
             kind: ErrorKind::Resource,
             message: message.into(),
-            position: None,
+            labels: Vec::new(),
             resource_limit: Some(limit),
         }
     }
@@ -288,22 +318,40 @@ impl Error {
     pub fn message(&self) -> &str {
         &self.message
     }
-    /// Returns the one-based source line when the compiler knows it.
+    /// Returns the primary label's start coordinate when the compiler knows it.
+    ///
+    /// This compatibility accessor returns the same line as before structured
+    /// labels were introduced. Call [`Self::labels`] to inspect complete ranges.
     pub fn position(&self) -> Option<SourcePosition> {
-        self.position
+        self.labels
+            .iter()
+            .find(|label| label.kind == DiagnosticLabelKind::Primary)
+            .map(|label| label.span.start)
+    }
+    /// Returns ordered, display-independent source annotations.
+    pub fn labels(&self) -> &[DiagnosticLabel] {
+        &self.labels
     }
     /// Returns the crossed resource boundary for a resource error.
     pub fn resource_limit(&self) -> Option<ResourceLimit> {
         self.resource_limit
     }
     pub(crate) fn at_line(mut self, line: usize) -> Self {
-        self.position = Some(SourcePosition { line });
+        self.labels = vec![DiagnosticLabel {
+            kind: DiagnosticLabelKind::Primary,
+            span: SourceSpan {
+                source_name: None,
+                start: SourcePosition { line, column: None },
+                end: None,
+            },
+            message: None,
+        }];
         self
     }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(position) = self.position {
+        if let Some(position) = self.position() {
             write!(
                 f,
                 "{} error (line {}): {}",
