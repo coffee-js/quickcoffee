@@ -3,6 +3,7 @@
 ## Notes
 
 QuickCoffee manual
+
 Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 qcoffee - reads a QuickCoffee program from standard input.
 qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.

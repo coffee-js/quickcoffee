@@ -3,6 +3,7 @@
 ## Notes
 
 QuickCoffee 用户手册
+
 QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 qcoffee - 可从标准输入读取 QuickCoffee 程序。
 qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
@@ -42,6 +43,7 @@ yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
 映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
 数组与 Unicode 字符串支持负索引，-1 取末项。
+
 函数捕获词法环境；末尾参数可写作 y = 2，缺省或 nil 时在函数内取默认值；末位 rest 参数写作 tail...。
 普通名称参数可省略括号：left, right -> left + right；默认、rest 与解构参数仍须括号。
 return expression 只在函数内结束当前调用；裸 return 得 nil，并清理循环且执行沿途 finally。

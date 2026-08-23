@@ -3,6 +3,7 @@
 ## Notes
 
 Manuale QuickCoffee
+
 Tabulae mappae segmenta expandere possunt; claves posteriores priores superant.
 In forma mappae ...metadata claves omissas immutabiliter capit.
 Indices negativi in seriebus et textu Unicode extremum elementum petunt.

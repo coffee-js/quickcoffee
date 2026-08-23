@@ -3,6 +3,7 @@
 ## Notes
 
 QuickCoffee 用法
+
 映射可展其项，后书之键胜前书：{...defaults, theme: 'dark'}。
 映射解构末可用 ...metadata 收未列之键，所得映射不变。
 数列与 Unicode 字符负索引，-一取其末。
