@@ -283,7 +283,12 @@ fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
     assert_ne!(first.stdout, different.stdout);
     let fingerprint = String::from_utf8_lossy(&first.stdout);
     assert_eq!(fingerprint.trim().len(), 16);
-    assert!(fingerprint.trim().chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(
+        fingerprint
+            .trim()
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    );
     assert!(first.stderr.is_empty());
     assert!(
         !first
@@ -292,10 +297,16 @@ fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
             .any(|w| w == b"side effect")
     );
     let conflict = Command::new(bin("qcoffee"))
-        .args(["--fingerprint", "--check", temp.to_str().unwrap()])
+        .args([
+            "--fingerprint",
+            temp.to_str().unwrap(),
+            "--check",
+            temp.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert_eq!(conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("execution-mode alternatives"));
     let _ = fs::remove_file(temp);
     let _ = fs::remove_file(other);
 }
