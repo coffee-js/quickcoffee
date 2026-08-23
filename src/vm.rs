@@ -452,6 +452,18 @@ pub struct ExecutionStats {
     ///
     /// The top-level program does not count toward this value.
     pub call_depth_peak: usize,
+    /// Bytecode name loads attempted during the run.
+    pub name_loads: u64,
+    /// Bytecode name stores attempted during the run.
+    pub name_stores: u64,
+    /// Bytecode call instructions attempted during the run.
+    pub calls: u64,
+    /// Bytecode container construction and access instructions attempted during the run.
+    pub container_ops: u64,
+    /// Bytecode iterator setup, advancement, and cleanup instructions attempted during the run.
+    pub iterator_ops: u64,
+    /// Bytecode exception-handler and throw instructions attempted during the run.
+    pub exception_ops: u64,
 }
 /// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
@@ -589,6 +601,12 @@ impl Context {
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
+            name_loads: 0,
+            name_stores: 0,
+            calls: 0,
+            container_ops: 0,
+            iterator_ops: 0,
+            exception_ops: 0,
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -802,6 +820,12 @@ struct Vm {
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
+    name_loads: u64,
+    name_stores: u64,
+    calls: u64,
+    container_ops: u64,
+    iterator_ops: u64,
+    exception_ops: u64,
 }
 enum Step {
     Continue,
@@ -809,6 +833,30 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn record_profile(&mut self, instruction: &Instruction) {
+        match instruction {
+            Instruction::Load(_) | Instruction::LoadOrNil(_) => self.name_loads += 1,
+            Instruction::Store(_) => self.name_stores += 1,
+            Instruction::Call(_) | Instruction::CallSpread => self.calls += 1,
+            Instruction::MakeArray(_)
+            | Instruction::Append
+            | Instruction::MergeArrays(_)
+            | Instruction::MergeMaps(_)
+            | Instruction::MakeRange(_)
+            | Instruction::MakeMap(_)
+            | Instruction::Index
+            | Instruction::Slice(_)
+            | Instruction::Member(_) => self.container_ops += 1,
+            Instruction::IterStartEnumerable
+            | Instruction::IterStartMap
+            | Instruction::IterNext { .. }
+            | Instruction::IterEnd => self.iterator_ops += 1,
+            Instruction::Try { .. } | Instruction::EndTry | Instruction::Throw => {
+                self.exception_ops += 1
+            }
+            _ => {}
+        }
+    }
     fn eval_default(&mut self, chunk: Rc<Chunk>, env: Env) -> Result<Value, Error> {
         let mut nested = Vm {
             fuel: self.fuel,
@@ -817,12 +865,24 @@ impl Vm {
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
+            name_loads: self.name_loads,
+            name_stores: self.name_stores,
+            calls: self.calls,
+            container_ops: self.container_ops,
+            iterator_ops: self.iterator_ops,
+            exception_ops: self.exception_ops,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
         self.instructions = nested.instructions;
         self.call_depth = nested.call_depth;
         self.call_depth_peak = nested.call_depth_peak;
+        self.name_loads = nested.name_loads;
+        self.name_stores = nested.name_stores;
+        self.calls = nested.calls;
+        self.container_ops = nested.container_ops;
+        self.iterator_ops = nested.iterator_ops;
+        self.exception_ops = nested.exception_ops;
         result
     }
     fn stats(&self) -> ExecutionStats {
@@ -830,6 +890,12 @@ impl Vm {
             instructions: self.instructions,
             fuel_remaining: self.fuel,
             call_depth_peak: self.call_depth_peak,
+            name_loads: self.name_loads,
+            name_stores: self.name_stores,
+            calls: self.calls,
+            container_ops: self.container_ops,
+            iterator_ops: self.iterator_ops,
+            exception_ops: self.exception_ops,
         }
     }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
@@ -869,6 +935,7 @@ impl Vm {
                     .cloned()
                     .ok_or_else(|| Error::runtime("instruction pointer escaped chunk"))?;
                 frame.pc += 1;
+                self.record_profile(&op);
                 match op {
                     Instruction::Constant(i) => match frame
                         .chunk
