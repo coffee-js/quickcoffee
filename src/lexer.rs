@@ -1,6 +1,35 @@
-use crate::vm::Error;
+use crate::vm::{Error, SourcePosition, SourceSpan};
 use std::{iter::Peekable, str::Chars};
 use unicode_ident::{is_xid_continue, is_xid_start};
+
+#[derive(Clone)]
+struct ColumnChars<'a> {
+    chars: Peekable<Chars<'a>>,
+    next_column: usize,
+}
+impl<'a> ColumnChars<'a> {
+    fn new(source: &'a str, first_column: usize) -> Self {
+        Self {
+            chars: source.chars().peekable(),
+            next_column: first_column,
+        }
+    }
+    fn peek(&mut self) -> Option<&char> {
+        self.chars.peek()
+    }
+    fn column(&self) -> usize {
+        self.next_column
+    }
+}
+impl Iterator for ColumnChars<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.chars.next()?;
+        self.next_column += 1;
+        Some(next)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Token {
@@ -98,16 +127,45 @@ pub(crate) enum Token {
     Eof,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct TokenSpan {
+    pub(crate) line: usize,
+    start_column: usize,
+    end_column: usize,
+}
+impl TokenSpan {
+    pub(crate) fn line_only(line: usize) -> Self {
+        Self {
+            line,
+            start_column: 0,
+            end_column: 0,
+        }
+    }
+    pub(crate) fn into_source_span(self) -> SourceSpan {
+        SourceSpan {
+            source_name: None,
+            start: SourcePosition {
+                line: self.line,
+                column: (self.start_column != 0).then_some(self.start_column),
+            },
+            end: (self.end_column != 0).then_some(SourcePosition {
+                line: self.line,
+                column: Some(self.end_column),
+            }),
+        }
+    }
+}
+
 struct LexOutput {
     tokens: Vec<Token>,
-    lines: Vec<usize>,
+    spans: Vec<TokenSpan>,
     current_line: usize,
 }
 impl LexOutput {
     fn new() -> Self {
         Self {
             tokens: vec![],
-            lines: vec![],
+            spans: vec![],
             current_line: 1,
         }
     }
@@ -116,13 +174,19 @@ impl LexOutput {
     }
     fn push(&mut self, token: Token) {
         self.tokens.push(token);
-        self.lines.push(self.current_line);
+        self.spans.push(TokenSpan::line_only(self.current_line));
+    }
+    fn set_columns_since(&mut self, start: usize, start_column: usize, end_column: usize) {
+        for span in &mut self.spans[start..] {
+            span.start_column = start_column;
+            span.end_column = end_column;
+        }
     }
     fn last(&self) -> Option<&Token> {
         self.tokens.last()
     }
-    fn finish(self) -> (Vec<Token>, Vec<usize>) {
-        (self.tokens, self.lines)
+    fn finish(self) -> (Vec<Token>, Vec<TokenSpan>) {
+        (self.tokens, self.spans)
     }
 }
 
@@ -131,8 +195,10 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, Error> {
     Ok(lex_spanned(source)?.0)
 }
 
-pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Error> {
+pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<TokenSpan>), Error> {
     let normalized = normalize_indented_maps(&normalize_heredocs(source)?);
+    let preprocessing_preserved_columns = normalized == source;
+    let source_lines = source.split('\n').collect::<Vec<_>>();
     let logical_lines = normalize_multiline_strings(&normalized);
     let mut out = LexOutput::new();
     let mut indents = vec![0usize];
@@ -183,7 +249,18 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
                 std::cmp::Ordering::Equal => {}
             }
         }
-        lex_line(content, line_number, &mut groups, &mut out)?;
+        let columns_are_precise = preprocessing_preserved_columns
+            && source_lines
+                .get(line_number - 1)
+                .is_some_and(|source_line| *source_line == line);
+        lex_line(
+            content,
+            line_number,
+            leading.chars().count(),
+            columns_are_precise,
+            &mut groups,
+            &mut out,
+        )?;
         continued = groups.is_empty() && line_continues(out.last());
         let needs_separator =
             (groups.is_empty() && !continued && !matches!(out.last(), Some(Token::Semi)))
@@ -505,12 +582,19 @@ fn map_entry_line(content: &str) -> bool {
 fn lex_line(
     line: &str,
     line_number: usize,
+    column_offset: usize,
+    columns_are_precise: bool,
     groups: &mut Vec<char>,
     out: &mut LexOutput,
 ) -> Result<(), Error> {
     out.set_line(line_number);
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
+    let mut chars = ColumnChars::new(line, column_offset + 1);
+    loop {
+        let token_start_column = chars.column();
+        let Some(ch) = chars.next() else {
+            break;
+        };
+        let first_new_token = out.tokens.len();
         match ch {
             ' ' | '\t' => {}
             '#' => break,
@@ -544,6 +628,13 @@ fn lex_line(
                                 .at_line(line_number)
                         })?;
                         out.push(Token::Number(value as f64));
+                        if columns_are_precise {
+                            out.set_columns_since(
+                                first_new_token,
+                                token_start_column,
+                                chars.column(),
+                            );
+                        }
                         continue;
                     }
                 }
@@ -841,17 +932,32 @@ fn lex_line(
                 }
             }
             _ => {
-                return Err(
-                    Error::parse(format!("unexpected character '{ch}'")).at_line(line_number)
-                );
+                let error = Error::parse(format!("unexpected character '{ch}'"));
+                if columns_are_precise {
+                    return Err(error.at_span(SourceSpan {
+                        source_name: None,
+                        start: SourcePosition {
+                            line: line_number,
+                            column: Some(token_start_column),
+                        },
+                        end: Some(SourcePosition {
+                            line: line_number,
+                            column: Some(token_start_column + 1),
+                        }),
+                    }));
+                }
+                return Err(error.at_line(line_number));
             }
+        }
+        if columns_are_precise {
+            out.set_columns_since(first_new_token, token_start_column, chars.column());
         }
     }
     Ok(())
 }
 
 fn decode_string_escape(
-    chars: &mut Peekable<Chars<'_>>,
+    chars: &mut ColumnChars<'_>,
     escaped: char,
     line_number: usize,
 ) -> Result<char, Error> {

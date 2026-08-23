@@ -370,6 +370,49 @@ fn lexical_errors_expose_source_lines() {
     assert!(error.to_string().contains("parse error (line 2):"));
 }
 #[test]
+fn lexer_and_parser_errors_expose_unicode_scalar_spans_when_known() {
+    let lexical = compile("value = 1\n  café @").unwrap_err();
+    let lexical_span = &lexical.labels()[0].span;
+    assert_eq!(lexical_span.start.line, 2);
+    assert_eq!(lexical_span.start.column, Some(8));
+    assert_eq!(
+        lexical_span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(9),
+        })
+    );
+
+    let parser = compile("value = 1\nvalue = [1 2]").unwrap_err();
+    let parser_span = &parser.labels()[0].span;
+    assert_eq!(parser_span.start.line, 2);
+    assert_eq!(parser_span.start.column, Some(12));
+    assert_eq!(
+        parser_span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(13),
+        })
+    );
+
+    let consumed = compile("value = if then 1").unwrap_err();
+    let consumed_span = &consumed.labels()[0].span;
+    assert_eq!(consumed_span.start.column, Some(12));
+    assert_eq!(
+        consumed_span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 1,
+            column: Some(16),
+        })
+    );
+
+    let lowered = compile("record =\n  key: if then 1").unwrap_err();
+    let lowered_span = &lowered.labels()[0].span;
+    assert_eq!(lowered_span.start.line, 2);
+    assert_eq!(lowered_span.start.column, None);
+    assert_eq!(lowered_span.end, None);
+}
+#[test]
 fn unicode_xid_identifiers_support_combining_marks() {
     assert_eq!(eval("स्थित = 40\nस्थित + 2").as_number(), Some(42.));
     assert!(Context::new().eval("\u{94b}value = 1").is_err());

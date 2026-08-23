@@ -348,6 +348,14 @@ impl Error {
         }];
         self
     }
+    pub(crate) fn at_span(mut self, span: SourceSpan) -> Self {
+        self.labels = vec![DiagnosticLabel {
+            kind: DiagnosticLabelKind::Primary,
+            span,
+            message: None,
+        }];
+        self
+    }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

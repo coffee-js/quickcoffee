@@ -1,5 +1,5 @@
 use crate::{
-    lexer::{Token, lex_spanned},
+    lexer::{Token, TokenSpan, lex_spanned},
     vm::Error,
 };
 
@@ -144,10 +144,10 @@ type ForHeader = (
 );
 
 pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
-    let (tokens, lines) = lex_spanned(source)?;
+    let (tokens, spans) = lex_spanned(source)?;
     Parser {
         tokens,
-        lines,
+        spans,
         at: 0,
     }
     .program()
@@ -176,17 +176,23 @@ pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
 }
 struct Parser {
     tokens: Vec<Token>,
-    lines: Vec<usize>,
+    spans: Vec<TokenSpan>,
     at: usize,
 }
 impl Parser {
     fn parse_error(&self, message: impl Into<String>) -> Error {
+        self.parse_error_at(self.at, message)
+    }
+    fn previous_error(&self, message: impl Into<String>) -> Error {
+        self.parse_error_at(self.at.saturating_sub(1), message)
+    }
+    fn parse_error_at(&self, index: usize, message: impl Into<String>) -> Error {
         let error = Error::parse(message);
-        self.lines
-            .get(self.at)
-            .or_else(|| self.lines.last())
-            .copied()
-            .map_or(error.clone(), |line| error.at_line(line))
+        if let Some(span) = self.spans.get(index).or_else(|| self.spans.last()).copied() {
+            error.at_span(span.into_source_span())
+        } else {
+            error
+        }
     }
     fn peek(&self) -> &Token {
         &self.tokens[self.at]
@@ -267,7 +273,7 @@ impl Parser {
         let bindings = self.named_bindings()?;
         self.expect(&Token::From)?;
         let Token::String(specifier, false) = self.next() else {
-            return Err(self.parse_error("module specifier must be a literal string"));
+            return Err(self.previous_error("module specifier must be a literal string"));
         };
         Ok(Stmt::Import(bindings, specifier))
     }
@@ -282,7 +288,7 @@ impl Parser {
             ));
         }
         let Token::Ident(name) = self.next() else {
-            return Err(self.parse_error("expected exported name or named export list"));
+            return Err(self.previous_error("expected exported name or named export list"));
         };
         self.expect(&Token::Assign)?;
         Ok(Stmt::ExportAssign(name, self.expr(0)?))
@@ -293,11 +299,11 @@ impl Parser {
         if !self.eat(&Token::RBrace) {
             loop {
                 let Token::Ident(source) = self.next() else {
-                    return Err(self.parse_error("expected named binding"));
+                    return Err(self.previous_error("expected named binding"));
                 };
                 let local = if self.eat(&Token::As) {
                     let Token::Ident(local) = self.next() else {
-                        return Err(self.parse_error("expected local alias after as"));
+                        return Err(self.previous_error("expected local alias after as"));
                     };
                     local
                 } else {
@@ -582,7 +588,7 @@ impl Parser {
                     Token::Ident(name) => name,
                     got => {
                         return Err(
-                            self.parse_error(format!("expected member name, found {got:?}"))
+                            self.previous_error(format!("expected member name, found {got:?}"))
                         );
                     }
                 };
@@ -592,7 +598,7 @@ impl Parser {
             if let Some(update) = postfix_update(self.peek()) {
                 self.next();
                 let Expr::Name(name) = left else {
-                    return Err(self.parse_error("increment and decrement require a plain name"));
+                    return Err(self.previous_error("increment and decrement require a plain name"));
                 };
                 left = Expr::Update(name, update, false);
                 continue;
@@ -636,8 +642,9 @@ impl Parser {
                         let name = match self.next() {
                             Token::Ident(name) => name,
                             got => {
-                                return Err(self
-                                    .parse_error(format!("expected member name, found {got:?}")));
+                                return Err(self.previous_error(format!(
+                                    "expected member name, found {got:?}"
+                                )));
                             }
                         };
                         left = Expr::SoakMember(Box::new(left), name);
@@ -1006,7 +1013,9 @@ impl Parser {
                 let name = match self.next() {
                     Token::Ident(name) => name,
                     got => {
-                        return Err(self.parse_error(format!("expected class name, found {got:?}")));
+                        return Err(
+                            self.previous_error(format!("expected class name, found {got:?}"))
+                        );
                     }
                 };
                 let params = if self.eat(&Token::LParen) {
@@ -1037,7 +1046,9 @@ impl Parser {
                 let name = match self.next() {
                     Token::Ident(name) => name,
                     got => {
-                        return Err(self.parse_error(format!("expected catch name, found {got:?}")));
+                        return Err(
+                            self.previous_error(format!("expected catch name, found {got:?}"))
+                        );
                     }
                 };
                 let handler = self.body()?;
@@ -1152,7 +1163,7 @@ impl Parser {
                             Token::Ident(s) | Token::String(s, _) => s.clone(),
                             _ => {
                                 return Err(
-                                    self.parse_error("map key must be identifier or string")
+                                    self.previous_error("map key must be identifier or string")
                                 );
                             }
                         };
@@ -1161,7 +1172,9 @@ impl Parser {
                         } else if matches!(key, Token::Ident(_)) {
                             Expr::Name(k.clone())
                         } else {
-                            return Err(self.parse_error("string map keys require ':' and a value"));
+                            return Err(
+                                self.previous_error("string map keys require ':' and a value")
+                            );
                         };
                         m.push(MapItem::Entry(k, value));
                     }
@@ -1179,7 +1192,7 @@ impl Parser {
                 }
                 Ok(Expr::Map(m))
             }
-            x => Err(self.parse_error(format!("expected expression, found {x:?}"))),
+            x => Err(self.previous_error(format!("expected expression, found {x:?}"))),
         }
     }
     fn for_prefix(&mut self) -> Result<Expr, Error> {
@@ -1198,7 +1211,7 @@ impl Parser {
         let name = match self.next() {
             Token::Ident(name) => name,
             got => {
-                return Err(self.parse_error(format!(
+                return Err(self.previous_error(format!(
                     "increment and decrement require a plain name, found {got:?}"
                 )));
             }
@@ -1401,17 +1414,16 @@ impl Parser {
                 }
             }
             let end = end.ok_or_else(|| self.parse_error("unterminated string interpolation"))?;
-            let (tokens, mut lines) = lex_spanned(remainder[expression_start..end].trim())?;
+            let (tokens, mut spans) = lex_spanned(remainder[expression_start..end].trim())?;
             let source_line = self
-                .lines
+                .spans
                 .get(self.at)
-                .or_else(|| self.lines.last())
-                .copied()
-                .unwrap_or(1);
-            lines.fill(source_line);
+                .or_else(|| self.spans.last())
+                .map_or(1, |span| span.line);
+            spans.fill(TokenSpan::line_only(source_line));
             let mut expression_parser = Parser {
                 tokens,
-                lines,
+                spans,
                 at: 0,
             };
             let expression = expression_parser.expr(0)?;

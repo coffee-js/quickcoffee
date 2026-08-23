@@ -2,7 +2,7 @@
 
 与 CoffeeScript 1.12.7 官方语言参考的逐章节对照，以及明确的“实现 / 改写 / 拒绝”决策，见 [CoffeeScript 2016 特性矩阵](coffeescript-2016-matrix.md)。
 
-嵌入诊断通过 `Error::labels()` 暴露有序的 primary/secondary 标签。`SourceSpan` 包含可选的不透明来源名、起点与可选的不含终点；列从 1 开始按 Unicode 标量计数，当前端只知道行时保持缺省。`Error::position()` 继续作为 primary 起点的兼容访问器。
+嵌入诊断通过 `Error::labels()` 暴露有序的 primary/secondary 标签。`SourceSpan` 包含可选的不透明来源名、起点与可选的不含终点；列从 1 开始按 Unicode 标量计数。物理行未被预处理改写时，lexer/parser 错误携带精确范围；合成或已改写输入保持行级位置，不虚构列。`Error::position()` 继续作为 primary 起点的兼容访问器。
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 
