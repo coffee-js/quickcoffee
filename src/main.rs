@@ -78,8 +78,16 @@ fn json_error(error: &Error) -> String {
     let line = error
         .position()
         .map_or_else(|| "null".to_owned(), |position| position.line.to_string());
+    let source = error
+        .labels()
+        .iter()
+        .find(|label| label.kind == quickcoffee::DiagnosticLabelKind::Primary)
+        .and_then(|label| label.span.source_name.as_deref())
+        .map_or_else(String::new, |source_name| {
+            format!(",\"source\":\"{}\"", json_escape(source_name))
+        });
     format!(
-        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\",\"line\":{line}}}",
+        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\"{source},\"line\":{line}}}",
         error.kind(),
         json_escape(error.message())
     )
@@ -169,6 +177,7 @@ fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
     let mut fuel_set = false;
     let mut source = None;
+    let mut source_name = None;
     let mut dump = false;
     let mut fingerprint = false;
     let mut check = false;
@@ -249,7 +258,10 @@ fn main() -> ExitCode {
                 match args.next() {
                     Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
                     {
-                        Ok(text) => source = Some(text),
+                        Ok(text) => {
+                            source = Some(text);
+                            source_name = Some(path);
+                        }
                         Err(error) => {
                             eprintln!("{error}");
                             return ExitCode::from(1);
@@ -279,7 +291,10 @@ fn main() -> ExitCode {
                 check = true;
                 match args.next() {
                     Some(path) => match read_source(&path) {
-                        Ok(text) => source = Some(text),
+                        Ok(text) => {
+                            source = Some(text);
+                            source_name = Some(path);
+                        }
                         Err(error) => {
                             if json {
                                 println!("{}", json_io_error("read", &error));
@@ -310,7 +325,10 @@ fn main() -> ExitCode {
                 match args.next() {
                     Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
                     {
-                        Ok(text) => source = Some(text),
+                        Ok(text) => {
+                            source = Some(text);
+                            source_name = Some(path);
+                        }
                         Err(error) => {
                             eprintln!("{error}");
                             return ExitCode::from(1);
@@ -327,7 +345,10 @@ fn main() -> ExitCode {
                 }
             }
             "-" if source.is_none() => match read_source("-") {
-                Ok(text) => source = Some(text),
+                Ok(text) => {
+                    source = Some(text);
+                    source_name = Some("-".to_owned());
+                }
                 Err(error) => {
                     if json {
                         println!("{}", json_io_error("read", &error));
@@ -338,7 +359,10 @@ fn main() -> ExitCode {
                 }
             },
             path if !path.starts_with('-') && source.is_none() => match read_source(path) {
-                Ok(text) => source = Some(text),
+                Ok(text) => {
+                    source = Some(text);
+                    source_name = Some(path.to_owned());
+                }
                 Err(error) => {
                     if json {
                         println!("{}", json_io_error("read", &error));
@@ -384,7 +408,11 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let engine = Engine::new();
-    let chunk = match engine.compile(&source) {
+    let compiled = match source_name.as_deref() {
+        Some(source_name) => engine.compile_named(source_name, &source),
+        None => engine.compile(&source),
+    };
+    let chunk = match compiled {
         Ok(c) => c,
         Err(e) => {
             if json {

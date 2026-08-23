@@ -104,17 +104,23 @@ impl ModuleExports {
 impl Engine {
     /// Compiles one module with static named import/export directives.
     pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
-        let syntax = parser::parse_module(source)?;
+        let name = name.into();
+        let syntax =
+            parser::parse_module(source).map_err(|error| error.with_source_name(name.as_str()))?;
         let mut public_names = BTreeSet::new();
         for (public, _) in &syntax.exports {
             if !public_names.insert(public.clone()) {
                 return Err(Error::parse(format!("duplicate module export: {public}")));
             }
         }
-        let program: Program = bytecode::compile(&syntax.body)?.into();
-        program.verify()?;
+        let program: Program = bytecode::compile(&syntax.body)
+            .map_err(|error| error.with_source_name(name.as_str()))?
+            .into();
+        program
+            .verify()
+            .map_err(|error| error.with_source_name(name.as_str()))?;
         Ok(Module {
-            name: name.into(),
+            name,
             program,
             imports: syntax.imports,
             exports: syntax.exports,

@@ -25,12 +25,28 @@ pub fn compile(source: &str) -> Result<Chunk, Error> {
     Ok(chunk)
 }
 
+/// Compiles `source` to verified bytecode and attaches the opaque
+/// host-provided `source_name` to any diagnostic labels produced on failure.
+pub fn compile_named(source_name: &str, source: &str) -> Result<Chunk, Error> {
+    compile(source).map_err(|error| error.with_source_name(source_name))
+}
+
 /// Compiles `source` to a cheaply cloneable shared verified program.
 pub fn compile_program(source: &str) -> Result<Program, Error> {
     Engine::new().compile_program(source)
 }
 
+/// Compiles named source to a cheaply cloneable shared verified program.
+pub fn compile_program_named(source_name: &str, source: &str) -> Result<Program, Error> {
+    Engine::new().compile_program_named(source_name, source)
+}
+
 /// Evaluates `source` in a freshly created context.
 pub fn eval(source: &str) -> Result<Value, Error> {
     Context::new().eval(source)
+}
+
+/// Evaluates named source in a freshly created context.
+pub fn eval_named(source_name: &str, source: &str) -> Result<Value, Error> {
+    Context::new().eval_named(source_name, source)
 }

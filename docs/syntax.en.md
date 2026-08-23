@@ -2,7 +2,7 @@
 
 For a section-by-section comparison with the CoffeeScript 1.12.7 language reference, including explicit **Implement**, **Adapt**, and **Reject** decisions, see the [CoffeeScript 2016 feature matrix](coffeescript-2016-matrix.md).
 
-Embedding diagnostics expose ordered primary/secondary labels through `Error::labels()`. A `SourceSpan` carries an optional opaque source name, a start coordinate, and an optional exclusive end; columns are one-based Unicode scalar positions. Lexer and parser errors carry precise ranges when their physical line was not rewritten by preprocessing; synthetic or rewritten input remains line-only rather than inventing a column. `Error::position()` remains the compatibility accessor for the primary start.
+Embedding diagnostics expose ordered primary/secondary labels through `Error::labels()`. A `SourceSpan` carries an optional opaque source name, a start coordinate, and an optional exclusive end; columns are one-based Unicode scalar positions. Lexer and parser errors carry precise ranges when their physical line was not rewritten by preprocessing; synthetic or rewritten input remains line-only rather than inventing a column. `compile_named`, `compile_program_named`, and `Context::eval_named` preserve a host-supplied name verbatim on existing labels; named modules and CLI file input do the same. Anonymous calls remain unnamed, and `Error::position()` remains the compatibility accessor for the primary start.
 
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 
