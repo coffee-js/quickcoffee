@@ -44,6 +44,15 @@ fn public_values_and_native_errors_are_structured() {
     assert_eq!(map["answer"].as_number(), Some(42.));
     assert_eq!(map["items"].as_array().unwrap()[0].as_str(), Some("coffee"));
     assert_eq!(map["items"].kind(), ValueKind::Array);
+    assert_eq!(Value::from(false).kind(), ValueKind::Bool);
+    assert_eq!(Value::from(0_i64).kind(), ValueKind::Number);
+    assert_eq!(Value::from("coffee").kind(), ValueKind::String);
+    assert_eq!(
+        context.eval("(x) -> x").unwrap().kind(),
+        ValueKind::Function
+    );
+    assert!(!Value::from(false).is_nil());
+    assert!(!Value::from(0_i64).is_nil());
     assert_eq!(Value::Nil.kind(), ValueKind::Nil);
     assert!(Value::Nil.is_nil());
 
