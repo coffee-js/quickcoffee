@@ -1,8 +1,11 @@
-use quickcoffee::{Context, Error, Value};
+use quickcoffee::{CancellationToken, Context, Error, Value};
 
 fn main() -> Result<(), Error> {
+    let cancellation = CancellationToken::new();
     let mut context = Context::new()
         .with_fuel(100_000)
+        .with_max_call_depth(128)
+        .with_cancellation_token(cancellation.clone())
         .with_global("factor", Value::from(2_i64))
         .with_native("host_add", |args| {
             if args.len() != 2 {
@@ -13,6 +16,7 @@ fn main() -> Result<(), Error> {
             };
             Ok(Value::from(left + right))
         });
+    // The request owner may call `cancellation.cancel()` from another control path.
     let value = context.eval("host_add(20, 22) * factor")?;
     println!("{value}");
     Ok(())

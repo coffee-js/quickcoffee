@@ -558,15 +558,15 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     );
     assert!(parse_error.stderr.is_empty());
 
-    let runtime_error = Command::new(bin("qcoffee"))
+    let resource_error = Command::new(bin("qcoffee"))
         .args(["--json", "--fuel", "10", "-e", "while true then 1"])
         .output()
         .unwrap();
-    assert!(!runtime_error.status.success());
-    let runtime_stdout = String::from_utf8_lossy(&runtime_error.stdout);
-    assert!(runtime_stdout.starts_with("{\"ok\":false,\"kind\":\"runtime\""));
-    assert!(runtime_stdout.contains("fuel exhausted"));
-    assert!(runtime_stdout.ends_with("\"line\":null}\n"));
+    assert!(!resource_error.status.success());
+    let resource_stdout = String::from_utf8_lossy(&resource_error.stdout);
+    assert!(resource_stdout.starts_with("{\"ok\":false,\"kind\":\"resource\""));
+    assert!(resource_stdout.contains("fuel exhausted"));
+    assert!(resource_stdout.ends_with("\"line\":null}\n"));
 
     let missing = Command::new(bin("qcoffee"))
         .args(["--json", "qcoffee-file-that-does-not-exist.qc"])

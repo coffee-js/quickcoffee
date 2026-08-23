@@ -7,6 +7,7 @@ QuickCoffee 用户手册
 QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 qcoffee - 可从标准输入读取 QuickCoffee 程序。
 qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
+嵌入宿主可用 Context::with_fuel、with_max_call_depth 和 with_cancellation_token 分别限制指令、递归与取消执行；资源错误不被脚本 catch 吞掉。
 qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
@@ -20,18 +21,18 @@ qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写
 qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
 qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。
 qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
-Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
+Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime、Resource；error.resource_limit() 可分辨 fuel、调用深度与取消，宿主回调仍可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
 qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
 qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
-嵌入方可在运行之间调用 Context::set_fuel；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。
+嵌入方可在运行之间调用 Context::set_fuel、set_max_call_depth 与 set_cancellation_token；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。
 cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
 宿主可用 Value::kind() 分流类型，用 Value::is_nil() 判断 nil，无须检查内部容器。
 Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
-Context::last_execution() 提供指令数与剩余燃料统计，不暴露 VM 帧。
+Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统计，不暴露 VM 帧。
 -- 后的参数以普通字符串数组 argv 暴露给程序。
 它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。
 # 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
