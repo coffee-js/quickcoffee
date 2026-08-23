@@ -500,6 +500,7 @@ fn coffeescript_block_comments_are_ignored_and_require_a_closing_delimiter() {
     assert_eq!(eval("### one line ###\n42").as_number(), Some(42.));
     assert!(Context::new().eval("### never closed\n42").is_err());
     assert!(compile("### ignored ###\n42").unwrap().verify().is_ok());
+    assert_eq!(eval("###\n\"\"\"\n###\n42").as_number(), Some(42.));
 }
 #[test]
 fn short_circuit_returns_operands() {
