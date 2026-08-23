@@ -2,6 +2,7 @@
 ##
 ## Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 ## qcoffee - reads a QuickCoffee program from standard input.
+## qcoffee --quit initializes one Context and exits silently; it cannot be combined with source or execution options.
 ## qcoffee --stats writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
@@ -23,7 +24,7 @@
 ## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
 ## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
 ## Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by --iterations or --repeat.
-## qbench --compare-qjs PATH emits a separate qcompare CLI comparison using the caller-supplied QuickJS path; it includes startup, parsing, compilation, and execution. Reports should use --repeat 11; each *_mad_ns field is the median absolute deviation from the median.
+## qbench --compare-qjs PATH separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use --repeat 11; each phase has a median and *_mad_ns.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
 ## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.

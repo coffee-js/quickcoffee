@@ -6,6 +6,7 @@ QuickCoffee 用户手册
 
 QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 qcoffee - 可从标准输入读取 QuickCoffee 程序。
+qcoffee --quit 创建一个 Context 后静默退出，不能与源码或其他执行选项组合。
 qcoffee --stats 将指令数、剩余燃料及查名、调用、容器、迭代、异常、托管值分配与词法环境分配计数写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
 嵌入模块可写 import { public as local } from 'name' 与 export；Engine::compile_module 和 Context::run_module 只经宿主 ModuleLoader 取源码，模块全局私有且整张图共享 fuel。
 嵌入宿主可用 Context::with_fuel、with_max_call_depth 和 with_cancellation_token 分别限制指令、递归与取消执行；资源错误不被脚本 catch 吞掉。
@@ -28,7 +29,7 @@ Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行
 qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
 每条 qbench 记录的 profile_* 字段来自一次不计时执行，给出热点与分配事件，不乘以 --iterations 或 --repeat。
-qbench --compare-qjs PATH 以调用者提供的 QuickJS 路径输出独立 qcompare CLI 对比；它包括启动、解析、编译与执行，不与 qbench 进程内计时混比。正式报告宜用 --repeat 11；每个 *_mad_ns 字段给出相对中位数的 MAD。
+qbench --compare-qjs PATH 分别报告双方的启动、编译、预编译热执行与端到端 CLI 总耗时。正式报告宜用 --repeat 11；每个阶段都有中位数和 *_mad_ns。
 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
 qdocco --markdown 将说明、围栏 QuickCoffee 代码与最终值写成可审阅的 Markdown 产物。
 嵌入方可在运行之间调用 Context::set_fuel、set_max_call_depth 与 set_cancellation_token；Context::fuel 返回当前每轮预算，且不清除全局值；with_global 与 with_native 可链式配置宿主。

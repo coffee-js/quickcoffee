@@ -9,7 +9,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -165,7 +165,19 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 fn main() -> ExitCode {
-    let mut args = env::args().skip(1);
+    let raw_args: Vec<_> = env::args().skip(1).collect();
+    if raw_args
+        .first()
+        .is_some_and(|argument| argument == "--quit")
+    {
+        if raw_args.len() != 1 {
+            eprintln!("--quit cannot be combined with execution options or a source");
+            return ExitCode::from(2);
+        }
+        let _context = Context::new();
+        return ExitCode::SUCCESS;
+    }
+    let mut args = raw_args.into_iter();
     let mut fuel = 1_000_000u64;
     let mut source = None;
     let mut dump = false;

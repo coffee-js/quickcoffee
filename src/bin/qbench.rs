@@ -26,13 +26,13 @@ const COMPARISON_WORKLOADS: &[ComparisonWorkload] = &[
     ComparisonWorkload {
         name: "scalar-loop",
         quickcoffee: "sum = 0\ni = 0\nwhile i < 1000000\n  sum += i\n  i++\nsum",
-        quickjs: "let sum = 0; for (let i = 0; i < 1000000; i++) sum += i; console.log(sum);",
+        quickjs: "(function () { let sum = 0; for (let i = 0; i < 1000000; i++) sum += i; return sum; })",
         expected: "499999500000",
     },
     ComparisonWorkload {
         name: "function-loop",
         quickcoffee: "increment = (value) -> value + 1\nsum = 0\ni = 0\nwhile i < 250000\n  sum = increment(sum)\n  i++\nsum",
-        quickjs: "const increment = value => value + 1; let sum = 0; for (let i = 0; i < 250000; i++) sum = increment(sum); console.log(sum);",
+        quickjs: "(function () { const increment = value => value + 1; let sum = 0; for (let i = 0; i < 250000; i++) sum = increment(sum); return sum; })",
         expected: "250000",
     },
 ];
@@ -268,11 +268,80 @@ fn run_checked(command: &mut Command, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_phase_output(output: &[u8]) -> Result<(u128, u128), String> {
+    let text = String::from_utf8_lossy(output);
+    let mut fields = text.split_whitespace();
+    let compile_ns = fields
+        .next()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| "QuickJS phase output is missing compile nanoseconds".to_owned())?;
+    let hot_ns = fields
+        .next()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| "QuickJS phase output is missing hot-execution nanoseconds".to_owned())?;
+    if fields.next().is_some() {
+        return Err("QuickJS phase output contains unexpected fields".to_owned());
+    }
+    Ok((compile_ns, hot_ns))
+}
+
+fn run_quickjs_phases(
+    path: &str,
+    workload: &ComparisonWorkload,
+    iterations: usize,
+) -> Result<(u128, u128), String> {
+    let script = format!(
+        "const source=\"{}\";const expected=\"{}\";let workload;let start=os.now();for(let i=0;i<{};i++)workload=std.evalScript(source);const compileNs=Math.round((os.now()-start)*1000000);start=os.now();for(let i=0;i<{};i++){{const value=workload();if(String(value)!==expected)throw new Error(`expected ${{expected}}, got ${{value}}`);}}const hotNs=Math.round((os.now()-start)*1000000);print(`${{compileNs}} ${{hotNs}}`);",
+        json_escape(workload.quickjs),
+        json_escape(workload.expected),
+        iterations,
+        iterations
+    );
+    let output = Command::new(path)
+        .args(["--std", "-e", &script])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    parse_phase_output(&output.stdout)
+}
+
+fn measure_startup(
+    executable: &std::ffi::OsStr,
+    quit_argument: &str,
+    iterations: usize,
+    repeat: usize,
+) -> Result<(u128, u128), String> {
+    let mut samples = Vec::with_capacity(repeat);
+    for _ in 0..repeat {
+        let start = Instant::now();
+        for _ in 0..iterations {
+            run_checked(Command::new(executable).arg(quit_argument), "")?;
+        }
+        samples.push(start.elapsed().as_nanos());
+    }
+    Ok(median_and_mad(&mut samples))
+}
+
 fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Result<(), String> {
     let qcoffee = cli_binary("qcoffee")?;
+    let (quickcoffee_startup_ns, quickcoffee_startup_mad_ns) =
+        measure_startup(qcoffee.as_os_str(), "--quit", iterations, repeat)?;
+    let (quickjs_startup_ns, quickjs_startup_mad_ns) =
+        measure_startup(std::ffi::OsStr::new(path), "--quit", iterations, repeat)?;
+    let engine = Engine::new();
     for workload in COMPARISON_WORKLOADS {
         let mut quickcoffee_samples = Vec::with_capacity(repeat);
         let mut quickjs_samples = Vec::with_capacity(repeat);
+        let mut quickcoffee_compile_samples = Vec::with_capacity(repeat);
+        let mut quickcoffee_hot_samples = Vec::with_capacity(repeat);
+        let mut quickjs_compile_samples = Vec::with_capacity(repeat);
+        let mut quickjs_hot_samples = Vec::with_capacity(repeat);
+        let hot_program = engine
+            .compile_program(workload.quickcoffee)
+            .map_err(|error| error.to_string())?;
+        let quickjs_cli_source = format!("console.log(({})());", workload.quickjs);
         for _ in 0..repeat {
             let start = Instant::now();
             for _ in 0..iterations {
@@ -286,21 +355,64 @@ fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Resu
             let start = Instant::now();
             for _ in 0..iterations {
                 run_checked(
-                    Command::new(path).args(["-e", workload.quickjs]),
+                    Command::new(path).args(["-e", &quickjs_cli_source]),
                     workload.expected,
                 )?;
             }
             quickjs_samples.push(start.elapsed().as_nanos());
+
+            let start = Instant::now();
+            for _ in 0..iterations {
+                engine
+                    .compile(workload.quickcoffee)
+                    .map_err(|error| error.to_string())?;
+            }
+            quickcoffee_compile_samples.push(start.elapsed().as_nanos());
+
+            let mut context = Context::new().with_fuel(20_000_000);
+            let start = Instant::now();
+            for _ in 0..iterations {
+                let value = context
+                    .run_program(&hot_program)
+                    .map_err(|error| error.to_string())?;
+                if value.to_string() != workload.expected {
+                    return Err(format!("expected {}, got {value}", workload.expected));
+                }
+            }
+            quickcoffee_hot_samples.push(start.elapsed().as_nanos());
+
+            let (compile_ns, hot_ns) = run_quickjs_phases(path, workload, iterations)?;
+            quickjs_compile_samples.push(compile_ns);
+            quickjs_hot_samples.push(hot_ns);
         }
         let (quickcoffee_ns, quickcoffee_mad_ns) = median_and_mad(&mut quickcoffee_samples);
         let (quickjs_ns, quickjs_mad_ns) = median_and_mad(&mut quickjs_samples);
+        let (quickcoffee_compile_ns, quickcoffee_compile_mad_ns) =
+            median_and_mad(&mut quickcoffee_compile_samples);
+        let (quickcoffee_hot_ns, quickcoffee_hot_mad_ns) =
+            median_and_mad(&mut quickcoffee_hot_samples);
+        let (quickjs_compile_ns, quickjs_compile_mad_ns) =
+            median_and_mad(&mut quickjs_compile_samples);
+        let (quickjs_hot_ns, quickjs_hot_mad_ns) = median_and_mad(&mut quickjs_hot_samples);
         if json {
             println!(
-                "{{\"schema\":\"{COMPARISON_SCHEMA}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"quickcoffee_cli_ns\":{},\"quickcoffee_cli_mad_ns\":{},\"quickjs_cli_ns\":{},\"quickjs_cli_mad_ns\":{}}}",
+                "{{\"schema\":\"{COMPARISON_SCHEMA}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"quickcoffee_startup_ns\":{},\"quickcoffee_startup_mad_ns\":{},\"quickjs_startup_ns\":{},\"quickjs_startup_mad_ns\":{},\"quickcoffee_compile_ns\":{},\"quickcoffee_compile_mad_ns\":{},\"quickjs_compile_ns\":{},\"quickjs_compile_mad_ns\":{},\"quickcoffee_hot_ns\":{},\"quickcoffee_hot_mad_ns\":{},\"quickjs_hot_ns\":{},\"quickjs_hot_mad_ns\":{},\"quickcoffee_cli_ns\":{},\"quickcoffee_cli_mad_ns\":{},\"quickjs_cli_ns\":{},\"quickjs_cli_mad_ns\":{}}}",
                 workload.name,
                 iterations,
                 repeat,
                 workload.expected,
+                quickcoffee_startup_ns,
+                quickcoffee_startup_mad_ns,
+                quickjs_startup_ns,
+                quickjs_startup_mad_ns,
+                quickcoffee_compile_ns,
+                quickcoffee_compile_mad_ns,
+                quickjs_compile_ns,
+                quickjs_compile_mad_ns,
+                quickcoffee_hot_ns,
+                quickcoffee_hot_mad_ns,
+                quickjs_hot_ns,
+                quickjs_hot_mad_ns,
                 quickcoffee_ns,
                 quickcoffee_mad_ns,
                 quickjs_ns,
@@ -308,10 +420,22 @@ fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Resu
             );
         } else {
             println!(
-                "schema={COMPARISON_SCHEMA} {} iterations={} repeat={} quickcoffee_cli_ns={} quickcoffee_cli_mad_ns={} quickjs_cli_ns={} quickjs_cli_mad_ns={} expected={}",
+                "schema={COMPARISON_SCHEMA} {} iterations={} repeat={} quickcoffee_startup_ns={} quickcoffee_startup_mad_ns={} quickjs_startup_ns={} quickjs_startup_mad_ns={} quickcoffee_compile_ns={} quickcoffee_compile_mad_ns={} quickjs_compile_ns={} quickjs_compile_mad_ns={} quickcoffee_hot_ns={} quickcoffee_hot_mad_ns={} quickjs_hot_ns={} quickjs_hot_mad_ns={} quickcoffee_cli_ns={} quickcoffee_cli_mad_ns={} quickjs_cli_ns={} quickjs_cli_mad_ns={} expected={}",
                 workload.name,
                 iterations,
                 repeat,
+                quickcoffee_startup_ns,
+                quickcoffee_startup_mad_ns,
+                quickjs_startup_ns,
+                quickjs_startup_mad_ns,
+                quickcoffee_compile_ns,
+                quickcoffee_compile_mad_ns,
+                quickjs_compile_ns,
+                quickjs_compile_mad_ns,
+                quickcoffee_hot_ns,
+                quickcoffee_hot_mad_ns,
+                quickjs_hot_ns,
+                quickjs_hot_mad_ns,
                 quickcoffee_ns,
                 quickcoffee_mad_ns,
                 quickjs_ns,
@@ -324,7 +448,12 @@ fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Resu
 }
 
 fn json_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 fn median(samples: &mut [u128]) -> u128 {
@@ -541,4 +670,17 @@ fn main() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_phase_output;
+
+    #[test]
+    fn quickjs_phase_output_requires_exact_unsigned_fields() {
+        assert_eq!(parse_phase_output(b"10 20\n").unwrap(), (10, 20));
+        assert!(parse_phase_output(b"10\n").is_err());
+        assert!(parse_phase_output(b"ten 20\n").is_err());
+        assert!(parse_phase_output(b"10 20 30\n").is_err());
+    }
 }
