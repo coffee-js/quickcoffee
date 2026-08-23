@@ -30,7 +30,9 @@ cargo build --locked --release --bins
 target/release/qbench --compare-qjs /path/to/qjs --compare-iterations 1 --repeat 11 --json
 ```
 
-当前比较负载是双方可等价表达并校验结果的标量循环和函数调用；每个读数包含 CLI 启动、解析、编译与执行。它用于量级判断和回归观察，不是 JavaScript 兼容性声明，也不替代独立的预编译热执行剖析。
+当前比较负载是双方可等价表达并校验结果的标量循环和函数调用。既有 `quickcoffee_cli_ns` 与 `quickjs_cli_ns` 继续表示包含启动、解析、编译和执行的端到端子进程总耗时，不由其他阶段相减得出。
+
+RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_startup_ns` / `quickjs_startup_ns` 通过各自 `--quit` 测进程启动；`*_compile_ns` 在进程内重复编译函数或程序；`*_hot_ns` 复用已编译函数或已验证 `Program` 与运行上下文，并在每次执行后校验最终值。每个阶段都是一轮 `--compare-iterations` 的总耗时，并配有对 `--repeat` 样本计算的 `*_mad_ns`。QuickJS 阶段由 `qjs --std` 内的 `os.now()` 自计时，因此字段使用纳秒单位不代表底层时钟具有纳秒分辨率。它用于量级判断和回归观察，不是 JavaScript 兼容性声明。
 
 调试单一回归时，先用 `qbench --list` 查看确定性的内建负载名，再用 `qbench --only NAME` 只运行该负载；不指定 `--only` 始终运行完整集合，持续门禁口径不变。
 

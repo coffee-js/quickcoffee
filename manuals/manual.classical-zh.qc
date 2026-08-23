@@ -10,6 +10,7 @@
 ## ! 同 not，严反 Bool；!= 仍严不等。
 ## 严等与数较可相连，中项惟求一遍，前否则后不求。
 ## qcoffee - 者，自标准输入读其文也。
+## qcoffee --quit 初置一 Context 而默退，不得兼源码与他行法。
 ## qcoffee --stats 则书所试指令、余燃料及查名、调用、容器、迭、异常、托管值分配与词法环境分配之数于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
 ## 嵌入之模块可名 import/export；Engine::compile_module、Context::run_module 惟由宿主 ModuleLoader 得其文，模块全局私有，而全图共其 fuel。
 ## qcoffee --check FILE 者，析编验其文而不行也。
@@ -32,7 +33,7 @@
 ## qcoffee --fingerprint FILE 出十六位小写字节码键，先验之而不行其文。
 ## qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。
 ## 每 qbench 录之 profile_* 皆取一次不入计时之执行，记热点与分配事件，不乘 --iterations 或 --repeat。
-## qbench --compare-qjs PATH 由调用者给 QuickJS 之径，别出 qcompare CLI 对比；其含启动、析、编与行，不可混于机内计时。正报宜 --repeat 11；每 *_mad_ns 记中数之绝差中数。
+## qbench --compare-qjs PATH 别计两端启动、编译、预编热行与 CLI 全程。正报宜 --repeat 11；各段皆有中数与 *_mad_ns。
 ## 指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。
 ## qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 ## 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。

@@ -1,6 +1,6 @@
 # QuickCoffee 0.2 前业务适用性与性能基线
 
-本文件是 2026-08-23 在 `main`（RFC 0000–0123）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。它把下一阶段的工作拆成可审阅、可测量的目标。
+本文件是 2026-08-23 在 `main`（RFC 0000–0124）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。它把下一阶段的工作拆成可审阅、可测量的目标。
 
 后续拆分由 [#65：语言业务适用性](https://github.com/coffee-js/quickcoffee/issues/65) 与 [#66：QuickJS 量级性能收敛](https://github.com/coffee-js/quickcoffee/issues/66) 跟踪。
 
@@ -61,15 +61,15 @@ qjs -e 'let sum = 0; for (let i = 0; i < 10000000; i++) sum += i; if (sum !== 49
 
 `/usr/bin/time -p` 的单次端到端读数分别为 **5.48 s** 与 **0.13 s**，即约 **42×**。QuickCoffee 的燃料必须显式提高；默认 1,000,000 fuel 会在该测试中按设计中止。该比值包含各自 CLI 启动、解析、编译与执行，且 QuickJS 的短读数受计时分辨率影响，故它是方向性基线，不是发布门槛。
 
-同一构建下 `qbench --json --iterations 100 --repeat 5` 的 QuickCoffee 执行中位数还显示热路径集中在循环、值分派、查名和分配：`loop-core` 3.52 ms、`array-slices` 11.18 ms、`nested-destructuring` 23.46 ms、`return-cleanup` 184.30 ms（均为 100 次程序执行总计）。RFC 0122/0123 又为每条记录加入一次不计时执行的确定性热点与托管分配剖析：`loop-core` 有 203 次查名、102 次存名且无托管分配，`closures-and-ranges` 有 49 次调用和 49 次词法环境分配。现有 `qbench` 对 QuickCoffee 自身回归有效，但不能直接与 QuickJS 比较，因为负载含有本语言特有语义和每次新建 `Context`。
+同一构建下 `qbench --json --iterations 100 --repeat 5` 的 QuickCoffee 执行中位数还显示热路径集中在循环、值分派、查名和分配：`loop-core` 3.52 ms、`array-slices` 11.18 ms、`nested-destructuring` 23.46 ms、`return-cleanup` 184.30 ms（均为 100 次程序执行总计）。RFC 0122/0123 又为每条记录加入一次不计时执行的确定性热点与托管分配剖析：`loop-core` 有 203 次查名、102 次存名且无托管分配，`closures-and-ranges` 有 49 次调用和 49 次词法环境分配。该 `qbench.v1` 套件只用于 QuickCoffee 自身回归；RFC 0124 的独立 `qcompare.v1` 则用双方可等价表达的负载分离报告启动、编译、预编译热执行和 CLI 总耗时。
 
 官方 QuickJS 将自身定位为小型可嵌入的 ES2025 引擎，使用引用计数和 cycle removal；其功能范围远大于 QuickCoffee，因此只把它作为性能参照，不作为语义或 API 模板。[QuickJS 官方说明](https://bellard.org/quickjs/)
 
 ## 性能收敛计划
 
-1. 新建独立的跨运行时基准 harness：固定 CPU/优先级、预热、至少 11 次样本与中位数，并区分 CLI 启动、解析编译和预编译程序热执行；只纳入双方可等价表达的标量循环、调用、数组和字符串负载。
+1. RFC 0124 已在独立跨运行时 harness 中分离 CLI 启动、编译和预编译热执行，并为双方等价的标量循环与调用负载输出至少 11 次样本建议、中位数与 MAD；下一步扩展数组/字符串等价负载，并记录 CPU 固定与预热环境。
 2. 确定性的指令类别、查名、托管值和词法环境分配事件已由 RFC 0122/0123 接入 qbench；下一步补充采样耗时与分配字节证据，再选择优化。
 3. 按路线图 C 先实现局部槽位和符号 intern，再评估紧凑编码与短指令。每一项保留未优化路径差分执行、字节码验证和 fuel 等价测试。
 4. 首个可审阅目标不是承诺一次赶平，而是在同机 scalar-loop 热执行上降至 QuickJS 的 **10× 内**，集合负载降至 **20× 内**；达成后再以完整噪声模型决定是否把阈值作为 CI 告警。
 
-在跨运行时阶段分离、采样剖析和同机目标达成前，不应宣称 QuickCoffee 已达到 QuickJS 量级。
+在采样剖析和同机目标达成前，不应宣称 QuickCoffee 已达到 QuickJS 量级。

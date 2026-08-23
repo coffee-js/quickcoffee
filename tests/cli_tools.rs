@@ -381,6 +381,25 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("qcoffee "));
 
+    let quit = Command::new(bin("qcoffee")).arg("--quit").output().unwrap();
+    assert!(quit.status.success());
+    assert!(quit.stdout.is_empty());
+    assert!(quit.stderr.is_empty());
+
+    let quit_conflict = Command::new(bin("qcoffee"))
+        .args(["--quit", "-e", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(quit_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&quit_conflict.stderr).contains("--quit cannot"));
+
+    let prefixed_quit_conflict = Command::new(bin("qcoffee"))
+        .args(["--fuel", "1", "--quit"])
+        .output()
+        .unwrap();
+    assert_eq!(prefixed_quit_conflict.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&prefixed_quit_conflict.stderr).contains("--quit cannot"));
+
     let evaluation = Command::new(bin("qcoffee"))
         .args(["-e", "1 + 2"])
         .output()
@@ -406,6 +425,13 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
         .unwrap();
     assert!(args.status.success());
     assert_eq!(String::from_utf8_lossy(&args.stdout), "2\n");
+
+    let quit_argument = Command::new(bin("qcoffee"))
+        .args(["-e", "argv[0]", "--", "--quit"])
+        .output()
+        .unwrap();
+    assert!(quit_argument.status.success());
+    assert_eq!(String::from_utf8_lossy(&quit_argument.stdout), "--quit\n");
 
     let mut stdin = Command::new(bin("qcoffee"))
         .arg("-")
@@ -791,6 +817,82 @@ fn qbench_json_is_guarded_and_machine_readable() {
         .unwrap();
     assert_eq!(compare_conflict.status.code(), Some(2));
 }
+
+#[cfg(unix)]
+#[test]
+fn qcompare_separates_startup_compile_hot_and_cli_phases() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = std::env::temp_dir().join(format!("qcoffee-qjs-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let fake_qjs = temp.join("qjs");
+    fs::write(
+        &fake_qjs,
+        r#"#!/bin/sh
+if [ "$1" = "--quit" ]; then
+  exit 0
+fi
+if [ "$1" = "--std" ]; then
+  printf '100 200\n'
+  exit 0
+fi
+case "$2" in
+  *1000000*) printf '499999500000\n' ;;
+  *250000*) printf '250000\n' ;;
+  *) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&fake_qjs).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_qjs, permissions).unwrap();
+
+    let output = Command::new(bin("qbench"))
+        .args([
+            "--compare-qjs",
+            fake_qjs.to_str().unwrap(),
+            "--compare-iterations",
+            "1",
+            "--repeat",
+            "1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "qbench failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().count(), 2);
+    for line in stdout.lines() {
+        for field in [
+            "\"schema\":\"quickcoffee.qcompare.v1\"",
+            "\"quickcoffee_startup_ns\":",
+            "\"quickcoffee_startup_mad_ns\":0",
+            "\"quickjs_startup_ns\":",
+            "\"quickjs_startup_mad_ns\":0",
+            "\"quickcoffee_compile_ns\":",
+            "\"quickcoffee_compile_mad_ns\":0",
+            "\"quickjs_compile_ns\":100",
+            "\"quickjs_compile_mad_ns\":0",
+            "\"quickcoffee_hot_ns\":",
+            "\"quickcoffee_hot_mad_ns\":0",
+            "\"quickjs_hot_ns\":200",
+            "\"quickjs_hot_mad_ns\":0",
+            "\"quickcoffee_cli_ns\":",
+            "\"quickcoffee_cli_mad_ns\":0",
+            "\"quickjs_cli_ns\":",
+            "\"quickjs_cli_mad_ns\":0",
+        ] {
+            assert!(line.contains(field), "missing {field} in {line}");
+        }
+    }
+    let _ = fs::remove_dir_all(temp);
+}
+
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     let mut process = Command::new(bin("qcoffee"))
