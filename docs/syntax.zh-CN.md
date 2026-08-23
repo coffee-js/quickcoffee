@@ -53,3 +53,6 @@
 数组遍历可另绑定从零开始的下标：`for value, index in items then value + index`；使用 `by step` 时下标仍是实际数组位置。
 
 推导亦可用 CoffeeScript 风格后置形式：`value * 2 for value in items`，或以方括号包住写作 `[value * 2 for value in items]`。后置形式与前置形式共享 `by`、`when`、映射、模式、`break`、`continue` 语义；方括号只是推导界标，不再增加一层嵌套数组。
+## 基准统计
+
+`qbench --json --repeat 11` 对编译、验证与执行输出上侧中位数及对应 `*_mad_ns`（median absolute deviation）离散度。`qbench --compare-qjs PATH` 对两端 CLI 总耗时也输出相同的 MAD 字段；它不等同于预编译热执行。

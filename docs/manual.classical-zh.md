@@ -34,7 +34,7 @@ Engine::compile_program 创时验之；Context::run_program 屡行则复用不�
 Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。
 qcoffee --fingerprint FILE 出十六位小写字节码键，先验之而不行其文。
 qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。
-qbench --compare-qjs PATH 由调用者给 QuickJS 之径，别出 qcompare CLI 对比；其含启动、析、编与行，不可混于机内计时。
+qbench --compare-qjs PATH 由调用者给 QuickJS 之径，别出 qcompare CLI 对比；其含启动、析、编与行，不可混于机内计时。正报宜 --repeat 11；每 *_mad_ns 记中数之绝差中数。
 指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。
 qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。

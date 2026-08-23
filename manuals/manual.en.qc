@@ -22,7 +22,7 @@
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 ## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
 ## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
-## qbench --compare-qjs PATH emits a separate qcompare CLI comparison using the caller-supplied QuickJS path; it includes startup, parsing, compilation, and execution.
+## qbench --compare-qjs PATH emits a separate qcompare CLI comparison using the caller-supplied QuickJS path; it includes startup, parsing, compilation, and execution. Reports should use --repeat 11; each *_mad_ns field is the median absolute deviation from the median.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
 ## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.

@@ -29,7 +29,7 @@ Engine::compile_program एकवारं verify करोति; Context::run_
 Program::fingerprint होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
 qcoffee --fingerprint FILE सत्यापित-bytecode-कुञ्जीं षोडश लघु-षोडशाधारीय-अङ्कैः दर्शयति, लेखं न चालयति।
 qbench --json प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; --iterations नमूना-सङ्ख्यां नियच्छति।
-qbench --compare-qjs PATH आह्वातृ-दत्तेन QuickJS-मार्गेण पृथक् qcompare CLI-तुलनां ददाति; आरम्भं, parse, compile, execution च गणयति।
+qbench --compare-qjs PATH आह्वातृ-दत्तेन QuickJS-मार्गेण पृथक् qcompare CLI-तुलनां ददाति; आरम्भं, parse, compile, execution च गणयति। औपचारिक-प्रतिवेदने --repeat 11 भवेत्; प्रत्येक *_mad_ns क्षेत्रं मध्यकात् median absolute deviation दर्शयति।
 बीजाङ्काः Rust-debug-रूपं विना स्पष्ट-नियत-bytecode-संकेतेन निर्मीयन्ते, अतः साधन-रूपपरिवर्तनं सञ्चय-कुञ्जीं न परिवर्तयति।
 qdocco --markdown टिप्पणीन्, सीमितं QuickCoffee-कोडं, अन्तिम-मूल्यं च पठनीय Markdown-फलके लिखति।
 अन्तःस्थापकः चालनयोर्मध्ये Context::set_fuel आह्वयितुं शक्नोति; Context::fuel वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति; with_global तथा with_native क्रमिक-संयोजनाय स्तः।
