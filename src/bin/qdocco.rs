@@ -2,7 +2,9 @@
 
 use quickcoffee::{Context, Engine, Value};
 use std::{
-    env, fs,
+    env,
+    ffi::{OsStr, OsString},
+    fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -17,15 +19,18 @@ fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
         _ => left == right,
     }
 }
+fn temporary_path(destination: &Path) -> PathBuf {
+    let mut temporary_name = OsString::from(".");
+    temporary_name.push(
+        destination
+            .file_name()
+            .unwrap_or(OsStr::new("qdocco-output")),
+    );
+    temporary_name.push(format!(".quickcoffee-{}.tmp", std::process::id()));
+    destination.with_file_name(temporary_name)
+}
 fn write_output(destination: &Path, document: &str) -> io::Result<()> {
-    let file_name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("qdocco-output");
-    let temporary = destination.with_file_name(format!(
-        ".{file_name}.quickcoffee-{}.tmp",
-        std::process::id()
-    ));
+    let temporary = temporary_path(destination);
     let mut created = false;
     let result = (|| {
         let mut file = fs::OpenOptions::new()
@@ -36,7 +41,17 @@ fn write_output(destination: &Path, document: &str) -> io::Result<()> {
         file.write_all(document.as_bytes())?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, destination)
+        // Windows rename does not replace an existing destination. The write
+        // remains crash-safe in its temporary sibling; replacement there is
+        // necessarily remove-then-rename rather than Unix's atomic rename.
+        #[cfg(windows)]
+        if destination.exists() {
+            fs::remove_file(destination)?;
+        }
+        fs::rename(&temporary, destination)?;
+        #[cfg(unix)]
+        fs::File::open(destination.parent().unwrap_or(Path::new(".")))?.sync_all()?;
+        Ok(())
     })();
     if result.is_err() && created {
         let _ = fs::remove_file(&temporary);
@@ -184,7 +199,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::write_output;
+    use super::{temporary_path, write_output};
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -212,5 +227,21 @@ mod tests {
         write_output(&destination, "new").expect("replace output");
         assert_eq!(fs::read_to_string(&destination).expect("new output"), "new");
         fs::remove_dir_all(directory).expect("remove temporary directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_path_keeps_non_utf8_destination_names_distinct() {
+        use std::{
+            ffi::OsString,
+            os::unix::ffi::{OsStrExt, OsStringExt},
+        };
+
+        let directory = PathBuf::from("qdocco-test-output");
+        let destination = directory.join(OsString::from_vec(b"document-\xff.html".to_vec()));
+        let temporary = temporary_path(&destination);
+        let file_name = temporary.file_name().expect("temporary file name");
+        assert!(file_name.as_bytes().contains(&0xff));
+        assert_ne!(temporary, destination);
     }
 }
