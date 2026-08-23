@@ -34,6 +34,7 @@
 ## # line-comment अस्ति; ### … ### non-nesting block-comment layout तथा parse पूर्वं त्यज्यते।
 ## Unicode XID-नामानि संयोजक-चिह्नानि गृह्णन्ति, अतः स्थित इत्यादि नाम executable अस्ति।
 ## yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
+## ! strict-Bool not-पर्यायः अस्ति; != strict-असाम्यमेव तिष्ठति।
 ## chained-comparison मध्ये मध्य-मूल्य एकवारं, पूर्व-false चेत् short-circuit भवति।
 ## सामान्य-library साधारण-function रूपेण print, len, type, range, str, keys, values, join, split, assert ददाति।
 ## कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।

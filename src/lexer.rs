@@ -36,6 +36,7 @@ pub(crate) enum Token {
     And,
     Or,
     Not,
+    Bang,
     Plus,
     PlusPlus,
     Minus,
@@ -716,7 +717,7 @@ fn lex_line(
                     chars.next();
                     out.push(Token::NotEq)
                 } else {
-                    return Err(Error::parse("expected '=' after '!'").at_line(line_number));
+                    out.push(Token::Bang)
                 }
             }
             '<' => {
@@ -1016,5 +1017,18 @@ mod tests {
         );
         assert!(!tokens.contains(&Token::Indent));
         assert!(!tokens.contains(&Token::Dedent));
+    }
+
+    #[test]
+    fn bang_is_distinct_from_not_and_not_equal() {
+        let tokens = lex("!value != other").unwrap();
+        assert!(tokens.contains(&Token::Bang));
+        assert!(tokens.contains(&Token::NotEq));
+        assert!(!tokens.windows(2).any(|pair| {
+            matches!(
+                pair,
+                [Token::Bang, Token::NotEq] | [Token::Not, Token::NotEq]
+            )
+        }));
     }
 }
