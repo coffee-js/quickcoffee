@@ -269,7 +269,7 @@ impl fmt::Display for ErrorKind {
     }
 }
 /// A structured error suitable for CLI display or host-side branching.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Error {
     kind: ErrorKind,
     message: String,
@@ -281,6 +281,16 @@ pub struct Error {
 struct VerificationSite {
     chunk: Option<usize>,
     instruction: usize,
+}
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field("message", &self.message)
+            .field("labels", &self.labels)
+            .field("resource_limit", &self.resource_limit)
+            .finish()
+    }
 }
 impl Error {
     pub(crate) fn parse(m: impl Into<String>) -> Self {
