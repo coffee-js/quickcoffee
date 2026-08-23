@@ -47,7 +47,7 @@ nil-सुरक्षित suffix CoffeeScript-रीत्या `record?.nam
 
 स एव collector CoffeeScript-postfix-comprehension अपि स्वीकरोति: `value * 2 for value in items`, अथवा `[value * 2 for value in items]`। brackets केवलं comprehension-सीमा, अतिरिक्त nested-array न; `by`, `when`, map, pattern, `break`, `continue` prefix-रूपस्य नियमैः चलन्ति।
 
-पूर्णाङ्क-range `[1..3]` अन्तं गृह्णाति, अतः `[1, 2, 3]` भवति; `[1...3]` अन्तं न गृह्णाति, अतः `[1, 2]` भवति। सीमा finite integer भवेत्।
+पूर्णाङ्क-range `[1..3]` अन्तं गृह्णाति, अतः `[1, 2, 3]` भवति; `[1...3]` अन्तं न गृह्णाति, अतः `[1, 2]` भवति; अधोमुख-range `[3..1]` `[3, 2, 1]` भवति। सीमा finite integer भवेत्।
 
 postfix `value?` केवलं non-nil परीक्षते: `nil?` false, `false?` तथा `0?` true; unbound-name-error न गोपयति, `left ? right` fallback अपि न।
 

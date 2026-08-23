@@ -323,8 +323,13 @@ impl Parser {
                             }
                             break;
                         }
-                        let key = match self.next() {
-                            Token::Ident(key) => key,
+                        let (key, literal_key) = match self.next() {
+                            Token::Ident(key) => (key, false),
+                            Token::String(key, interpolate)
+                                if !interpolate || !key.contains("#{") =>
+                            {
+                                (key, true)
+                            }
                             _ => {
                                 self.at = saved;
                                 return None;
@@ -336,6 +341,9 @@ impl Parser {
                                 return None;
                             };
                             self.pattern_default(pattern).ok()?
+                        } else if literal_key {
+                            self.at = saved;
+                            return None;
                         } else if key == "_" {
                             self.pattern_default(Pattern::Ignore).ok()?
                         } else {

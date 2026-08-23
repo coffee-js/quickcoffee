@@ -39,6 +39,7 @@
 <p>return expression केवलं वर्तमान-कार्यं समाप्तं करोति; केवलः return nil फलति, loop शुद्धीकरोति, finally च चलयति।</p>
 <p>parameter strict array/map-pattern गृह्णाति; default तथा rest केवलं name भवतः।</p>
 <p>पूर्णाङ्क-range `[1..3]` अन्तं गृह्णाति; `[1...3]` अन्तं न गृह्णाति।</p>
+<p>Range अधोमुखोऽपि भवति: `[3..1]` `[3, 2, 1]` ददाति, `[3...1]` `[3, 2]` ददाति।</p>
 <p>array-slice a[start..end] अन्तं गृह्णाति, a[start...end] अन्तं न गृह्णाति; सीमा finite integer array-अन्तर्गतौ, negative अन्तात्, nil-safe slice nil-receiver मध्ये सीमौ न मूल्यते।</p>
 <p>nil-विशेष-fallback left ? right इति; false तथा zero न परिवर्तेते।</p>
 <p>postfix value? non-nil एव परीक्षते: nil? false, false? तथा 0? true; unbound-name-error न गोप्यते।</p>
