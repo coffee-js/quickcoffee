@@ -120,14 +120,14 @@ impl Chunk {
             .collect()
     }
     /// Returns a deterministic content fingerprint for cache keys and diagnostics.
+    ///
+    /// The encoding is explicit rather than based on `Debug` formatting, so a
+    /// Rust toolchain changing its human-readable representation cannot silently
+    /// invalidate cache keys.
     pub fn fingerprint(&self) -> u64 {
-        let mut hash = 0xcbf29ce484222325u64;
-        let representation = format!("{:?}\n{:?}", self.constants, self.code);
-        for byte in representation.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash
+        let mut encoder = FingerprintEncoder::new();
+        encoder.chunk(self);
+        encoder.finish()
     }
     pub fn verify(&self) -> Result<(), Error> {
         if self.code.is_empty() {
@@ -379,6 +379,322 @@ impl Chunk {
             }
         }
         Ok(())
+    }
+}
+
+struct FingerprintEncoder {
+    hash: u64,
+}
+
+impl FingerprintEncoder {
+    fn new() -> Self {
+        Self {
+            hash: 0xcbf29ce484222325,
+        }
+    }
+    fn finish(self) -> u64 {
+        self.hash
+    }
+    fn byte(&mut self, byte: u8) {
+        self.hash ^= u64::from(byte);
+        self.hash = self.hash.wrapping_mul(0x100000001b3);
+    }
+    fn tag(&mut self, tag: u8) {
+        self.byte(tag);
+    }
+    fn u64(&mut self, value: u64) {
+        for byte in value.to_le_bytes() {
+            self.byte(byte);
+        }
+    }
+    fn i32(&mut self, value: i32) {
+        for byte in value.to_le_bytes() {
+            self.byte(byte);
+        }
+    }
+    fn bool(&mut self, value: bool) {
+        self.byte(u8::from(value));
+    }
+    fn string(&mut self, value: &str) {
+        self.u64(value.len() as u64);
+        for byte in value.as_bytes() {
+            self.byte(*byte);
+        }
+    }
+    fn chunk(&mut self, chunk: &Chunk) {
+        self.tag(0x01);
+        self.u64(chunk.constants.len() as u64);
+        for constant in &chunk.constants {
+            self.constant(constant);
+        }
+        self.u64(chunk.code.len() as u64);
+        for instruction in &chunk.code {
+            self.instruction(instruction);
+        }
+    }
+    fn constant(&mut self, constant: &Constant) {
+        match constant {
+            Constant::Value(value) => {
+                self.tag(0x10);
+                self.value(value);
+            }
+            Constant::Function {
+                params,
+                required,
+                rest,
+                chunk,
+            } => {
+                self.tag(0x11);
+                self.u64(params.len() as u64);
+                for pattern in params {
+                    self.pattern(pattern);
+                }
+                self.u64(*required as u64);
+                self.option_string(rest.as_deref());
+                self.chunk(chunk);
+            }
+        }
+    }
+    fn option_string(&mut self, value: Option<&str>) {
+        match value {
+            Some(value) => {
+                self.tag(1);
+                self.string(value);
+            }
+            None => self.tag(0),
+        }
+    }
+    fn value(&mut self, value: &Value) {
+        match value {
+            Value::Nil => self.tag(0x20),
+            Value::Bool(value) => {
+                self.tag(0x21);
+                self.bool(*value);
+            }
+            Value::Number(value) => {
+                self.tag(0x22);
+                self.u64(value.to_bits());
+            }
+            Value::String(value) => {
+                self.tag(0x23);
+                self.string(value);
+            }
+            Value::Array(values) => {
+                self.tag(0x24);
+                self.u64(values.len() as u64);
+                for value in values.iter() {
+                    self.value(value);
+                }
+            }
+            Value::Map(values) => {
+                self.tag(0x25);
+                self.u64(values.len() as u64);
+                for (key, value) in values.iter() {
+                    self.string(key);
+                    self.value(value);
+                }
+            }
+            // Native/opaque functions cannot occur in compiler constants. Keep
+            // their fingerprint representation deterministic if a host builds a
+            // custom Chunk containing one.
+            Value::Function(_) => self.tag(0x26),
+        }
+    }
+    fn pattern(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Ignore => self.tag(0x30),
+            Pattern::Bind(name) => {
+                self.tag(0x31);
+                self.string(name);
+            }
+            Pattern::Rest(name) => {
+                self.tag(0x32);
+                self.string(name);
+            }
+            Pattern::Default { pattern, default } => {
+                self.tag(0x33);
+                self.pattern(pattern);
+                self.chunk(default);
+            }
+            Pattern::Array(patterns) => {
+                self.tag(0x34);
+                self.u64(patterns.len() as u64);
+                for pattern in patterns {
+                    self.pattern(pattern);
+                }
+            }
+            Pattern::Map(fields) => {
+                self.tag(0x35);
+                self.u64(fields.len() as u64);
+                for (key, pattern) in fields {
+                    self.string(key);
+                    self.pattern(pattern);
+                }
+            }
+            Pattern::MapRest { fields, rest } => {
+                self.tag(0x36);
+                self.u64(fields.len() as u64);
+                for (key, pattern) in fields {
+                    self.string(key);
+                    self.pattern(pattern);
+                }
+                self.string(rest);
+            }
+        }
+    }
+    fn instruction(&mut self, instruction: &Instruction) {
+        macro_rules! simple {
+            ($tag:expr) => {{
+                self.tag($tag);
+            }};
+        }
+        match instruction {
+            Instruction::Constant(index) => {
+                self.tag(0x40);
+                self.u64(*index as u64);
+            }
+            Instruction::Load(name) => {
+                self.tag(0x41);
+                self.string(name);
+            }
+            Instruction::LoadOrNil(name) => {
+                self.tag(0x42);
+                self.string(name);
+            }
+            Instruction::Store(name) => {
+                self.tag(0x43);
+                self.string(name);
+            }
+            Instruction::Destructure(pattern) => {
+                self.tag(0x44);
+                self.pattern(pattern);
+            }
+            Instruction::Pop => simple!(0x45),
+            Instruction::Dup => simple!(0x46),
+            Instruction::Swap => simple!(0x47),
+            Instruction::Rotate3 => simple!(0x48),
+            Instruction::Neg => simple!(0x49),
+            Instruction::Not => simple!(0x4a),
+            Instruction::BitNot => simple!(0x4b),
+            Instruction::Exists => simple!(0x4c),
+            Instruction::Add => simple!(0x4d),
+            Instruction::Sub => simple!(0x4e),
+            Instruction::Mul => simple!(0x4f),
+            Instruction::Div => simple!(0x50),
+            Instruction::FloorDiv => simple!(0x51),
+            Instruction::Rem => simple!(0x52),
+            Instruction::Modulo => simple!(0x53),
+            Instruction::BitAnd => simple!(0x54),
+            Instruction::BitOr => simple!(0x55),
+            Instruction::BitXor => simple!(0x56),
+            Instruction::ShiftLeft => simple!(0x57),
+            Instruction::ShiftRight => simple!(0x58),
+            Instruction::ShiftRightUnsigned => simple!(0x59),
+            Instruction::Pow => simple!(0x5a),
+            Instruction::Eq => simple!(0x5b),
+            Instruction::Ne => simple!(0x5c),
+            Instruction::Lt => simple!(0x5d),
+            Instruction::Le => simple!(0x5e),
+            Instruction::Gt => simple!(0x5f),
+            Instruction::Ge => simple!(0x60),
+            Instruction::Contains => simple!(0x61),
+            Instruction::HasKey => simple!(0x62),
+            Instruction::Jump(offset) => {
+                self.tag(0x63);
+                self.i32(*offset);
+            }
+            Instruction::JumpIfFalse(offset) => {
+                self.tag(0x64);
+                self.i32(*offset);
+            }
+            Instruction::JumpIfNil(offset) => {
+                self.tag(0x65);
+                self.i32(*offset);
+            }
+            Instruction::Try { catch, name } => {
+                self.tag(0x66);
+                self.i32(*catch);
+                self.string(name);
+            }
+            Instruction::EndTry => simple!(0x67),
+            Instruction::Throw => simple!(0x68),
+            Instruction::IterStartEnumerable => simple!(0x69),
+            Instruction::IterStartMap => simple!(0x6a),
+            Instruction::IterNext { patterns, end } => {
+                self.tag(0x6b);
+                self.u64(patterns.len() as u64);
+                for pattern in patterns {
+                    self.pattern(pattern);
+                }
+                self.i32(*end);
+            }
+            Instruction::IterEnd => simple!(0x6c),
+            Instruction::MakeArray(count) => {
+                self.tag(0x6d);
+                self.u64(*count as u64);
+            }
+            Instruction::Append => simple!(0x6e),
+            Instruction::MergeArrays(count) => {
+                self.tag(0x6f);
+                self.u64(*count as u64);
+            }
+            Instruction::MergeMaps(count) => {
+                self.tag(0x70);
+                self.u64(*count as u64);
+            }
+            Instruction::MakeRange(inclusive) => {
+                self.tag(0x71);
+                self.bool(*inclusive);
+            }
+            Instruction::MakeMap(keys) => {
+                self.tag(0x72);
+                self.u64(keys.len() as u64);
+                for key in keys {
+                    self.string(key);
+                }
+            }
+            Instruction::Stringify => simple!(0x73),
+            Instruction::Concat(count) => {
+                self.tag(0x74);
+                self.u64(*count as u64);
+            }
+            Instruction::Index => simple!(0x75),
+            Instruction::Slice(inclusive) => {
+                self.tag(0x76);
+                self.bool(*inclusive);
+            }
+            Instruction::Member(name) => {
+                self.tag(0x77);
+                self.string(name);
+            }
+            Instruction::Call(count) => {
+                self.tag(0x78);
+                self.u64(*count as u64);
+            }
+            Instruction::CallSpread => simple!(0x79),
+            Instruction::MakeFunction(index) => {
+                self.tag(0x7a);
+                self.u64(*index as u64);
+            }
+            Instruction::Return => simple!(0x7b),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FingerprintEncoder;
+
+    #[test]
+    fn fingerprint_i32_uses_four_little_endian_bytes() {
+        let mut fingerprint = FingerprintEncoder::new();
+        fingerprint.i32(-2);
+
+        let mut expected = FingerprintEncoder::new();
+        for byte in (-2_i32).to_le_bytes() {
+            expected.byte(byte);
+        }
+        assert_eq!(fingerprint.finish(), expected.finish());
     }
 }
 

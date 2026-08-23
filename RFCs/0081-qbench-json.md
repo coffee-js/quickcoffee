@@ -9,7 +9,7 @@
 
 ## CLI 契约
 
-`qbench [--iterations N] [--json]` 对内建负载逐一测量：未验证源码编译、共享 `Program` 的验证调用、以及每轮新 `Context` 的执行。默认 `N=100`，必须为正整数；每个负载在计时循环内都验证最终值与预期值一致，语义错误直接使命令失败。benchmark 使用 `Engine::compile_unverified` 分离编译与验证计时；普通嵌入方应使用会自动验证的编译 API。
+`qbench [--iterations N] [--json]` 对内建负载逐一测量：源码编译、已验证共享 `Program` 的验证调用、以及每轮新 `Context` 的执行。默认 `N=100`，必须为正整数；每个负载在计时循环内都验证最终值与预期值一致，语义错误直接使命令失败。
 
 每个负载输出一条记录，字段为 `name`、`iterations`、`expected`、`compile_ns`、`verify_ns`、`execute_ns`。`--json` 输出一行一个 JSON 对象，适合 CI 逐行采集；默认文本输出为同一字段的空格分隔记录。计时值是本次进程的纳秒总耗时，不作为跨机器性能结论；正式报告仍须按 RFC 0002 记录硬件、工具链、样本和中位数。
 

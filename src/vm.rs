@@ -319,16 +319,6 @@ impl Engine {
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
         compile(source)
     }
-    /// Compiles source without verifying the resulting bytecode.
-    ///
-    /// Callers must invoke [`Chunk::verify`] before executing or sharing the
-    /// chunk. This narrow escape hatch is used by benchmark tooling to keep
-    /// compilation and verification timings separate; normal embedders should
-    /// prefer [`Engine::compile`] or [`Engine::compile_program`].
-    pub fn compile_unverified(&self, source: &str) -> Result<Chunk, Error> {
-        let ast = crate::parser::parse(source)?;
-        crate::bytecode::compile(&ast)
-    }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
         let program: Program = self.compile(source)?.into();

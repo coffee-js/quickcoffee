@@ -21,6 +21,7 @@
 ## Program::fingerprint होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
 ## qcoffee --fingerprint FILE सत्यापित-bytecode-कुञ्जीं षोडश लघु-षोडशाधारीय-अङ्कैः दर्शयति, लेखं न चालयति।
 ## qbench --json प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; --iterations नमूना-सङ्ख्यां नियच्छति।
+## बीजाङ्काः Rust-debug-रूपं विना स्पष्ट-नियत-bytecode-संकेतेन निर्मीयन्ते, अतः साधन-रूपपरिवर्तनं सञ्चय-कुञ्जीं न परिवर्तयति।
 ## Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
 ## -- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।
 ## JavaScript नास्ति: prototype-chain, this, eval, अन्तःस्थ-JavaScript च न सन्ति।
