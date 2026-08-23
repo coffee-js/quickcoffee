@@ -1059,6 +1059,11 @@ impl Compiler {
                 let compiled = Self::compile_pattern(pattern)?;
                 self.emit(Instruction::Destructure(compiled));
             }
+            Stmt::Import(_, _) | Stmt::ExportAssign(_, _) | Stmt::ExportNames(_) => {
+                return Err(Error::verify(
+                    "module directives require Engine::compile_module",
+                ));
+            }
             Stmt::Expr(e) => self.expr(e)?,
         }
         Ok(())

@@ -594,6 +594,22 @@ impl Context {
         self.last_execution = vm.stats();
         result
     }
+    pub(crate) fn module_child(&self) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            global: env(Some(self.global.clone())),
+            fuel: self.fuel,
+            max_call_depth: self.max_call_depth,
+            cancellation: self.cancellation.clone(),
+            last_execution: ExecutionStats::default(),
+        }
+    }
+    pub(crate) fn get_local(&self, name: &str) -> Option<Value> {
+        self.global.borrow().values.get(name).cloned()
+    }
+    pub(crate) fn set_execution_stats(&mut self, stats: ExecutionStats) {
+        self.last_execution = stats;
+    }
     fn install_builtins(&mut self) {
         self.add_native("print", |xs| {
             for (i, x) in xs.iter().enumerate() {
