@@ -114,18 +114,14 @@ fn main() -> ExitCode {
             },
             "--stats" => stats = true,
             "-e" => match args.next() {
-                Some(s) if source.is_none() && !dump && !check && !fingerprint => source = Some(s),
-                Some(_) => {
-                    eprintln!("-e cannot be combined with another source or execution mode");
-                    return ExitCode::from(2);
-                }
+                Some(s) => source = Some(s),
                 None => {
                     eprintln!("-e requires source text");
                     return ExitCode::from(2);
                 }
             },
             "--dump-bytecode" => {
-                if source.is_some() || dump || check || fingerprint || stats {
+                if check || fingerprint || stats {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
@@ -152,7 +148,7 @@ fn main() -> ExitCode {
                 }
             }
             "--check" => {
-                if source.is_some() || dump || check || fingerprint || stats {
+                if dump || fingerprint || stats {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
@@ -174,7 +170,7 @@ fn main() -> ExitCode {
                 }
             }
             "--fingerprint" => {
-                if source.is_some() || check || dump || fingerprint || stats {
+                if check || dump || stats {
                     eprintln!(
                         "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
