@@ -118,7 +118,8 @@ fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
     assert_eq!(cx.last_execution(), failed);
 
     let mut exhausted = cx.with_fuel(5);
-    assert!(exhausted.eval("while true then 1").is_err());
+    let error = exhausted.eval("while true then 1").unwrap_err();
+    assert!(error.message().contains("execution fuel exhausted"));
     let fuel = exhausted.last_execution();
     assert_eq!(fuel.instructions, 5);
     assert_eq!(fuel.fuel_remaining, 0);

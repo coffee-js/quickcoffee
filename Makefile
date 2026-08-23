@@ -1,10 +1,14 @@
-.PHONY: fmt test clippy api-doc docs doc-check check bench qbench
+.PHONY: fmt test examples clippy api-doc docs doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
 
 test:
 	cargo test
+
+examples:
+	cargo test --examples
+	test "$$(cargo run --quiet --example embed)" = "84"
 
 clippy:
 	cargo clippy --all-targets -- -D warnings
@@ -26,7 +30,7 @@ docs: doc-check
 	cargo run --quiet --bin qdocco -- manuals/manual.latin.qc -o docs/manual.latin.html
 	cargo run --quiet --bin qdocco -- manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.html
 
-check: fmt test clippy api-doc doc-check
+check: fmt test examples clippy api-doc doc-check
 
 bench:
 	cargo bench --bench core

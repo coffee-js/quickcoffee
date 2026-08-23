@@ -136,3 +136,5 @@ let value = cx.eval("host_values[0] + host_values[1]")?;
 单独赋值行（`record =`）后可缩进书写映射；嵌套的 `key: value` 条目会成为无原型映射，普通赋值续行不受影响。
 
 同一逻辑行的调用可省略括号：`implicit_answer = implicit_add 20, 22`；比较或跨布局边界时仍可使用显式括号。
+
+`qtest --json` 为每个测试文件输出稳定 JSON，`qtest --tap` 输出 TAP 13；`qcoffee --fingerprint FILE` 在不执行文件时输出规范化字节码缓存键；`qbench --json` 输出带语义护栏的编译、验证、执行计时；`qdocco --markdown` 生成可审阅的文学编程 Markdown。嵌入方可用 `Context::set_fuel` 调整复用上下文，并运行 `cargo run --example embed` 查看完整宿主示例。

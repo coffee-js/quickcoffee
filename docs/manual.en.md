@@ -114,3 +114,5 @@ Multiline arrays and maps may omit commas at line boundaries; calls and ordinary
 An indented map may follow a standalone assignment (`record =`); nested `key: value` entries become a prototype-free map without changing ordinary assignment continuations.
 
 Calls may omit parentheses on one logical line: `implicit_answer = implicit_add 20, 22`; explicit parentheses remain available for unambiguous comparisons and layout boundaries.
+
+`qtest --json` emits one stable JSON record per test file, while `qtest --tap` emits TAP 13 records. `qcoffee --fingerprint FILE` prints a canonical verified-bytecode cache key without executing the file. `qbench --json` reports guarded compile, verify, and execute timings; `qdocco --markdown` writes reviewable literate Markdown. Embedding hosts can adjust a reused context with `Context::set_fuel` and run the complete host example with `cargo run --example embed`.
