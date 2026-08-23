@@ -4,6 +4,7 @@ QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本
 
 当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0117-qcoffee-json-output.md](RFCs/0117-qcoffee-json-output.md)。
 构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
+后续大需求、里程碑和拆分规则见 [ROADMAP.md](ROADMAP.md)。
 
 ```coffee
 square = (x) -> x * x
