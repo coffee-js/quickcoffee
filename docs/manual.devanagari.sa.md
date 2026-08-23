@@ -17,7 +17,7 @@ strict अथवा numeric-comparison श्रृङ्खला भवति:
 `qcoffee -e "print(range(1, 4))"` प्रयुञ्जीत। `qcoffee --check FILE` स्रोतं compile-verify करोति, न चालयति; `--fuel N` निर्देश-संख्यां सीमयति। `print`, `len`, `type`, `range`, `str`, `keys`, `values`, `join`, `split`, `assert` मानक-सहायकाः; `range(a, b)` मध्ये `b` न गृह्यते।
 
 `qcoffee -` मानक-input तः स्रोतः पठति; `qcoffee --dump-bytecode -` तमेव स्रोतं चालनं विना विच्छिनत्ति।
-`qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; `--check` अथवा `--dump-bytecode` सह न योज्यम्।
+`qcoffee --stats` instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
 
 `qcoffee --interactive` (वा `-i`) पङ्क्तिषु एकं Context धारयति; `:help` आदेशान् दर्शयति, `:quit`/`:exit` सत्रं समापयतः। pipe-input मध्ये prompt न भवति।
 `for character, index in 'a☕中' then index` `[0, 1, 2]` ददाति; string Unicode-scalar-क्रमेण चलति, `by` न स्वीकरोति।

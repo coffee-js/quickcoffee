@@ -10,7 +10,7 @@
 ## ! 同 not，严反 Bool；!= 仍严不等。
 ## 严等与数较可相连，中项惟求一遍，前否则后不求。
 ## qcoffee - 者，自标准输入读其文也。
-## qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改。
+## qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
 ## qcoffee --check FILE 者，析编验其文而不行也。
 ## qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
 ## qcoffee --interactive --stats 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。

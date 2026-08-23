@@ -22,7 +22,7 @@ qcoffee --dump-bytecode program.qc
 ```
 
 `qcoffee -` 从标准输入读取源码，便于接入管道；`qcoffee --check FILE`（FILE 可为 `-`）只解析、编译和验证而不执行；`qcoffee --dump-bytecode -` 则反汇编标准输入而不执行。
-`qcoffee --stats` 将指令数与剩余 fuel 写入标准错误，同时保持程序标准输出不变；不可与 `--check` 或 `--dump-bytecode` 合用。
+`qcoffee --stats` 将指令数与剩余 fuel 写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
 
 `qcoffee --interactive`（或 `-i`）在输入行之间保持同一 Context；`:help` 列出命令，`:quit`/`:exit` 退出会话。管道输入不输出提示符。
 交互模式加 `--stats` 时，仅实际执行或运行时失败的非空输入行把指令数与剩余 fuel 写入标准错误；解析、验证错误不生成新记录。

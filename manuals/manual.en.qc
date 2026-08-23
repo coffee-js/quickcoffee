@@ -2,7 +2,7 @@
 ##
 ## Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 ## qcoffee - reads a QuickCoffee program from standard input.
-## qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout.
+## qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
