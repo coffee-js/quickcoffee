@@ -1032,7 +1032,19 @@ fn do_iifes_forward_same_named_outer_arguments() {
         "[a, b]"
     );
     assert_eq!(eval("do -> 42").as_number(), Some(42.));
-    assert!(Context::new().eval("do (value = 1) -> value").is_err());
+    for source in [
+        "do (value = 1) -> value",
+        "do (values...) -> values",
+        "do ([value]) -> value",
+    ] {
+        let error = compile(source).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Parse);
+        assert!(
+            error
+                .message()
+                .contains("requires plain required name parameters")
+        );
+    }
 }
 #[test]
 fn for_loop_bindings_support_strict_recursive_patterns_atomically() {
