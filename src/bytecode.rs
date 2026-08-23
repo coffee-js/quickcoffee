@@ -4,6 +4,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, VecDeque},
+    fmt::Write,
     rc::Rc,
 };
 
@@ -122,11 +123,11 @@ pub enum Instruction {
 impl Chunk {
     /// Returns a human-readable instruction listing with stable program counters.
     pub fn disassemble(&self) -> String {
-        self.code
-            .iter()
-            .enumerate()
-            .map(|(i, op)| format!("{i:04} {op:?}\n"))
-            .collect()
+        let mut output = String::new();
+        for (i, op) in self.code.iter().enumerate() {
+            writeln!(&mut output, "{i:04} {op:?}").expect("writing to a String cannot fail");
+        }
+        output
     }
     /// Returns a deterministic content fingerprint for cache keys and diagnostics.
     ///
@@ -973,7 +974,7 @@ struct ReturnCleanup {
     finalizer: Option<Expr>,
 }
 impl Compiler {
-    fn compile_pattern(&mut self, pattern: &AstPattern) -> Result<Pattern, Error> {
+    fn compile_pattern(pattern: &AstPattern) -> Result<Pattern, Error> {
         Ok(match pattern {
             AstPattern::Ignore => Pattern::Ignore,
             AstPattern::Bind(name) => Pattern::Bind(name.clone()),
@@ -981,19 +982,19 @@ impl Compiler {
             AstPattern::Array(items) => Pattern::Array(
                 items
                     .iter()
-                    .map(|p| self.compile_pattern(p))
+                    .map(Self::compile_pattern)
                     .collect::<Result<_, _>>()?,
             ),
             AstPattern::Map(fields) => Pattern::Map(
                 fields
                     .iter()
-                    .map(|(key, p)| Ok((key.clone(), self.compile_pattern(p)?)))
+                    .map(|(key, p)| Ok((key.clone(), Self::compile_pattern(p)?)))
                     .collect::<Result<_, Error>>()?,
             ),
             AstPattern::MapRest(fields, rest) => Pattern::MapRest {
                 fields: fields
                     .iter()
-                    .map(|(key, p)| Ok((key.clone(), self.compile_pattern(p)?)))
+                    .map(|(key, p)| Ok((key.clone(), Self::compile_pattern(p)?)))
                     .collect::<Result<_, Error>>()?,
                 rest: rest.clone(),
             },
@@ -1002,7 +1003,7 @@ impl Compiler {
                 compiler.expr(expr)?;
                 compiler.emit(Instruction::Return);
                 Pattern::Default {
-                    pattern: Box::new(self.compile_pattern(inner)?),
+                    pattern: Box::new(Self::compile_pattern(inner)?),
                     default: Rc::new(compiler.chunk),
                 }
             }
@@ -1055,7 +1056,7 @@ impl Compiler {
             }
             Stmt::Destructure(pattern, e) => {
                 self.expr(e)?;
-                let compiled = self.compile_pattern(pattern)?;
+                let compiled = Self::compile_pattern(pattern)?;
                 self.emit(Instruction::Destructure(compiled));
             }
             Stmt::Expr(e) => self.expr(e)?,
@@ -1085,7 +1086,7 @@ impl Compiler {
         let start = self.chunk.code.len();
         let compiled_patterns = patterns
             .iter()
-            .map(|p| self.compile_pattern(p))
+            .map(Self::compile_pattern)
             .collect::<Result<_, _>>()?;
         let exit = self.emit(Instruction::IterNext {
             patterns: compiled_patterns,
@@ -1175,7 +1176,7 @@ impl Compiler {
             }
             Expr::Destructure(pattern, value) => {
                 self.expr(value)?;
-                let compiled = self.compile_pattern(pattern)?;
+                let compiled = Self::compile_pattern(pattern)?;
                 self.emit(Instruction::Destructure(compiled));
             }
             Expr::Array(items) => {
@@ -1389,7 +1390,7 @@ impl Compiler {
                 let start = self.chunk.code.len();
                 let compiled_patterns = patterns
                     .iter()
-                    .map(|p| self.compile_pattern(p))
+                    .map(Self::compile_pattern)
                     .collect::<Result<_, _>>()?;
                 let exit = self.emit(Instruction::IterNext {
                     patterns: compiled_patterns,
@@ -1678,7 +1679,7 @@ impl Compiler {
         let idx = self.chunk.constants.len();
         let compiled_params = params
             .iter()
-            .map(|param| self.compile_pattern(&param.pattern))
+            .map(|param| Self::compile_pattern(&param.pattern))
             .collect::<Result<_, _>>()?;
         self.chunk.constants.push(Constant::Function {
             params: compiled_params,

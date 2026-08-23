@@ -1,10 +1,28 @@
 use std::{
     fs,
     io::Write,
+    path::PathBuf,
     process::{Command, Stdio},
 };
 fn bin(name: &str) -> String {
-    std::env::var(format!("CARGO_BIN_EXE_{name}")).expect("Cargo supplies bin path")
+    if let Ok(path) = std::env::var(format!("CARGO_BIN_EXE_{name}")) {
+        return path;
+    }
+    let test_binary = std::env::current_exe().expect("test binary path is available");
+    let target_debug = test_binary
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("test binary lives below target/debug/deps");
+    let mut candidate = PathBuf::from(target_debug);
+    candidate.push(name);
+    if cfg!(windows) {
+        candidate.set_extension("exe");
+    }
+    assert!(
+        candidate.is_file(),
+        "Cargo binary path is unavailable: {candidate:?}"
+    );
+    candidate.to_string_lossy().into_owned()
 }
 #[test]
 fn qdocco_renders_escaped_source_and_checks() {
@@ -155,17 +173,15 @@ fn qtest_reports_success_and_failure() {
     assert!(directory.status.success());
     let directory_stdout = String::from_utf8_lossy(&directory.stdout);
     for fixture in [
-        "arithmetic.qc",
-        "collections.qc",
-        "comprehension.qc",
-        "control-flow.qc",
-        "function.qc",
-    ]
-    .map(|name| std::path::Path::new("tests/scripts").join(name))
-    {
-        let fixture = fixture.display().to_string();
+        "tests/scripts/arithmetic.qc",
+        "tests/scripts/collections.qc",
+        "tests/scripts/comprehension.qc",
+        "tests/scripts/control-flow.qc",
+        "tests/scripts/function.qc",
+        "tests/scripts/stdlib.qc",
+    ] {
         assert!(
-            directory_stdout.contains(&fixture),
+            directory_stdout.contains(fixture),
             "qtest skipped {fixture}"
         );
     }
@@ -592,6 +608,34 @@ fn qbench_json_is_guarded_and_machine_readable() {
         .output()
         .unwrap();
     assert_eq!(invalid_repeat.status.code(), Some(2));
+    let listed = Command::new(bin("qbench")).arg("--list").output().unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .collect::<Vec<_>>(),
+        expected_names
+    );
+    assert!(listed.stderr.is_empty());
+    let selected = Command::new(bin("qbench"))
+        .args(["--only", "map-spread", "--json", "--iterations", "1"])
+        .output()
+        .unwrap();
+    assert!(selected.status.success());
+    let selected_stdout = String::from_utf8_lossy(&selected.stdout);
+    assert_eq!(selected_stdout.lines().count(), 1);
+    assert!(selected_stdout.contains("\"name\":\"map-spread\""));
+    let unknown = Command::new(bin("qbench"))
+        .args(["--only", "missing-workload"])
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("use --list"));
+    let list_conflict = Command::new(bin("qbench"))
+        .args(["--list", "--only", "map-spread"])
+        .output()
+        .unwrap();
+    assert_eq!(list_conflict.status.code(), Some(2));
 }
 #[test]
 fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {

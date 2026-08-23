@@ -4,7 +4,7 @@ Embedding callers may use `Program::fingerprint()` as a deterministic bytecode c
 
 Cargo package metadata links embedding users to the repository, README, license, and docs.rs API.
 
-The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. `qcoffee --fingerprint FILE` prints a stable 16-digit hexadecimal key for verified bytecode without executing it; the key uses canonical encoding rather than Rust debug text. `qbench --json` emits guarded compile/verify/execute timing records, and `qdocco --markdown` renders literate notes, fenced source, and final values for review. Embedders can adjust a reused context with `Context::set_fuel` and inspect `Context::fuel`; `cargo run --example embed` is a compiled host integration example. Execution statistics remain on stderr with `--stats`.
+The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. `qcoffee --fingerprint FILE` prints a stable 16-digit hexadecimal key for verified bytecode without executing it; the key uses canonical encoding rather than Rust debug text. `qbench --json` emits guarded compile/verify/execute timing records; `qbench --list` enumerates workloads and `qbench --only NAME` runs one selected workload, while the default remains the complete suite. `qdocco --markdown` renders literate notes, fenced source, and final values for review. Embedders can adjust a reused context with `Context::set_fuel` and inspect `Context::fuel`; `cargo run --example embed` is a compiled host integration example. Execution statistics remain on stderr with `--stats`.
 
 Integer ranges are ascending or descending: `[2..4]` is `[2, 3, 4]`, `[4..2]` is `[4, 3, 2]`, and exclusive forms omit the end (`[4...2]` is `[4, 3]`). Bounds must be finite integers and oversized ranges are rejected.
 
@@ -17,6 +17,8 @@ Map literals support left-to-right spread (`config = {...defaults, theme: 'dark'
 Destructuring array and map members may use dynamic defaults (`[first = 1, second = first + 1] = [nil]`); missing or `nil` values evaluate defaults in the current lexical environment, with strict atomic matching.
 
 This is the English index of RFC 0001. An omitted CoffeeScript 2016 feature is deliberately unsupported, not silently compatible.
+
+The standard library is ordinary functions: `print`, `len`, `type`, `range`, `str`, `abs`, `sum`, `min`, `max`, `keys`, `values`, `join`, `split`, and `assert`. Numeric aggregators accept one array of finite numbers; `sum([])` is `0`, while `min([])` and `max([])` are errors.
 
 Ordinary single- and double-quoted strings decode `\\0`, `\\b`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, quote/backslash escapes, two-digit `\\xNN`, four-digit `\\uNNNN`, and one-to-six-digit `\\u{...}` Unicode escapes. They may span physical lines; a normal newline becomes one space and indentation inside the string is ignored. A single unescaped backslash at the line end removes both the backslash and the newline. Double-quoted multiline strings retain `#{expression}` interpolation, while single-quoted strings remain literal. Triple-quoted heredocs preserve newlines: `"""…"""` interpolates and `'''…'''` is literal; an unclosed delimiter or invalid escape is a lexical error.
 
