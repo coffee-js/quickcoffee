@@ -9,7 +9,7 @@ QuickCoffee मार्गदर्शिका
 ऋण-सूचकाङ्केन क्रमस्य अन्तिमं पदं लभ्यते।
 स्रोतः पठ्यते, सत्यापित-bytecode मध्ये संकल्यते, fuel-सीमया चालयते।
 qcoffee - मानक-input तः QuickCoffee-program पठति।
-qcoffee --stats instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
+qcoffee --stats instruction-संख्या, अवशिष्ट-fuel, name, call, container, iterator, exception-path च standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
 अन्तःस्थ-module नामयुक्त import/export प्रयुङ्क्ते; Engine::compile_module तथा Context::run_module host-ModuleLoader द्वारा एव source गृह्णीतः, module-global गोप्यं fuel च सर्व-graph मध्ये संयुक्तम्।
 qcoffee --check FILE स्रोतं verify करोति, न चालयति।
 qcoffee --interactive (वा -i) एकं Context पङ्क्ति-क्रमेण धारयति; :help दर्शयति, :quit निर्गच्छति।

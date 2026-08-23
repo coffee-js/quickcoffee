@@ -2,7 +2,7 @@
 ##
 ## Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 ## qcoffee - reads a QuickCoffee program from standard input.
-## qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
+## qcoffee --stats writes instruction, remaining-fuel, name, call, container, iterator, and exception-path counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.

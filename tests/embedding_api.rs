@@ -95,6 +95,50 @@ fn public_fuel_and_execution_stats_bound_untrusted_programs() {
 }
 
 #[test]
+fn execution_stats_classify_hot_vm_operations() {
+    let mut context = Context::new();
+    assert_eq!(
+        context.eval("value = 1\nvalue").unwrap().as_number(),
+        Some(1.)
+    );
+    let stats = context.last_execution();
+    assert_eq!(stats.name_loads, 1);
+    assert_eq!(stats.name_stores, 1);
+    assert_eq!(stats.calls, 0);
+
+    assert_eq!(
+        context
+            .eval("item = 1\nlen([item, 2])")
+            .unwrap()
+            .as_number(),
+        Some(2.)
+    );
+    let stats = context.last_execution();
+    assert_eq!(stats.calls, 1);
+    assert_eq!(stats.container_ops, 1);
+
+    assert_eq!(
+        context
+            .eval("sum = 0\nfor value in [1...3] then sum += value\nsum")
+            .unwrap()
+            .as_number(),
+        Some(3.)
+    );
+    assert!(context.last_execution().iterator_ops >= 4);
+
+    assert_eq!(
+        context
+            .eval("try throw 1 catch error then 42")
+            .unwrap()
+            .as_number(),
+        Some(42.)
+    );
+    assert!(context.last_execution().exception_ops >= 2);
+    assert!(context.eval("throw 1").is_err());
+    assert_eq!(context.last_execution().exception_ops, 1);
+}
+
+#[test]
 fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
     let mut context = Context::new().with_fuel(1_000).with_max_call_depth(3);
     assert_eq!(context.max_call_depth(), 3);

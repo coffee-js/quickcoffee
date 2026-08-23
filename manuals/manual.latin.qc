@@ -5,7 +5,7 @@
 ## Indices negativi in seriebus et textu Unicode extremum elementum petunt.
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
-## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
+## qcoffee --stats numeros instructionum, alimenti reliqui, nominum, vocationum, vasorum, iterationum et errorum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 ## Moduli hospitis import/export nominata habent; Engine::compile_module et Context::run_module fontem solum per ModuleLoader hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
 ## qcoffee --check FILE fontem verificat sine cursu.
 ## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.

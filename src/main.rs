@@ -141,8 +141,15 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                 if report_stats {
                     let execution = context.last_execution();
                     eprintln!(
-                        "qcoffee stats: instructions={} fuel_remaining={}",
-                        execution.instructions, execution.fuel_remaining
+                        "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={}",
+                        execution.instructions,
+                        execution.fuel_remaining,
+                        execution.name_loads,
+                        execution.name_stores,
+                        execution.calls,
+                        execution.container_ops,
+                        execution.iterator_ops,
+                        execution.exception_ops
                     );
                 }
                 match result {
@@ -378,8 +385,15 @@ fn main() -> ExitCode {
     if stats {
         let execution = context.last_execution();
         eprintln!(
-            "qcoffee stats: instructions={} fuel_remaining={}",
-            execution.instructions, execution.fuel_remaining
+            "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={}",
+            execution.instructions,
+            execution.fuel_remaining,
+            execution.name_loads,
+            execution.name_stores,
+            execution.calls,
+            execution.container_ops,
+            execution.iterator_ops,
+            execution.exception_ops
         );
     }
     match result {

@@ -10,7 +10,7 @@
 ## ! 同 not，严反 Bool；!= 仍严不等。
 ## 严等与数较可相连，中项惟求一遍，前否则后不求。
 ## qcoffee - 者，自标准输入读其文也。
-## qcoffee --stats 则书所试指令与余燃料于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
+## qcoffee --stats 则书所试指令、余燃料及查名、调用、容器、迭、异常路径之数于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
 ## 嵌入之模块可名 import/export；Engine::compile_module、Context::run_module 惟由宿主 ModuleLoader 得其文，模块全局私有，而全图共其 fuel。
 ## qcoffee --check FILE 者，析编验其文而不行也。
 ## qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
