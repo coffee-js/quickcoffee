@@ -2,7 +2,7 @@
 
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 
-The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. `qcoffee --fingerprint FILE` prints a stable 16-digit hexadecimal key for verified bytecode without executing it; the key uses canonical encoding rather than Rust debug text. `qbench --json` emits guarded compile/verify/execute timing records, and `qdocco --markdown` renders literate notes, fenced source, and final values for review. Embedders can adjust a reused context with `Context::set_fuel` and inspect `Context::fuel`; execution statistics remain on stderr with `--stats`.
+The bundled `qtest --json` runner emits one stable JSON result per file for CI and host integration; `qtest --tap` emits deterministic TAP 13 records. `qcoffee --fingerprint FILE` prints a stable 16-digit hexadecimal key for verified bytecode without executing it; the key uses canonical encoding rather than Rust debug text. `qbench --json` emits guarded compile/verify/execute timing records, and `qdocco --markdown` renders literate notes, fenced source, and final values for review. Embedders can adjust a reused context with `Context::set_fuel` and inspect `Context::fuel`; `cargo run --example embed` is a compiled host integration example. Execution statistics remain on stderr with `--stats`.
 
 Array and Unicode string indexing accepts negative finite integers (`items[-1]`, `'a☕中'[-2]`); out-of-range indices remain errors.
 

@@ -92,3 +92,5 @@ host-त्रुटिः संरचिता: `error.kind()` `ErrorKind::Par
 एकाकी assignment (`record =`) अनन्तरं indentation द्वारा map लिखितुं शक्यते; nested `key: value` prototype-विहीनं भवति, सामान्य continuation न विपर्यस्यते।
 
 एकस्यां logical-line मध्ये call-parenthesis विना अपि शक्यते: `implicit_answer = implicit_add 20, 22`; comparison अथवा layout-boundary मध्ये explicit parenthesis प्रयोजनीया।
+
+`qtest --json` प्रत्येक-परीक्षा-पत्राय स्थिरं JSON लिखति, `qtest --tap` TAP 13 ददाति; `qcoffee --fingerprint FILE` लेखं न चालयित्वा नियत-bytecode-कुञ्जीं दर्शयति; `qbench --json` semantic-रक्षणेन compile, verify, execute कालं मापयति; `qdocco --markdown` समीक्षायै literate Markdown जनयति। अन्तःस्थापकः Context::set_fuel द्वारा पुनःप्रयुक्त-सन्दर्भस्य सीमा परिवर्तयितुं शक्नोति, तथा `cargo run --example embed` पूर्णं host-उदाहरणं चालयति।

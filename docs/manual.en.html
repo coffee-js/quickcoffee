@@ -20,6 +20,7 @@
 <p>Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.</p>
 <p>qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.</p>
 <p>Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals.</p>
+<p>cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.</p>
 <p>Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.</p>
 <p>Arguments after -- are exposed as the ordinary string array argv.</p>
 <p>This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.</p>
