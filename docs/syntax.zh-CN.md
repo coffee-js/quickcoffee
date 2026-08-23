@@ -24,6 +24,8 @@
 
 标识符采用 Unicode XID：首字符为 XID start 或 `_`，后续为 XID continue 或 `_`，不做规范化；组合附标可作为续字符。`#` 是行注释；`### … ###` 是不嵌套的块注释，块内容不影响布局。`for value in array` 遍历数组（包括 `range` 的结果）；可写 `by step`，步长只求值一次且必须为正有限整数。`for own key, value of map` 遍历映射且不支持 `by`。`for` 收集每轮体值为新数组；`when` 跳过的项与 `continue` 不收集，`break` 返回既得前缀；`while`、`until` 与 `loop` 的值仍为 `nil`。`return expression` 只可在函数体中使用，立即返回表达式值；裸 `return` 返回 `nil`，并在离开循环或 `try` 时完成清理与 finally。`if`、循环和函数可在换行后用空格缩进多个语句，且缩进必须一致；语句也可用 `;` 分隔。调用可写 `f(a, b)`，亦可在同一逻辑行写 `f a, b`。条件必须是布尔值，名称必须先赋值或由宿主注册。完整规范见 RFC。
 
+`do` 可立即调用函数；`do (name, other) -> ...` 将同名外层值按序转发，默认、rest 与解构形参在 `do` 中拒绝，`do -> ...` 仍是零参 IIFE。
+
 隐式调用只消费同一逻辑行的普通表达式：`print value`、`add 20, 22`、`double add 20, 22`、`len [1, 2, 3]` 均可；跨布局边界请使用显式括号调用。
 
 `for` 的绑定可用严格递归模式：`for [left, right] in pairs then left + right`、`for own _, value of record then value` 均可。模式不匹配是运行时错误，且本轮绑定绝不部分写入。

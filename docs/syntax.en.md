@@ -28,6 +28,8 @@ Comprehensions may also use CoffeeScript's postfix form: `value * 2 for value in
 
 String indexing and strict slices use Unicode scalar boundaries: `'a☕中'[1]` is `'☕'`, and `'a☕中'[1..2]` is `'☕中'`. String `for` iteration also accepts a positive finite `by` step over Unicode scalar positions: `for character, index in 'a☕中x' by 2 then index` yields `[0, 2]`.
 
+`do` immediately invokes a function; `do (name, other) -> ...` forwards same-named outer values, while defaults, rest, and destructuring are rejected in `do` parameters. `do -> ...` remains a zero-argument IIFE.
+
 Array and string `by step` expressions are evaluated once and must be positive finite integers; map iteration excludes `by`.
 
 Names support arithmetic compound assignment (`+=`, `-=`, `*=`, `/=`, `%=` and `**=`). Compound assignment is intentionally name-only; members, indexes, and destructuring remain immutable API boundaries.

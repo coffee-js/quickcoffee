@@ -1590,7 +1590,30 @@ impl Compiler {
             }
             Expr::Do(function) => {
                 self.expr(function)?;
-                self.emit(Instruction::Call(0));
+                match function.as_ref() {
+                    Expr::Function(params, rest, _) => {
+                        if rest.is_some()
+                            || params.iter().any(|param| {
+                                !matches!(&param.pattern, AstPattern::Bind(_))
+                                    || param.default.is_some()
+                            })
+                        {
+                            return Err(Error::verify(
+                                "do function forwarding requires plain required name parameters",
+                            ));
+                        }
+                        for param in params {
+                            let AstPattern::Bind(name) = &param.pattern else {
+                                unreachable!("validated plain name parameter");
+                            };
+                            self.emit(Instruction::Load(name.clone()));
+                        }
+                        self.emit(Instruction::Call(params.len()));
+                    }
+                    _ => {
+                        self.emit(Instruction::Call(0));
+                    }
+                }
             }
         }
         Ok(())
