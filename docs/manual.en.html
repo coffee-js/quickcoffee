@@ -13,6 +13,8 @@
 <p>qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.</p>
 <p>qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.</p>
 <p>qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.</p>
+<p>qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.</p>
+<p>qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.</p>
 <p>Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime(&quot;message&quot;), and error.position() may give a one-based source line.</p>
 <p>Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.</p>
 <p>Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.</p>
@@ -66,7 +68,8 @@
 <p>Arithmetic also has floor division // and dividend-dependent modulo %%: -7 // 5 is -2, while -7 %% 5 is 3.</p>
 <p>return expression exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.</p>
 <p>Parameters may use strict nested array/map patterns; defaults and rest stay name-only.</p>
-</main><main><h1>Code</h1><pre><code>base = 20
+</main><main><h1>Code</h1><pre><code>
+base = 20
 add = (x) -&gt;
   result = x + base
   result

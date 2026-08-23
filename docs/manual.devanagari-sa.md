@@ -20,6 +20,8 @@ qtest --fuel N प्रत्येक executable-document पृथक् inst
 qtest --stats प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
 qtest --json प्रत्येकस्य लेखस्य स्थिरं JSON फलम् एकस्मिन् पङ्क्तौ लिखति; --stats stderr मध्ये एव।
 qtest --tap TAP 13 तथा नियत-सङ्ख्याङ्कितानि फलानि लिखति; --json च --tap च परस्परं निषिद्धे।
+qtest --filter TEXT मार्ग-साम्येन परीक्षां चिनोति; qtest --list चयनित-पत्राणि केवलं गणयति, न चालयति।
+qcoffee --json एकस्मिन् प्रयोगे JSON-मूल्यं वा संरचितं दोषं एकया पङ्क्त्या ददाति, CI-होष्ट्रयोः उपयोगाय।
 host-error ErrorKind::Parse, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; error.position() कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
 Engine::compile_program एकवारं verify करोति; Context::run_program पुनःचालने अपरिवर्तनीय-सत्यापित-bytecode पुनरुपयुङ्क्ते।
 Program::fingerprint होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
@@ -70,6 +72,7 @@ postfix-comprehension समानं strict-collection वहति: value * 2 
 ## Code
 
 ````quickcoffee
+
 base = 40
 add = (x) -> x + base
 shorthand = 'yes'

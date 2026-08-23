@@ -17,6 +17,8 @@ qtest --fuel N 为每份可执行文档设置独立指令预算。
 qtest --stats 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写标准错误。
 qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
+qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。
+qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
 Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime 与不依赖展示文本的详情；宿主回调可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
@@ -72,6 +74,7 @@ for 绑定可用严格模式：for [left, right] in pairs 会原子地绑定每�
 ## Code
 
 ````quickcoffee
+
 base = 21
 double = (x) -> x * 2
 shorthand = 'yes'
