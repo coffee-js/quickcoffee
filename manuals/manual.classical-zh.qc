@@ -23,6 +23,7 @@
 ## 宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
 ## Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。
 ## Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。
+## qcoffee --fingerprint FILE 出十六位小写字节码键，先验之而不行其文。
 ## Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 ## -- 后之参，以常字符串数组 argv 见于文中。
 ## 其内府皆常函，如 print、len、type、range、str、keys、values、join、split、assert。

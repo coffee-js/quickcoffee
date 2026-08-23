@@ -7,7 +7,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -85,6 +85,7 @@ fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
     let mut source = None;
     let mut dump = false;
+    let mut fingerprint = false;
     let mut check = false;
     let mut stats = false;
     let mut interactive = false;
@@ -113,28 +114,37 @@ fn main() -> ExitCode {
             },
             "--stats" => stats = true,
             "-e" => match args.next() {
-                Some(s) => source = Some(s),
+                Some(s) if source.is_none() && !dump && !check && !fingerprint => source = Some(s),
+                Some(_) => {
+                    eprintln!("-e cannot be combined with another source or execution mode");
+                    return ExitCode::from(2);
+                }
                 None => {
                     eprintln!("-e requires source text");
                     return ExitCode::from(2);
                 }
             },
             "--dump-bytecode" => {
-                if check || stats {
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
-                        "--check, --dump-bytecode, and --stats are execution-mode alternatives"
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
                 dump = true;
                 match args.next() {
-                    Some(path) => match read_source(&path) {
+                    Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
+                    {
                         Ok(text) => source = Some(text),
                         Err(error) => {
                             eprintln!("{error}");
                             return ExitCode::from(1);
                         }
                     },
+                    Some(_) => {
+                        eprintln!("--dump-bytecode requires a file");
+                        return ExitCode::from(2);
+                    }
                     None => {
                         eprintln!("--dump-bytecode requires a file");
                         return ExitCode::from(2);
@@ -142,9 +152,9 @@ fn main() -> ExitCode {
                 }
             }
             "--check" => {
-                if dump || stats {
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
-                        "--check, --dump-bytecode, and --stats are execution-mode alternatives"
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
@@ -159,6 +169,33 @@ fn main() -> ExitCode {
                     },
                     None => {
                         eprintln!("--check requires a file");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--fingerprint" => {
+                if source.is_some() || check || dump || fingerprint || stats {
+                    eprintln!(
+                        "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+                    );
+                    return ExitCode::from(2);
+                }
+                fingerprint = true;
+                match args.next() {
+                    Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
+                    {
+                        Ok(text) => source = Some(text),
+                        Err(error) => {
+                            eprintln!("{error}");
+                            return ExitCode::from(1);
+                        }
+                    },
+                    Some(_) => {
+                        eprintln!("--fingerprint requires a file");
+                        return ExitCode::from(2);
+                    }
+                    None => {
+                        eprintln!("--fingerprint requires a file");
                         return ExitCode::from(2);
                     }
                 }
@@ -184,9 +221,9 @@ fn main() -> ExitCode {
         }
     }
     if interactive {
-        if source.is_some() || check || dump {
+        if source.is_some() || check || dump || fingerprint {
             eprintln!(
-                "--interactive cannot be combined with a source, --check, or --dump-bytecode"
+                "--interactive cannot be combined with a source, --check, --dump-bytecode, or --fingerprint"
             );
             return ExitCode::from(2);
         }
@@ -196,8 +233,10 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
-    if stats && (dump || check) {
-        eprintln!("--check, --dump-bytecode, and --stats are execution-mode alternatives");
+    if stats && (dump || check || fingerprint) {
+        eprintln!(
+            "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+        );
         return ExitCode::from(2);
     }
     let engine = Engine::new();
@@ -213,6 +252,10 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     if check {
+        return ExitCode::SUCCESS;
+    }
+    if fingerprint {
+        println!("{:016x}", chunk.fingerprint());
         return ExitCode::SUCCESS;
     }
     let mut context = Context::new().with_fuel(fuel);
