@@ -14,7 +14,7 @@
 | 运算 | 算术、严格有符号 32 位位运算 `&`、`|`、`^`、`~`、`<<`、`>>`、`>>>` 及其名称复合赋值、名称复合赋值 `name += value`、`-=`, `*=`, `/=`, `%=`, `**=`、名称前后置更新 `++`/`--`、比较（`==`/`is`、`!=`/`isnt`，可短路成链 `a < b < c`）、`and`/`or`、`not`、仅对 `nil` 回退的 `left ? right`、后缀非 nil 测试 `value?`、仅名称的存在性赋值 `name ?= value`、数组成员 `value in array` / `value not in array`、映射自身键 `key of map` / `key not of map`、数组索引与严格切片 `a[start..end]` / `a[start...end]`、映射成员访问、nil 安全后缀 `a?.name`、`a?[i]`、`a?[start..end]`、`f?(args)` | 成员/索引/解构复合赋值、成员/索引/解构 `?=`、字符串/映射切片、隐式截断、未声明名称检查 |
 | 控制 | `if`/`unless`、后置条件、`while … then …`、`until … then …`、语句后置 `body while/until condition`、前置或后置列表推导 `for value[, index] in xs [by step] [when condition] then …` / `value for value in xs`、`switch`/`when`、`try`/`catch`/`finally`、`throw`、函数内 `return`、`break`、`continue` | JS Error 对象、顶层 `return`、映射 `for` 的 `by` |
 | 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, "first-name": first, ...metadata} = map`（标识符或字面字符串键）的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、`=>` 同义箭头、`do` 立即调用 | 动态 computed 映射键、无括号默认/rest/解构参数、生成器 |
-| OO/模块 | 无原型工厂类 `class Name(args) -> expression` | 继承、`this`、`new`、import/export |
+| OO/模块 | 无原型工厂类 `class Name(args) -> expression`；仅嵌入 `Engine::compile_module` 的命名 `import { x as y } from 'name'`、`export x = value` 与 `export { local as public }` | 继承、`this`、`new`、CLI 文件模块、隐式文件/网络加载 |
 
 整数区间支持升序与降序：`[2..4]` 为 `[2, 3, 4]`，`[4..2]` 为 `[4, 3, 2]`；排除上界形式相应省略终点（`[4...2]` 为 `[4, 3]`）。边界必须是有限整数，过长区间仍报错。
 
@@ -33,6 +33,8 @@
 隐式调用只消费同一逻辑行的普通表达式：`print value`、`add 20, 22`、`double add 20, 22`、`len [1, 2, 3]` 均可；跨布局边界请使用显式括号调用。
 
 `for` 的绑定可用严格递归模式：`for [left, right] in pairs then left + right`、`for own _, value of record then value` 均可。模式不匹配是运行时错误，且本轮绑定绝不部分写入。
+
+模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。`qcoffee` CLI 暂不解析模块路径。
 
 名称亦支持前置、后置数值更新：`next = ++counter` 产生更新后的值，`previous = counter--` 先产生旧值再减一。`++`、`--` 只接受名称并使用严格数值运算；成员、索引和解构形式在解析阶段拒绝。
 

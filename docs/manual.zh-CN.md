@@ -7,6 +7,7 @@ QuickCoffee 用户手册
 QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 qcoffee - 可从标准输入读取 QuickCoffee 程序。
 qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
+嵌入模块可写 import { public as local } from 'name' 与 export；Engine::compile_module 和 Context::run_module 只经宿主 ModuleLoader 取源码，模块全局私有且整张图共享 fuel。
 嵌入宿主可用 Context::with_fuel、with_max_call_depth 和 with_cancellation_token 分别限制指令、递归与取消执行；资源错误不被脚本 catch 吞掉。
 qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。

@@ -80,7 +80,17 @@ pub(crate) struct Param {
 pub(crate) enum Stmt {
     Assign(String, Expr),
     Destructure(Pattern, Expr),
+    Import(Vec<(String, String)>, String),
+    ExportAssign(String, Expr),
+    ExportNames(Vec<(String, String)>),
     Expr(Expr),
+}
+/// Parsed module directives plus the executable module body.
+#[derive(Clone, Debug)]
+pub(crate) struct ModuleSyntax {
+    pub imports: Vec<(Vec<(String, String)>, String)>,
+    pub exports: Vec<(String, String)>,
+    pub body: Vec<Stmt>,
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Unary {
@@ -142,6 +152,28 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
     }
     .program()
 }
+pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
+    let statements = parse(source)?;
+    let mut imports = Vec::new();
+    let mut exports = Vec::new();
+    let mut body = Vec::new();
+    for statement in statements {
+        match statement {
+            Stmt::Import(bindings, specifier) => imports.push((bindings, specifier)),
+            Stmt::ExportAssign(name, value) => {
+                exports.push((name.clone(), name.clone()));
+                body.push(Stmt::Assign(name, value));
+            }
+            Stmt::ExportNames(names) => exports.extend(names),
+            statement => body.push(statement),
+        }
+    }
+    Ok(ModuleSyntax {
+        imports,
+        exports,
+        body,
+    })
+}
 struct Parser {
     tokens: Vec<Token>,
     lines: Vec<usize>,
@@ -202,6 +234,12 @@ impl Parser {
         Ok(out)
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
+        if self.eat(&Token::Import) {
+            return self.import_statement();
+        }
+        if self.eat(&Token::Export) {
+            return self.export_statement();
+        }
         if let Some(pattern) = self.assignment_pattern() {
             let value = self.expr(0)?;
             if matches!(self.peek(), Token::While | Token::Until) {
@@ -224,6 +262,55 @@ impl Parser {
                 Ok(Stmt::Expr(expression))
             }
         }
+    }
+    fn import_statement(&mut self) -> Result<Stmt, Error> {
+        let bindings = self.named_bindings()?;
+        self.expect(&Token::From)?;
+        let Token::String(specifier, false) = self.next() else {
+            return Err(self.parse_error("module specifier must be a literal string"));
+        };
+        Ok(Stmt::Import(bindings, specifier))
+    }
+    fn export_statement(&mut self) -> Result<Stmt, Error> {
+        if self.eat(&Token::LBrace) {
+            self.at = self.at.saturating_sub(1);
+            return Ok(Stmt::ExportNames(
+                self.named_bindings()?
+                    .into_iter()
+                    .map(|(local, public)| (public, local))
+                    .collect(),
+            ));
+        }
+        let Token::Ident(name) = self.next() else {
+            return Err(self.parse_error("expected exported name or named export list"));
+        };
+        self.expect(&Token::Assign)?;
+        Ok(Stmt::ExportAssign(name, self.expr(0)?))
+    }
+    fn named_bindings(&mut self) -> Result<Vec<(String, String)>, Error> {
+        self.expect(&Token::LBrace)?;
+        let mut bindings = Vec::new();
+        if !self.eat(&Token::RBrace) {
+            loop {
+                let Token::Ident(source) = self.next() else {
+                    return Err(self.parse_error("expected named binding"));
+                };
+                let local = if self.eat(&Token::As) {
+                    let Token::Ident(local) = self.next() else {
+                        return Err(self.parse_error("expected local alias after as"));
+                    };
+                    local
+                } else {
+                    source.clone()
+                };
+                bindings.push((source, local));
+                if self.eat(&Token::RBrace) {
+                    break;
+                }
+                self.expect(&Token::Comma)?;
+            }
+        }
+        Ok(bindings)
     }
     fn postfix_loop(&mut self, body: Expr) -> Result<Expr, Error> {
         let inverted = if self.eat(&Token::While) {

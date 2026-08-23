@@ -5,10 +5,12 @@
 
 mod bytecode;
 mod lexer;
+mod module;
 mod parser;
 mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
+pub use module::{MemoryModuleLoader, Module, ModuleExports, ModuleLoader, ModuleSource};
 pub use vm::{
     CancellationToken, Context, Engine, Error, ErrorKind, ExecutionStats, Function, NativeFunction,
     Program, ResourceLimit, SourcePosition, Value, ValueKind,
