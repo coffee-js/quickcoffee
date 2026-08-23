@@ -212,9 +212,22 @@ fn normalize_multiline_strings(source: &str) -> Vec<(usize, String)> {
     let physical: Vec<&str> = source.split('\n').collect();
     let mut logical = Vec::with_capacity(physical.len());
     let mut index = 0usize;
+    let mut block_comment = false;
     while index < physical.len() {
         let line_number = index + 1;
         let mut line = physical[index].to_owned();
+        let content = line.trim_start();
+        if block_comment || content.starts_with('#') {
+            if block_comment && content.contains("###") {
+                block_comment = false;
+            } else if !block_comment && content.starts_with("###") && !content[3..].contains("###")
+            {
+                block_comment = true;
+            }
+            logical.push((line_number, line));
+            index += 1;
+            continue;
+        }
         while has_unclosed_string(&line) && index + 1 < physical.len() {
             let next = physical[index + 1];
             let continued_without_space = trim_single_trailing_backslash(&mut line);
@@ -281,7 +294,62 @@ fn has_unclosed_string(line: &str) -> bool {
 fn normalize_heredocs(source: &str) -> Result<String, Error> {
     let mut chars = source.chars().peekable();
     let mut out = String::with_capacity(source.len());
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut string_quote = None;
+    let mut escaped = false;
     while let Some(ch) = chars.next() {
+        if line_comment {
+            out.push(ch);
+            if ch == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment {
+            out.push(ch);
+            if ch == '#' && chars.peek() == Some(&'#') {
+                chars.next();
+                out.push('#');
+                if chars.peek() == Some(&'#') {
+                    chars.next();
+                    out.push('#');
+                    block_comment = false;
+                    // The lexer treats the entire closing-delimiter line as a
+                    // comment, so heredoc markers after it must stay inert.
+                    line_comment = true;
+                }
+            }
+            continue;
+        }
+        if let Some(quote) = string_quote {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote {
+                string_quote = None;
+            }
+            continue;
+        }
+        if ch == '#' {
+            out.push(ch);
+            if chars.peek() == Some(&'#') {
+                chars.next();
+                out.push('#');
+                if chars.peek() == Some(&'#') {
+                    chars.next();
+                    out.push('#');
+                    block_comment = true;
+                } else {
+                    line_comment = true;
+                }
+            } else {
+                line_comment = true;
+            }
+            continue;
+        }
         if (ch == '\'' || ch == '"') && chars.peek() == Some(&ch) {
             chars.next();
             if chars.peek() == Some(&ch) {
@@ -328,6 +396,10 @@ fn normalize_heredocs(source: &str) -> Result<String, Error> {
             continue;
         }
         out.push(ch);
+        if ch == '\'' || ch == '"' {
+            string_quote = Some(ch);
+            escaped = false;
+        }
     }
     Ok(out)
 }
@@ -954,6 +1026,8 @@ mod tests {
         assert!(tokens.contains(&Token::Indent));
         assert!(tokens.contains(&Token::Number(42.)));
         assert!(lex("### one line ###\n42").is_ok());
+        let tokens = lex("### starts\nignored\n### \"\"\"\n42").unwrap();
+        assert!(tokens.contains(&Token::Number(42.)));
         assert!(lex("### starts\n42").is_err());
     }
 
@@ -972,6 +1046,14 @@ mod tests {
         let tokens = lex("message = '''first\nsecond'''").unwrap();
         assert!(matches!(tokens[2], Token::String(ref value, false) if value == "first\nsecond"));
         assert!(lex("message = \"\"\"unfinished").is_err());
+    }
+
+    #[test]
+    fn heredoc_markers_inside_comments_and_strings_are_not_reinterpreted() {
+        let tokens = lex("###\n\"\"\"\n###\n42").unwrap();
+        assert!(tokens.contains(&Token::Number(42.)));
+        assert!(lex("# \"\"\"\n42").is_ok());
+        assert!(lex("value = '\"\"\"'\nvalue").is_ok());
     }
 
     #[test]
