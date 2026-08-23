@@ -618,6 +618,19 @@ impl Engine {
     pub fn compile_program_named(&self, source_name: &str, source: &str) -> Result<Program, Error> {
         self.compile_program_source(Some(source_name), source)
     }
+    /// Compiles and verifies source without executing it, collecting every
+    /// parser error recoverable at a top-level statement boundary.
+    ///
+    /// Lexing, lowering, and verification stop at their first error. Existing
+    /// [`Self::compile_program`] methods retain their first-error behavior.
+    pub fn check_program(&self, source: &str) -> Result<(), Vec<Error>> {
+        self.check_program_source(None, source)
+    }
+    /// Like [`Self::check_program`], while attaching the caller-provided
+    /// opaque source name to every returned diagnostic label.
+    pub fn check_program_named(&self, source_name: &str, source: &str) -> Result<(), Vec<Error>> {
+        self.check_program_source(Some(source_name), source)
+    }
     fn compile_program_source(
         &self,
         source_name: Option<&str>,
@@ -631,6 +644,22 @@ impl Engine {
         let (chunk, source_map) = bytecode::compile_mapped(&ast).map_err(attach_name)?;
         bytecode::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
         Ok(Program::from_compiled(chunk, source_map, source_name))
+    }
+    fn check_program_source(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<(), Vec<Error>> {
+        let attach_name = |error: Error| match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        };
+        let ast = parser::parse_recover(source)
+            .map_err(|errors| errors.into_iter().map(attach_name).collect::<Vec<Error>>())?;
+        let (chunk, source_map) =
+            bytecode::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
+        bytecode::verify_mapped(&chunk, &source_map).map_err(|error| vec![attach_name(error)])?;
+        Ok(())
     }
 }
 /// Public counters for the most recent bytecode execution in a context.

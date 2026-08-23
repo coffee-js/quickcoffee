@@ -8,6 +8,8 @@ Lowering-time errors for `break`, `continue`, and `return`, single-file misuse o
 
 Compiled `Program` values keep a private source-map sidecar for top-level expressions, nested/default-parameter chunks, assignment/destructuring statements, modules, verifier failures, runtime failures, host-call failures, and resource stops. It is excluded from bytecode fingerprints and disassembly, and source-map lookup happens only on compile/VM error paths. Runtime errors retain a primary failure label followed by nearest-to-outermost `called from here` secondary QuickCoffee call sites. Raw host-built `Chunk` values remain deliberately unattributed.
 
+`Engine::check_program*` performs static compilation without execution and may return several independently recoverable parser errors. Recovery is deliberately limited to deterministic top-level statement boundaries; ordinary `compile*` APIs retain their one-error result. `qcoffee --check FILE` prints the collected parser errors in source order to stderr, with no stdout and no bytecode execution.
+
 Embedding callers may use `Program::fingerprint()` as a deterministic bytecode cache key; it does not alter verification or execution semantics.
 
 Cargo package metadata links embedding users to the repository, README, license, and docs.rs API.

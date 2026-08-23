@@ -408,6 +408,21 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let engine = Engine::new();
+    if check {
+        let checked = match source_name.as_deref() {
+            Some(source_name) => engine.check_program_named(source_name, &source),
+            None => engine.check_program(&source),
+        };
+        return match checked {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(errors) => {
+                for error in errors {
+                    eprintln!("{error}");
+                }
+                ExitCode::from(1)
+            }
+        };
+    }
     let compiled = match source_name.as_deref() {
         Some(source_name) => engine.compile_program_named(source_name, &source),
         None => engine.compile_program(&source),
@@ -425,9 +440,6 @@ fn main() -> ExitCode {
     };
     if dump {
         print!("{}", program.disassemble());
-        return ExitCode::SUCCESS;
-    }
-    if check {
         return ExitCode::SUCCESS;
     }
     if fingerprint {
