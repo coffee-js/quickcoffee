@@ -82,9 +82,20 @@ fn module_cycles_are_rejected_and_resources_cover_dependencies() {
 #[test]
 fn module_directives_are_not_accepted_by_single_file_compilation() {
     let error = Engine::new()
-        .compile_program("export answer = 42")
+        .compile_program_named("virtual://single.qc", "value = 1\nexport answer = 42")
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Verify);
+    let span = &error.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some("virtual://single.qc"));
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(7),
+        })
+    );
 }
 
 #[test]
@@ -95,6 +106,28 @@ fn module_parse_errors_carry_the_host_canonical_name() {
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
         Some("pkg://rules/../invoice")
+    );
+}
+
+#[test]
+fn duplicate_module_exports_point_to_the_later_directive() {
+    let error = Engine::new()
+        .compile_module(
+            "pkg://rules/invoice",
+            "export answer = 41\nexport answer = 42",
+        )
+        .unwrap_err();
+    assert_eq!(error.message(), "duplicate module export: answer");
+    let span = &error.labels()[0].span;
+    assert_eq!(span.source_name.as_deref(), Some("pkg://rules/invoice"));
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, Some(1));
+    assert_eq!(
+        span.end,
+        Some(quickcoffee::SourcePosition {
+            line: 2,
+            column: Some(7),
+        })
     );
 }
 

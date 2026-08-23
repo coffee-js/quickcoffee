@@ -1059,10 +1059,13 @@ impl Compiler {
                 let compiled = Self::compile_pattern(pattern)?;
                 self.emit(Instruction::Destructure(compiled));
             }
-            Stmt::Import(_, _) | Stmt::ExportAssign(_, _) | Stmt::ExportNames(_) => {
-                return Err(Error::verify(
-                    "module directives require Engine::compile_module",
-                ));
+            Stmt::Import(_, _, span)
+            | Stmt::ExportAssign(_, _, span)
+            | Stmt::ExportNames(_, span) => {
+                return Err(
+                    Error::verify("module directives require Engine::compile_module")
+                        .at_span(span.into_source_span()),
+                );
             }
             Stmt::Expr(e) => self.expr(e)?,
         }
@@ -1429,11 +1432,10 @@ impl Compiler {
                     self.patch_jump_to(jump, break_target);
                 }
             }
-            Expr::Break => {
-                let owns_iterator = self
-                    .loops
-                    .last()
-                    .ok_or_else(|| Error::parse("break outside of loop"))?;
+            Expr::Break(span) => {
+                let owns_iterator = self.loops.last().ok_or_else(|| {
+                    Error::parse("break outside of loop").at_span(span.into_source_span())
+                })?;
                 if owns_iterator.owns_iterator {
                     self.emit(Instruction::IterEnd);
                 }
@@ -1444,17 +1446,21 @@ impl Compiler {
                     .breaks
                     .push(jump);
             }
-            Expr::Continue => {
+            Expr::Continue(span) => {
                 let target = self
                     .loops
                     .last()
-                    .ok_or_else(|| Error::parse("continue outside of loop"))?
+                    .ok_or_else(|| {
+                        Error::parse("continue outside of loop").at_span(span.into_source_span())
+                    })?
                     .continue_target;
                 self.emit_back_jump(target);
             }
-            Expr::Return(value) => {
+            Expr::Return(value, span) => {
                 if !self.in_function {
-                    return Err(Error::parse("return outside of function"));
+                    return Err(
+                        Error::parse("return outside of function").at_span(span.into_source_span())
+                    );
                 }
                 if let Some(value) = value {
                     self.expr(value)?;

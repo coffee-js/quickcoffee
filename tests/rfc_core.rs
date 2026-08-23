@@ -413,6 +413,35 @@ fn lexer_and_parser_errors_expose_unicode_scalar_spans_when_known() {
     assert_eq!(lowered_span.end, None);
 }
 #[test]
+fn lowering_errors_preserve_control_flow_keyword_spans() {
+    for (source, message, line, start, end) in [
+        ("value = 1\nbreak", "break outside of loop", 2, 1, 6),
+        ("continue", "continue outside of loop", 1, 1, 9),
+        ("return 1", "return outside of function", 1, 1, 7),
+        ("if 状态 then break", "break outside of loop", 1, 12, 17),
+    ] {
+        let error = quickcoffee::compile_named("virtual://lowering.qc", source).unwrap_err();
+        assert_eq!(error.message(), message);
+        let span = &error.labels()[0].span;
+        assert_eq!(span.source_name.as_deref(), Some("virtual://lowering.qc"));
+        assert_eq!(span.start.line, line);
+        assert_eq!(span.start.column, Some(start));
+        assert_eq!(
+            span.end,
+            Some(quickcoffee::SourcePosition {
+                line,
+                column: Some(end),
+            })
+        );
+    }
+
+    let rewritten = quickcoffee::compile("record =\n  key: if true then break").unwrap_err();
+    let span = &rewritten.labels()[0].span;
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.column, None);
+    assert_eq!(span.end, None);
+}
+#[test]
 fn unicode_xid_identifiers_support_combining_marks() {
     assert_eq!(eval("स्थित = 40\nस्थित + 2").as_number(), Some(42.));
     assert!(Context::new().eval("\u{94b}value = 1").is_err());

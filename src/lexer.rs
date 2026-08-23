@@ -127,7 +127,7 @@ pub(crate) enum Token {
     Eof,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TokenSpan {
     pub(crate) line: usize,
     start_column: usize,

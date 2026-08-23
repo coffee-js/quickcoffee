@@ -108,9 +108,11 @@ impl Engine {
         let syntax =
             parser::parse_module(source).map_err(|error| error.with_source_name(name.as_str()))?;
         let mut public_names = BTreeSet::new();
-        for (public, _) in &syntax.exports {
+        for (public, _, span) in &syntax.exports {
             if !public_names.insert(public.clone()) {
-                return Err(Error::parse(format!("duplicate module export: {public}")));
+                return Err(Error::parse(format!("duplicate module export: {public}"))
+                    .at_span(span.into_source_span())
+                    .with_source_name(name.as_str()));
             }
         }
         let program: Program = bytecode::compile(&syntax.body)
@@ -123,7 +125,11 @@ impl Engine {
             name,
             program,
             imports: syntax.imports,
-            exports: syntax.exports,
+            exports: syntax
+                .exports
+                .into_iter()
+                .map(|(public, local, _)| (public, local))
+                .collect(),
         })
     }
 }
