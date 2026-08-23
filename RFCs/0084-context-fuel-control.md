@@ -9,7 +9,7 @@
 
 ## API 契约
 
-`Context::set_fuel(u64)` 修改下一次及后续 `eval`、`run`、`run_program` 使用的每轮指令预算；`Context::fuel()` 返回当前配置值。`Context::with_fuel` 保留并委托相同语义，便于链式构造。调整预算不清空全局环境、原生函数、共享 `Program` 或 `last_execution()`；一次运行仍从完整配置值开始扣减，耗尽返回 RFC 0118 定义的 `ErrorKind::Resource(ResourceLimit::Fuel)`。
+`Context::set_fuel(u64)` 修改下一次及后续 `eval`、`run`、`run_program` 使用的每轮指令预算；`Context::fuel()` 返回当前配置值。`Context::with_fuel` 保留并委托相同语义，便于链式构造。调整预算不清空全局环境、原生函数、共享 `Program` 或 `last_execution()`；一次运行仍从完整配置值开始扣减，耗尽时错误的 `kind()` 为 RFC 0118 定义的 `ErrorKind::Resource`，其 `resource_limit()` 为 `Some(ResourceLimit::Fuel)`。
 
 ## 验收
 

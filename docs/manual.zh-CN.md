@@ -21,7 +21,7 @@ qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写
 qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
 qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。
 qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
-Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime、Resource；Error::resource_limit 可分辨 fuel、调用深度与取消，宿主回调仍可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
+Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime、Resource；error.resource_limit() 可分辨 fuel、调用深度与取消，宿主回调仍可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
 qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
