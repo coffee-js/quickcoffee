@@ -17,7 +17,13 @@ make qbench
 # 或 cargo run --release --bin qbench -- --json --iterations 100
 ```
 
-`qbench` 为每个内建负载输出一行 JSON，分别记录编译、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。其结果用于 CI 回归和绘图，不替代下文要求的三次 release 中位数报告。
+要自动取得三次样本的中位数，可加 `--repeat 3`；输出中的 `repeat` 记录样本数，三个 `*_ns` 字段仍是每轮迭代总耗时的中位数：
+
+```sh
+cargo run --locked --release --bin qbench -- --json --iterations 100 --repeat 3
+```
+
+`qbench` 为每个内建负载输出一行 JSON，分别记录编译、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
 
 测量环境：Apple arm64（Darwin 25.5.0，T6000）、`rustc 1.94.0 (4a4ef493e 2026-03-02)`、`cargo bench --bench core`。基准以 release profile 运行；报告日期为 2026-08-22。
 
