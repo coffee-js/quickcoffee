@@ -167,6 +167,30 @@ fn qtest_ignores_recursive_directory_symlinks() {
     let _ = fs::remove_dir_all(temp);
 }
 
+#[cfg(unix)]
+#[test]
+fn qtest_executes_a_file_symlink_only_once() {
+    use std::os::unix::fs::symlink;
+
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-qtest-file-alias-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let actual = temp.join("actual.qc");
+    let alias = temp.join("alias.qc");
+    fs::write(&actual, "true\n").unwrap();
+    symlink(&actual, &alias).unwrap();
+    let output = Command::new(bin("qtest"))
+        .args(["--tap", actual.to_str().unwrap(), alias.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("TAP version 13\nok 1 - {}\n1..1\n", actual.display())
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
 #[test]
 fn every_cli_reports_the_same_package_version() {
     for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
