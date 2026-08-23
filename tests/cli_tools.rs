@@ -79,6 +79,25 @@ fn qdocco_renders_escaped_source_and_checks() {
     assert_eq!(overwrite.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("output path must differ"));
     assert_eq!(fs::read_to_string(&input).unwrap(), "## <Guide>\n1 + 2\n");
+    #[cfg(unix)]
+    {
+        let linked_output = temp.join("demo-link.html");
+        std::os::unix::fs::symlink(&input, &linked_output).unwrap();
+        let overwrite_via_symlink = Command::new(bin("qdocco"))
+            .args([
+                input.to_str().unwrap(),
+                "-o",
+                linked_output.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(overwrite_via_symlink.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&overwrite_via_symlink.stderr)
+                .contains("output path must differ")
+        );
+        assert_eq!(fs::read_to_string(&input).unwrap(), "## <Guide>\n1 + 2\n");
+    }
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])
         .output()
