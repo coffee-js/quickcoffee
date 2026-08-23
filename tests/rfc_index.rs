@@ -2,7 +2,9 @@ use std::{fs, path::Path};
 
 #[test]
 fn rfc_numbers_and_index_references_are_consistent() {
-    let mut entries = fs::read_dir("RFCs")
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let rfc_dir = workspace.join("RFCs");
+    let mut entries = fs::read_dir(&rfc_dir)
         .expect("RFC directory exists")
         .map(|entry| entry.expect("RFC entry is readable").path())
         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
@@ -34,12 +36,13 @@ fn rfc_numbers_and_index_references_are_consistent() {
         );
     }
     let latest_name = &numbered.last().unwrap().1;
-    let readme = fs::read_to_string(Path::new("README.md")).expect("README exists");
+    let readme = fs::read_to_string(workspace.join("README.md")).expect("README exists");
     assert!(
         readme.contains(latest_name),
         "README must link the latest RFC"
     );
-    let scope = fs::read_to_string("RFCs/0000-project-scope.md").expect("scope RFC exists");
+    let scope =
+        fs::read_to_string(rfc_dir.join("0000-project-scope.md")).expect("scope RFC exists");
     assert!(
         scope.contains(&format!("RFC {latest:04}")),
         "scope RFC must mention the latest RFC"
