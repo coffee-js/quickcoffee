@@ -150,6 +150,12 @@ fn main() {
             expected: "1617",
         },
         Workload {
+            name: "signed-by-iteration",
+            source: "sum = 0\nfor n, index in [1...100] by -3 then sum += n + index\nsum",
+            iterations: 10_000,
+            expected: "3333",
+        },
+        Workload {
             name: "for-collection",
             source: "values = for n in [1...100] when n % 3 == 0 then n * 2\nlen(values)",
             iterations: 10_000,

@@ -138,7 +138,7 @@ for character, index in 'a☕中x' by 2 then sum += index
 sum
 ```
 
-signed-by-iteration（20,000 次）：
+signed-by-iteration（10,000 次）：
 
 ```coffee
 sum = 0
@@ -544,6 +544,8 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 `qbench --json` 现在包含 `signed-by-iteration`，并在每轮编译、验证和执行后检查 `3333`。该负载不把数组复制到宿主侧，反向位置由 VM 的有符号步长直接推进；运行基准时应与 `stepped-iteration` 一起比较编译、验证和执行三个阶段。
 
 本次可复现实测在 Apple M1 Pro（T6000、16 GB 统一内存）、Darwin 25.5.0 上运行；编译器为 `rustc 1.94.0 (4a4ef493e 2026-03-02)`（完整 commit `4a4ef493e3a1488c6e321570238084b38948f6db`，LLVM 21.1.8），release 命令为 `cargo run --locked --release --bin qbench -- --json --iterations 100`。它得到 `signed-by-iteration` 一条记录：编译总计 `618750 ns`，验证总计 `28917 ns`，执行总计 `2363209 ns`，期望值为 `3333`。这是单次开发机样本，只用于确认工作负载已纳入语义护栏与性能采集；跨版本比较仍须按本报告口径重复至少三次并取中位数。
+
+标准 `cargo bench --locked --bench core`（10,000 次）同样已纳入该负载；本次样本为编译 `38.544 ms`、验证 `2.032 ms`、执行 `157.776 ms`，期望值 `3333`。它与正向 `stepped-iteration` 的执行样本（`124.616 ms`）同场输出，便于观察有符号步进的额外边界检查成本。
 
 ## RFC 0074 映射展开
 
