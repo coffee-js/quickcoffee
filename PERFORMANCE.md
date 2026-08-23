@@ -597,3 +597,15 @@ make bench
 在同一 Darwin arm64 开发机上，`cargo bench --bench core` 的 `map-spread` workload（20,000 次）单次样本为：编译 91.995 ms，验证 2.767 ms，执行 48.784 ms。映射展开为每个显式项生成单项映射，再由 `MergeMaps` 合并；后续键覆盖前值。
 
 解释器使用显式调用帧和 fuel 计数；名称以有序映射查找，数组与映射值以不可变 `Rc` 容器分享。切片为保持独立不可变值而复制所选元素，故其热路径吞吐低于纯索引。这换取了 API 简洁与可验证性，尚未进行 inline cache、寄存器分配、常量折叠、字符串 intern 或垃圾回收优化。后续优化必须保持 RFC 0002 的字节码验证与 fuel 语义，并更新本报告。
+
+## RFC 0123 托管分配剖析
+
+`qbench` 的每条 `quickcoffee.qbench.v1` 记录现在追加一次不计时执行的 `profile_*` 字段。热点计数来自 RFC 0122；`profile_value_allocations` 记录新建的引用计数字符串、数组、映射与字节码函数后备存储，`profile_environment_allocations` 记录 QuickCoffee 函数调用环境。它们是确定性事件数，不是字节数、存活对象数或系统分配器调用次数，也不包含编译期常量和嵌入宿主回调内部的分配。
+
+可用一个迭代快速复现计时和单次执行剖析；调整 `--iterations` 或 `--repeat` 只改变计时样本，不会放大 `profile_*`：
+
+```sh
+cargo run --locked --release --bin qbench -- --only closures-and-ranges --json --iterations 1
+```
+
+在本 RFC 的语义门禁运行中，`loop-core` 的单次执行为 `1117` 条指令、`203` 次查名、`102` 次存名且无托管值/环境分配；`closures-and-ranges` 为 `656` 条指令、`49` 次调用、`2` 次托管值分配和 `49` 次环境分配；`stepped-string-iteration` 为 `25` 条指令和 `5` 次托管值分配。这些确定性计数说明纯标量循环首先受名称访问影响，闭包负载同时受调用环境分配影响，字符串迭代会为标量快照创建后备存储，可作为后续局部槽位、intern 与迭代器优化的对照。

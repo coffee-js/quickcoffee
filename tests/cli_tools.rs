@@ -397,6 +397,8 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     let stats_stderr = String::from_utf8_lossy(&stats.stderr);
     assert!(stats_stderr.contains("qcoffee stats: instructions="));
     assert!(stats_stderr.contains("fuel_remaining="));
+    assert!(stats_stderr.contains("value_allocations="));
+    assert!(stats_stderr.contains("environment_allocations="));
 
     let args = Command::new(bin("qcoffee"))
         .args(["-e", "len(argv)", "--", "one", "two"])
@@ -700,6 +702,16 @@ fn qbench_json_is_guarded_and_machine_readable() {
             "\"verify_mad_ns\":",
             "\"execute_ns\":",
             "\"execute_mad_ns\":",
+            "\"profile_instructions\":",
+            "\"profile_call_depth_peak\":",
+            "\"profile_name_loads\":",
+            "\"profile_name_stores\":",
+            "\"profile_calls\":",
+            "\"profile_container_ops\":",
+            "\"profile_iterator_ops\":",
+            "\"profile_exception_ops\":",
+            "\"profile_value_allocations\":",
+            "\"profile_environment_allocations\":",
         ] {
             assert!(line.contains(field), "missing {field} in {line}");
         }
@@ -718,6 +730,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(text_stdout.contains("schema=quickcoffee.qbench.v1"));
     assert!(text_stdout.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
     assert!(text_stdout.contains("repeat=1"));
+    assert!(text_stdout.contains("profile_value_allocations="));
+    assert!(text_stdout.contains("profile_environment_allocations="));
     let repeated = Command::new(bin("qbench"))
         .args(["--json", "--iterations", "1", "--repeat", "3"])
         .output()

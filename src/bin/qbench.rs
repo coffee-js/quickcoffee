@@ -471,10 +471,24 @@ fn main() -> ExitCode {
         let (compile_ns, compile_mad_ns) = median_and_mad(&mut compile_samples);
         let (verify_ns, verify_mad_ns) = median_and_mad(&mut verify_samples);
         let (execute_ns, execute_mad_ns) = median_and_mad(&mut execute_samples);
+        let profile_program = engine
+            .compile_program(workload.source)
+            .expect("qbench workload must compile");
+        let mut profile_context = Context::new().with_fuel(100_000);
+        let profile_value = profile_context
+            .run_program(&profile_program)
+            .expect("qbench workload must execute");
+        assert_eq!(
+            profile_value.to_string(),
+            workload.expected,
+            "{}",
+            workload.name
+        );
+        let profile = profile_context.last_execution();
 
         if json {
             println!(
-                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{},\"profile_instructions\":{},\"profile_call_depth_peak\":{},\"profile_name_loads\":{},\"profile_name_stores\":{},\"profile_calls\":{},\"profile_container_ops\":{},\"profile_iterator_ops\":{},\"profile_exception_ops\":{},\"profile_value_allocations\":{},\"profile_environment_allocations\":{}}}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
@@ -486,11 +500,21 @@ fn main() -> ExitCode {
                 verify_ns,
                 verify_mad_ns,
                 execute_ns,
-                execute_mad_ns
+                execute_mad_ns,
+                profile.instructions,
+                profile.call_depth_peak,
+                profile.name_loads,
+                profile.name_stores,
+                profile.calls,
+                profile.container_ops,
+                profile.iterator_ops,
+                profile.exception_ops,
+                profile.value_allocations,
+                profile.environment_allocations
             );
         } else {
             println!(
-                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} expected={}",
+                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} profile_instructions={} profile_call_depth_peak={} profile_name_loads={} profile_name_stores={} profile_calls={} profile_container_ops={} profile_iterator_ops={} profile_exception_ops={} profile_value_allocations={} profile_environment_allocations={} expected={}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 workload.name,
@@ -502,6 +526,16 @@ fn main() -> ExitCode {
                 verify_mad_ns,
                 execute_ns,
                 execute_mad_ns,
+                profile.instructions,
+                profile.call_depth_peak,
+                profile.name_loads,
+                profile.name_stores,
+                profile.calls,
+                profile.container_ops,
+                profile.iterator_ops,
+                profile.exception_ops,
+                profile.value_allocations,
+                profile.environment_allocations,
                 workload.expected
             );
         }

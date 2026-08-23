@@ -2,7 +2,7 @@
 
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有原型链、`this`、`eval` 或嵌入 JavaScript。
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0122-vm-execution-profile.md](RFCs/0122-vm-execution-profile.md)。
+当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0123-managed-allocation-profile.md](RFCs/0123-managed-allocation-profile.md)。
 构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
 后续大需求、里程碑和拆分规则见 [ROADMAP.md](ROADMAP.md)。
 当前业务适用范围、语言缺口与 QuickJS 性能对照见 [docs/readiness.zh-CN.md](docs/readiness.zh-CN.md)。
@@ -46,6 +46,8 @@ cargo run --bin qtest -- --version
 cargo run --bin qdocco -- --version
 cargo run --bin qbench -- --version
 ```
+
+`qbench` 的每条记录还包含一次不计时执行的 `profile_*` 计数，用于比较指令热点、调用深度、托管值分配和词法环境分配；这些计数不乘以 `--iterations` 或 `--repeat`。
 
 `qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个成功执行或运行时失败的非空输入行输出统计，解析错误不生成新记录。
 

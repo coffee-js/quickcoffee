@@ -351,7 +351,10 @@ enum FunctionKind {
         chunk: Rc<Chunk>,
         env: Env,
     },
-    Native(NativeFunction),
+    Native {
+        function: NativeFunction,
+        allocation_profile: Option<fn(&Value) -> u64>,
+    },
 }
 type Env = Rc<RefCell<Environment>>;
 struct Environment {
@@ -464,6 +467,14 @@ pub struct ExecutionStats {
     pub iterator_ops: u64,
     /// Bytecode exception-handler and throw instructions attempted during the run.
     pub exception_ops: u64,
+    /// Fresh reference-counted value backings created during the run.
+    ///
+    /// This includes VM and standard-library strings, arrays, maps, and bytecode
+    /// functions, but excludes compile-time constants and values allocated by
+    /// embedding-host callbacks.
+    pub value_allocations: u64,
+    /// Lexical environments allocated for QuickCoffee function calls during the run.
+    pub environment_allocations: u64,
 }
 /// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
@@ -474,6 +485,18 @@ pub struct Context {
     cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
 }
+
+fn one_value_allocation(_: &Value) -> u64 {
+    1
+}
+
+fn array_and_element_allocations(value: &Value) -> u64 {
+    match value {
+        Value::Array(values) => values.len() as u64 + 1,
+        _ => 0,
+    }
+}
+
 impl Default for Context {
     fn default() -> Self {
         Self::new()
@@ -568,7 +591,28 @@ impl Context {
         self.set_global(
             name,
             Value::Function(Rc::new(Function {
-                inner: FunctionKind::Native(Rc::new(f)),
+                inner: FunctionKind::Native {
+                    function: Rc::new(f),
+                    allocation_profile: None,
+                },
+            })),
+        );
+    }
+    fn add_builtin<F>(
+        &mut self,
+        name: impl Into<String>,
+        f: F,
+        allocation_profile: fn(&Value) -> u64,
+    ) where
+        F: Fn(&[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.set_global(
+            name,
+            Value::Function(Rc::new(Function {
+                inner: FunctionKind::Native {
+                    function: Rc::new(f),
+                    allocation_profile: Some(allocation_profile),
+                },
             })),
         );
     }
@@ -607,6 +651,8 @@ impl Context {
             container_ops: 0,
             iterator_ops: 0,
             exception_ops: 0,
+            value_allocations: 0,
+            environment_allocations: 0,
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -651,34 +697,46 @@ impl Context {
             };
             Ok(Value::Number(n as f64))
         });
-        self.add_native("type", |xs| {
-            if xs.len() != 1 {
-                return Err(Error::runtime("type expects one argument"));
-            }
-            let n = match xs[0] {
-                Value::Nil => "nil",
-                Value::Bool(_) => "bool",
-                Value::Number(_) => "number",
-                Value::String(_) => "string",
-                Value::Array(_) => "array",
-                Value::Map(_) => "map",
-                Value::Function(_) => "function",
-            };
-            Ok(Value::String(Rc::from(n)))
-        });
-        self.add_native("range", |xs| {
-            if xs.len() != 2 {
-                return Err(Error::runtime("range expects two arguments"));
-            }
-            let (a, b) = numbers(xs)?;
-            numeric_range(a, b, false)
-        });
-        self.add_native("str", |xs| {
-            if xs.len() != 1 {
-                return Err(Error::runtime("str expects one argument"));
-            }
-            Ok(Value::String(Rc::from(xs[0].to_string())))
-        });
+        self.add_builtin(
+            "type",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("type expects one argument"));
+                }
+                let n = match xs[0] {
+                    Value::Nil => "nil",
+                    Value::Bool(_) => "bool",
+                    Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Array(_) => "array",
+                    Value::Map(_) => "map",
+                    Value::Function(_) => "function",
+                };
+                Ok(Value::String(Rc::from(n)))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "range",
+            |xs| {
+                if xs.len() != 2 {
+                    return Err(Error::runtime("range expects two arguments"));
+                }
+                let (a, b) = numbers(xs)?;
+                numeric_range(a, b, false)
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "str",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("str expects one argument"));
+                }
+                Ok(Value::String(Rc::from(xs[0].to_string())))
+            },
+            one_value_allocation,
+        );
         self.add_native("abs", |xs| {
             if xs.len() != 1 {
                 return Err(Error::runtime("abs expects one number"));
@@ -707,63 +765,78 @@ impl Context {
             };
             Ok(Value::Number(value))
         });
-        self.add_native("keys", |xs| {
-            if xs.len() != 1 {
-                return Err(Error::runtime("keys expects one argument"));
-            }
-            let Value::Map(map) = &xs[0] else {
-                return Err(Error::runtime("keys expects a map"));
-            };
-            Ok(Value::Array(Rc::new(
-                map.keys()
-                    .map(|key| Value::String(Rc::from(key.as_str())))
-                    .collect(),
-            )))
-        });
-        self.add_native("values", |xs| {
-            if xs.len() != 1 {
-                return Err(Error::runtime("values expects one argument"));
-            }
-            let Value::Map(map) = &xs[0] else {
-                return Err(Error::runtime("values expects a map"));
-            };
-            Ok(Value::Array(Rc::new(map.values().cloned().collect())))
-        });
-        self.add_native("join", |xs| {
-            if xs.len() != 2 {
-                return Err(Error::runtime("join expects array and separator"));
-            }
-            let Value::Array(values) = &xs[0] else {
-                return Err(Error::runtime("join expects an array"));
-            };
-            let Value::String(separator) = &xs[1] else {
-                return Err(Error::runtime("join separator must be string"));
-            };
-            Ok(Value::String(Rc::from(
-                values
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(separator),
-            )))
-        });
-        self.add_native("split", |xs| {
-            if xs.len() != 2 {
-                return Err(Error::runtime("split expects string and separator"));
-            }
-            let Value::String(input) = &xs[0] else {
-                return Err(Error::runtime("split expects a string"));
-            };
-            let Value::String(separator) = &xs[1] else {
-                return Err(Error::runtime("split separator must be string"));
-            };
-            Ok(Value::Array(Rc::new(
-                input
+        self.add_builtin(
+            "keys",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("keys expects one argument"));
+                }
+                let Value::Map(map) = &xs[0] else {
+                    return Err(Error::runtime("keys expects a map"));
+                };
+                Ok(Value::Array(Rc::new(
+                    map.keys()
+                        .map(|key| Value::String(Rc::from(key.as_str())))
+                        .collect(),
+                )))
+            },
+            array_and_element_allocations,
+        );
+        self.add_builtin(
+            "values",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("values expects one argument"));
+                }
+                let Value::Map(map) = &xs[0] else {
+                    return Err(Error::runtime("values expects a map"));
+                };
+                Ok(Value::Array(Rc::new(map.values().cloned().collect())))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "join",
+            |xs| {
+                if xs.len() != 2 {
+                    return Err(Error::runtime("join expects array and separator"));
+                }
+                let Value::Array(values) = &xs[0] else {
+                    return Err(Error::runtime("join expects an array"));
+                };
+                let Value::String(separator) = &xs[1] else {
+                    return Err(Error::runtime("join separator must be string"));
+                };
+                Ok(Value::String(Rc::from(
+                    values
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(separator),
+                )))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "split",
+            |xs| {
+                if xs.len() != 2 {
+                    return Err(Error::runtime("split expects string and separator"));
+                }
+                let Value::String(input) = &xs[0] else {
+                    return Err(Error::runtime("split expects a string"));
+                };
+                let Value::String(separator) = &xs[1] else {
+                    return Err(Error::runtime("split separator must be string"));
+                };
+                let parts: Vec<_> = input
                     .split(separator.as_ref())
                     .map(|part| Value::String(Rc::from(part)))
-                    .collect(),
-            )))
-        });
+                    .collect();
+                Ok(Value::Array(Rc::new(parts)))
+            },
+            array_and_element_allocations,
+        );
         self.add_native("assert", |xs| {
             let Some(Value::Bool(condition)) = xs.first() else {
                 return Err(Error::runtime("assert expects a boolean condition"));
@@ -826,6 +899,8 @@ struct Vm {
     container_ops: u64,
     iterator_ops: u64,
     exception_ops: u64,
+    value_allocations: u64,
+    environment_allocations: u64,
 }
 enum Step {
     Continue,
@@ -833,6 +908,14 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn record_value_allocations(&mut self, count: u64) {
+        self.value_allocations = self.value_allocations.saturating_add(count);
+    }
+
+    fn record_environment_allocation(&mut self) {
+        self.environment_allocations = self.environment_allocations.saturating_add(1);
+    }
+
     fn record_profile(&mut self, instruction: &Instruction) {
         match instruction {
             Instruction::Load(_) | Instruction::LoadOrNil(_) => self.name_loads += 1,
@@ -873,6 +956,8 @@ impl Vm {
             container_ops: self.container_ops,
             iterator_ops: self.iterator_ops,
             exception_ops: self.exception_ops,
+            value_allocations: self.value_allocations,
+            environment_allocations: self.environment_allocations,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -885,6 +970,8 @@ impl Vm {
         self.container_ops = nested.container_ops;
         self.iterator_ops = nested.iterator_ops;
         self.exception_ops = nested.exception_ops;
+        self.value_allocations = nested.value_allocations;
+        self.environment_allocations = nested.environment_allocations;
         result
     }
     fn stats(&self) -> ExecutionStats {
@@ -898,6 +985,8 @@ impl Vm {
             container_ops: self.container_ops,
             iterator_ops: self.iterator_ops,
             exception_ops: self.exception_ops,
+            value_allocations: self.value_allocations,
+            environment_allocations: self.environment_allocations,
         }
     }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
@@ -1120,16 +1209,14 @@ impl Vm {
                                 });
                             }
                             Value::String(value) => {
+                                let values: Vec<_> = value
+                                    .chars()
+                                    .map(|character| Value::String(Rc::from(character.to_string())))
+                                    .collect();
+                                self.record_value_allocations(values.len() as u64 + 1);
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
-                                        values: Rc::new(
-                                            value
-                                                .chars()
-                                                .map(|character| {
-                                                    Value::String(Rc::from(character.to_string()))
-                                                })
-                                                .collect(),
-                                        ),
+                                        values: Rc::new(values),
                                         position: if step < 0 {
                                             value.chars().count().saturating_sub(1)
                                         } else {
@@ -1204,6 +1291,7 @@ impl Vm {
                                         vec![Value::String(Rc::from(key.as_str())), value.clone()]
                                     });
                                     if value.is_some() {
+                                        self.record_value_allocations(1);
                                         *position += 1;
                                     }
                                     value
@@ -1257,14 +1345,19 @@ impl Vm {
                     }
                     Instruction::MakeArray(n) => {
                         let v = take(frame, n)?;
-                        frame.stack.push(Value::Array(Rc::new(v)))
+                        frame.stack.push(Value::Array(Rc::new(v)));
+                        self.record_value_allocations(1);
                     }
                     Instruction::Append => {
                         let value = pop(frame)?;
                         let Value::Array(mut values) = pop(frame)? else {
                             return Err(Error::runtime("append expects an array"));
                         };
+                        let cloned_backing = Rc::strong_count(&values) > 1;
                         Rc::make_mut(&mut values).push(value);
+                        if cloned_backing {
+                            self.record_value_allocations(1);
+                        }
                         frame.stack.push(Value::Array(values));
                     }
                     Instruction::MergeArrays(n) => {
@@ -1277,6 +1370,7 @@ impl Vm {
                             values.extend(segment.iter().cloned());
                         }
                         frame.stack.push(Value::Array(Rc::new(values)));
+                        self.record_value_allocations(1);
                     }
                     Instruction::MergeMaps(n) => {
                         let segments = take(frame, n)?;
@@ -1292,6 +1386,7 @@ impl Vm {
                             );
                         }
                         frame.stack.push(Value::Map(Rc::new(values)));
+                        self.record_value_allocations(1);
                     }
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
@@ -1300,16 +1395,19 @@ impl Vm {
                             return Err(Error::runtime("range bounds must be numbers"));
                         };
                         frame.stack.push(numeric_range(start, end, inclusive)?);
+                        self.record_value_allocations(1);
                     }
                     Instruction::MakeMap(keys) => {
                         let v = take(frame, keys.len())?;
                         frame
                             .stack
-                            .push(Value::Map(Rc::new(keys.into_iter().zip(v).collect())))
+                            .push(Value::Map(Rc::new(keys.into_iter().zip(v).collect())));
+                        self.record_value_allocations(1);
                     }
                     Instruction::Stringify => {
                         let value = pop(frame)?;
                         frame.stack.push(Value::String(Rc::from(value.to_string())));
+                        self.record_value_allocations(1);
                     }
                     Instruction::Concat(n) => {
                         let values = take(frame, n)?;
@@ -1321,17 +1419,20 @@ impl Vm {
                             output.push_str(&value);
                         }
                         frame.stack.push(Value::String(Rc::from(output)));
+                        self.record_value_allocations(1);
                     }
                     Instruction::Index => {
                         let key = pop(frame)?;
                         let target = pop(frame)?;
-                        frame.stack.push(index(target, key)?)
+                        frame.stack.push(index(self, target, key)?)
                     }
                     Instruction::Slice(inclusive) => {
                         let end = pop(frame)?;
                         let start = pop(frame)?;
                         let target = pop(frame)?;
-                        frame.stack.push(slice(target, start, end, inclusive)?)
+                        frame
+                            .stack
+                            .push(slice(self, target, start, end, inclusive)?)
                     }
                     Instruction::Member(name) => match pop(frame)? {
                         Value::Map(map) => {
@@ -1352,15 +1453,18 @@ impl Vm {
                             required,
                             rest,
                             chunk,
-                        } => frame.stack.push(Value::Function(Rc::new(Function {
-                            inner: FunctionKind::Bytecode {
-                                params: params.clone(),
-                                required: *required,
-                                rest: rest.clone(),
-                                chunk: chunk.clone(),
-                                env: frame.env.clone(),
-                            },
-                        }))),
+                        } => {
+                            frame.stack.push(Value::Function(Rc::new(Function {
+                                inner: FunctionKind::Bytecode {
+                                    params: params.clone(),
+                                    required: *required,
+                                    rest: rest.clone(),
+                                    chunk: chunk.clone(),
+                                    env: frame.env.clone(),
+                                },
+                            })));
+                            self.record_value_allocations(1);
+                        }
                         _ => return Err(Error::runtime("value used as function template")),
                     },
                     Instruction::Call(n) => {
@@ -1427,8 +1531,14 @@ fn call(
 ) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
-            FunctionKind::Native(function) => {
+            FunctionKind::Native {
+                function,
+                allocation_profile,
+            } => {
                 let value = function(&args)?;
+                if let Some(allocation_profile) = allocation_profile {
+                    vm.record_value_allocations(allocation_profile(&value));
+                }
                 frames
                     .last_mut()
                     .expect("call has a caller frame")
@@ -1460,6 +1570,7 @@ fn call(
                     )));
                 }
                 let local = env(Some(captured.clone()));
+                vm.record_environment_allocation();
                 for (index, pattern) in params.iter().enumerate() {
                     let value = args.get(index).cloned().unwrap_or(Value::Nil);
                     let mut bindings = vec![];
@@ -1480,6 +1591,7 @@ fn call(
                         rest.clone(),
                         Value::Array(Rc::new(args[params.len()..].to_vec())),
                     );
+                    vm.record_value_allocations(1);
                 }
                 frames.push(Frame {
                     chunk: chunk.clone(),
@@ -1513,6 +1625,7 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
                 .borrow_mut()
                 .values
                 .insert(handler.name, Value::String(Rc::from(error.to_string())));
+            vm.record_value_allocations(1);
             frame.pc = handler.catch_pc;
             return true;
         }
@@ -1758,6 +1871,7 @@ fn bind_pattern(
             for (index, pattern) in patterns.iter().enumerate() {
                 if let Pattern::Rest(name) = pattern {
                     let rest = Value::Array(Rc::new(values[index..].to_vec()));
+                    vm.record_value_allocations(1);
                     bindings.push((name.clone(), rest.clone()));
                     if name != "_" {
                         env.borrow_mut().values.insert(name.clone(), rest);
@@ -1805,6 +1919,7 @@ fn bind_pattern(
                 }
             }
             let rest_value = Value::Map(Rc::new(remaining));
+            vm.record_value_allocations(1);
             bindings.push((rest.clone(), rest_value.clone()));
             if rest != "_" {
                 env.borrow_mut().values.insert(rest.clone(), rest_value);
@@ -1813,17 +1928,20 @@ fn bind_pattern(
         }
     }
 }
-fn index(target: Value, key: Value) -> Result<Value, Error> {
+fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
     match (target, key) {
         (Value::Array(xs), Value::Number(i)) if i.is_finite() && i.fract() == 0. => xs
             .get(sequence_index(i, xs.len(), "array")?)
             .cloned()
             .ok_or_else(|| Error::runtime("array index out of range")),
-        (Value::String(text), Value::Number(i)) if i.is_finite() && i.fract() == 0. => text
-            .chars()
-            .nth(sequence_index(i, text.chars().count(), "string")?)
-            .map(|character| Value::String(Rc::from(character.to_string())))
-            .ok_or_else(|| Error::runtime("string index out of range")),
+        (Value::String(text), Value::Number(i)) if i.is_finite() && i.fract() == 0. => {
+            let character = text
+                .chars()
+                .nth(sequence_index(i, text.chars().count(), "string")?)
+                .ok_or_else(|| Error::runtime("string index out of range"))?;
+            vm.record_value_allocations(1);
+            Ok(Value::String(Rc::from(character.to_string())))
+        }
         (Value::Map(m), Value::String(k)) => m
             .get(k.as_ref())
             .cloned()
@@ -1840,7 +1958,13 @@ fn sequence_index(index: f64, len: usize, kind: &str) -> Result<usize, Error> {
     }
     Ok(resolved as usize)
 }
-fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
+fn slice(
+    vm: &mut Vm,
+    target: Value,
+    start: Value,
+    end: Value,
+    inclusive: bool,
+) -> Result<Value, Error> {
     match target {
         Value::Array(values) => {
             let start = slice_bound(start, values.len(), "slice start")?;
@@ -1853,7 +1977,9 @@ fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Val
             if start > end || end > values.len() {
                 return Err(Error::runtime("slice bounds out of range"));
             }
-            Ok(Value::Array(Rc::new(values[start..end].to_vec())))
+            let value = Value::Array(Rc::new(values[start..end].to_vec()));
+            vm.record_value_allocations(1);
+            Ok(value)
         }
         Value::String(text) => {
             let scalar_len = text.chars().count();
@@ -1875,7 +2001,9 @@ fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Val
                 .char_indices()
                 .nth(end)
                 .map_or(text.len(), |(offset, _)| offset);
-            Ok(Value::String(Rc::from(&text[start_byte..end_byte])))
+            let value = Value::String(Rc::from(&text[start_byte..end_byte]));
+            vm.record_value_allocations(1);
+            Ok(value)
         }
         _ => Err(Error::runtime("slice expects an array or string")),
     }
