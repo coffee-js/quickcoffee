@@ -116,6 +116,26 @@ fn execution_stats_classify_hot_vm_operations() {
     let stats = context.last_execution();
     assert_eq!(stats.calls, 1);
     assert_eq!(stats.container_ops, 1);
+
+    assert_eq!(
+        context
+            .eval("sum = 0\nfor value in [1...3] then sum += value\nsum")
+            .unwrap()
+            .as_number(),
+        Some(3.)
+    );
+    assert!(context.last_execution().iterator_ops >= 4);
+
+    assert_eq!(
+        context
+            .eval("try throw 1 catch error then 42")
+            .unwrap()
+            .as_number(),
+        Some(42.)
+    );
+    assert!(context.last_execution().exception_ops >= 2);
+    assert!(context.eval("throw 1").is_err());
+    assert_eq!(context.last_execution().exception_ops, 1);
 }
 
 #[test]

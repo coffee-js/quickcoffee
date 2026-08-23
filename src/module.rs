@@ -192,6 +192,12 @@ fn execute_module(
     *fuel = execution.fuel_remaining;
     stats.instructions += execution.instructions;
     stats.call_depth_peak = stats.call_depth_peak.max(execution.call_depth_peak);
+    stats.name_loads += execution.name_loads;
+    stats.name_stores += execution.name_stores;
+    stats.calls += execution.calls;
+    stats.container_ops += execution.container_ops;
+    stats.iterator_ops += execution.iterator_ops;
+    stats.exception_ops += execution.exception_ops;
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

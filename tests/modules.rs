@@ -23,6 +23,9 @@ fn named_static_imports_and_exports_keep_module_globals_private() {
     assert_eq!(exports.len(), 1);
     assert!(context.get_global("hidden").is_none());
     assert!(context.get_global("answer").is_none());
+    let stats = context.last_execution();
+    assert!(stats.name_loads > 0);
+    assert!(stats.calls > 0);
 }
 
 #[test]

@@ -846,7 +846,9 @@ impl Vm {
             | Instruction::MakeMap(_)
             | Instruction::Index
             | Instruction::Slice(_)
-            | Instruction::Member(_) => self.container_ops += 1,
+            | Instruction::Member(_)
+            | Instruction::Contains
+            | Instruction::HasKey => self.container_ops += 1,
             Instruction::IterStartEnumerable
             | Instruction::IterStartMap
             | Instruction::IterNext { .. }
