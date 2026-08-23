@@ -33,7 +33,7 @@ RFC 0128 把嵌入宿主、命名模块与 CLI 文件入口已知的不透明来
 
 RFC 0129 让 AST lowering 的控制流上下文错误、单文件模块指令错误与重复 export 保留触发关键字 span；一般成功表达式的 bytecode/runtime 归因仍未完成。
 
-RFC 0130 让成功表达式与 assignment/destructuring statement 的 span 进入私有 `Program` source-map sidecar，并为正常编译路径的 runtime/resource 错误提供 primary label；裸 `Chunk` verifier 与多标签调用栈仍待后续完成。
+RFC 0130 让成功表达式与 assignment/destructuring statement 的 span 进入私有 `Program` source-map sidecar，并为正常编译路径的 runtime/resource 错误提供 primary label。RFC 0131 让 mapped verifier 错误和运行期 QuickCoffee 调用链分别获得精确 primary 与有序 secondary label；裸 `Chunk` 仍刻意无来源。
 
 字节码指纹在 span 未进入规范编码前不得改变。任何无法可靠定位的错误宁可没有标签，也不得伪造列或来源名。
 

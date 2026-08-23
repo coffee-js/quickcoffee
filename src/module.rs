@@ -117,8 +117,7 @@ impl Engine {
         }
         let (chunk, source_map) = bytecode::compile_mapped(&syntax.body)
             .map_err(|error| error.with_source_name(name.as_str()))?;
-        chunk
-            .verify()
+        bytecode::verify_mapped(&chunk, &source_map)
             .map_err(|error| error.with_source_name(name.as_str()))?;
         let program = Program::from_compiled(chunk, source_map, Some(name.as_str()));
         Ok(Module {

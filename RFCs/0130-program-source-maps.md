@@ -17,7 +17,7 @@ RFC 0129 只让 lowering 自身拒绝的 AST 节点保留 span。正常表达式
 5. 运行期错误在尚无 label 时使用失败 instruction 的 span；函数 arity、call-depth 与 native callback 错误使用 caller 的 call expression span。嵌套函数、跨 eval 保留的函数和跨模块导入函数使用其定义 Program 的 source map。fuel/cancellation 在停止前使用下一条 instruction 的 span。
 6. source-map 查询和 `SourceSpan`/来源字符串构造只发生在错误慢路径。成功 VM instruction 热路径不查询 map；VM frame 直接共享其定义 `Program` 的调试信息，使跨 eval 与跨模块函数无需扫描或注册 source-map 表。
 7. 结构化 `labels()` 与 `qcoffee --json` 的既有 `line`/可选 `source` 字段获得新数据；legacy `Display` 对 runtime、resource 与 verify 错误继续保持无位置文本，parse 错误保持既有行号文本。已有 label 的宿主错误不被覆盖。
-8. 本 RFC 不给宿主伪造 bytecode 的 verifier 错误补来源，也不增加 stack trace 或 secondary call-site label；这些属于 #74 后续工作。
+8. RFC 0131 为 source-compiled `Program` 的 verifier 错误补充 sidecar primary label，并增加 secondary call-site label；宿主伪造 bytecode 继续不补来源。
 
 ## 验收
 

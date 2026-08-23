@@ -75,6 +75,17 @@ fn runtime_errors_in_dependency_functions_keep_the_dependency_name() {
         Some("dependency")
     );
     assert_eq!(error.labels()[0].span.start.line, 1);
+    assert_eq!(error.labels().len(), 2);
+    assert_eq!(
+        error.labels()[1].kind,
+        quickcoffee::DiagnosticLabelKind::Secondary
+    );
+    assert_eq!(
+        error.labels()[1].message.as_deref(),
+        Some("called from here")
+    );
+    assert_eq!(error.labels()[1].span.source_name.as_deref(), Some("main"));
+    assert_eq!(error.labels()[1].span.start.line, 2);
 }
 
 #[test]

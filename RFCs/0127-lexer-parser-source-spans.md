@@ -17,7 +17,7 @@ RFC 0126 建立结构化诊断类型，但既有 lexer 仍只给每个 token 保
 5. parser 错误引用当前未消费 token；若错误是在取出 token 后才确认，则引用刚消费的 token。parser 不再把这种错误错误地指向后续 token。
 6. lexer 的非法字符错误在来源未改写时附加该单个 Unicode 标量的精确 span。尚未迁移的复合词法错误继续保留行级位置，后续切片逐项收敛。
 
-本 RFC 不给 AST、bytecode instruction 或运行期值附加 span，不改变字节码编码与 `Program::fingerprint()`。RFC 0128 已把宿主、模块与 CLI 已知的来源名称传播到本 RFC 产生的 label；AST/lowering、bytecode、verify/runtime 诊断仍属于 #74 后续工作。
+本 RFC 不给 AST、bytecode instruction 或运行期值附加 span，不改变字节码编码与 `Program::fingerprint()`。RFC 0128 已把宿主、模块与 CLI 已知的来源名称传播到本 RFC 产生的 label；RFC 0129–0131 分别完成 lowering、mapped bytecode verification 与 runtime/call-context 的后续传播。
 
 ## 验收
 

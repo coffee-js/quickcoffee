@@ -6,7 +6,7 @@
 
 `break`、`continue`、`return` 的 lowering 上下文错误、单文件误用模块指令及重复模块导出会保留触发关键字 span。这些验证 span 不改变公开字节码；预处理改写输入继续降级为可靠行号，而不猜测列。
 
-编译后的 `Program` 以私有 source-map sidecar 保存顶层表达式、嵌套/默认参数 chunk、assignment/destructuring statement、模块、运行期错误、宿主调用错误与资源停止位置。sidecar 不进入字节码指纹和反汇编，且只在错误慢路径查询，不给成功 VM instruction 增加工作。宿主构造的裸 `Chunk` 刻意保持无来源；不可信 bytecode verifier 位置和多标签调用栈仍待后续完成。
+编译后的 `Program` 以私有 source-map sidecar 保存顶层表达式、嵌套/默认参数 chunk、assignment/destructuring statement、模块、verifier、运行期错误、宿主调用错误与资源停止位置。sidecar 不进入字节码指纹和反汇编，只在编译/VM 错误慢路径查询。运行期错误先保留 primary 失败位置，再按由近及远顺序追加 `called from here` 的 QuickCoffee 调用点 secondary label；宿主构造的裸 `Chunk` 刻意保持无来源。
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 

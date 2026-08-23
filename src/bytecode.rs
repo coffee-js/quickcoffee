@@ -142,11 +142,17 @@ impl Chunk {
     }
     /// Verifies stack/control-flow safety before execution.
     pub fn verify(&self) -> Result<(), Error> {
+        self.verify_inner()
+            .map_err(|error| error.with_verification_chunk(self as *const Self as usize))
+    }
+    fn verify_inner(&self) -> Result<(), Error> {
         if self.code.is_empty() {
             return Err(Error::verify("chunk is empty"));
         }
         if !matches!(self.code.last(), Some(Instruction::Return)) {
-            return Err(Error::verify("chunk does not end in Return"));
+            return Err(
+                Error::verify("chunk does not end in Return").at_instruction(self.code.len() - 1)
+            );
         }
         for (pc, op) in self.code.iter().enumerate() {
             match op {
@@ -155,43 +161,56 @@ impl Chunk {
                     Some(_) => {
                         return Err(Error::verify(format!(
                             "constant {i} at instruction {pc} is not a value"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     None => {
                         return Err(Error::verify(format!(
                             "constant {i} at instruction {pc} is out of bounds"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                 },
                 Instruction::MakeFunction(i) => match self.constants.get(*i) {
                     Some(Constant::Function { chunk, params, .. }) => {
-                        params.iter().try_for_each(validate_pattern)?;
+                        params
+                            .iter()
+                            .try_for_each(validate_pattern)
+                            .map_err(|error| error.at_instruction(pc))?;
                         chunk.verify()?
                     }
                     Some(_) => {
                         return Err(Error::verify(format!(
                             "constant {i} at instruction {pc} is not a function"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     None => {
                         return Err(Error::verify(format!(
                             "constant {i} at instruction {pc} is out of bounds"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                 },
-                Instruction::Destructure(pattern) => validate_pattern(pattern)?,
+                Instruction::Destructure(pattern) => {
+                    validate_pattern(pattern).map_err(|error| error.at_instruction(pc))?
+                }
                 Instruction::Jump(offset)
                 | Instruction::JumpIfFalse(offset)
                 | Instruction::JumpIfNil(offset)
                 | Instruction::IterNext { end: offset, .. } => {
                     if let Instruction::IterNext { patterns, .. } = op {
-                        patterns.iter().try_for_each(validate_pattern)?;
+                        patterns
+                            .iter()
+                            .try_for_each(validate_pattern)
+                            .map_err(|error| error.at_instruction(pc))?;
                     }
                     let target = pc as i64 + 1 + *offset as i64;
                     if target < 0 || target >= self.code.len() as i64 {
                         return Err(Error::verify(format!(
                             "jump at instruction {pc} leaves chunk"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                 }
                 Instruction::Try { catch, .. } => {
@@ -199,7 +218,8 @@ impl Chunk {
                     if target < 0 || target >= self.code.len() as i64 {
                         return Err(Error::verify(format!(
                             "catch target at instruction {pc} leaves chunk"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                 }
                 _ => {}
@@ -217,9 +237,10 @@ impl Chunk {
             let state = states[pc].expect("queued verifier state");
             let require = |count: i32| {
                 if state.0 < count {
-                    Err(Error::verify(format!(
-                        "stack underflow at instruction {pc}"
-                    )))
+                    Err(
+                        Error::verify(format!("stack underflow at instruction {pc}"))
+                            .at_instruction(pc),
+                    )
                 } else {
                     Ok(())
                 }
@@ -228,7 +249,8 @@ impl Chunk {
                 match states[target] {
                     Some(existing) if existing != successor => Err(Error::verify(format!(
                         "inconsistent stack state at instruction {target}"
-                    ))),
+                    ))
+                    .at_instruction(target)),
                     Some(_) => Ok(()),
                     None => {
                         states[target] = Some(successor);
@@ -343,7 +365,8 @@ impl Chunk {
                     if state.2 == 0 {
                         return Err(Error::verify(format!(
                             "handler stack underflow at instruction {pc}"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     next(fallthrough, (state.0, state.1, state.2 - 1))?;
                 }
@@ -362,7 +385,8 @@ impl Chunk {
                     if state.1 == 0 {
                         return Err(Error::verify(format!(
                             "iterator stack underflow at instruction {pc}"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     next(fallthrough, state)?;
                     next(jump_target(pc, *end), (state.0, state.1 - 1, state.2))?;
@@ -371,7 +395,8 @@ impl Chunk {
                     if state.1 == 0 {
                         return Err(Error::verify(format!(
                             "iterator stack underflow at instruction {pc}"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     next(fallthrough, (state.0, state.1 - 1, state.2))?;
                 }
@@ -380,12 +405,14 @@ impl Chunk {
                     if state.1 != 0 {
                         return Err(Error::verify(format!(
                             "iterator leaked at Return instruction {pc}"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                     if state.2 != 0 {
                         return Err(Error::verify(format!(
                             "handler leaked at Return instruction {pc}"
-                        )));
+                        ))
+                        .at_instruction(pc));
                     }
                 }
             }
@@ -736,11 +763,44 @@ pub(crate) struct ChunkSourceMap {
     pub(crate) instructions: Vec<u32>,
     pub(crate) spans: Vec<TokenSpan>,
 }
+impl ChunkSourceMap {
+    fn span(&self, pc: usize) -> Option<crate::SourceSpan> {
+        let span_id = *self.instructions.get(pc)?;
+        if span_id == 0 {
+            return None;
+        }
+        self.spans
+            .get(span_id as usize - 1)
+            .copied()
+            .map(TokenSpan::into_source_span)
+    }
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct CompiledSourceMap {
     pub(crate) top: ChunkSourceMap,
     pub(crate) nested: Vec<(Rc<Chunk>, ChunkSourceMap)>,
+}
+impl CompiledSourceMap {
+    fn span(&self, top_chunk: usize, chunk: usize, pc: usize) -> Option<crate::SourceSpan> {
+        if chunk == top_chunk {
+            return self.top.span(pc);
+        }
+        self.nested
+            .iter()
+            .find(|(nested, _)| Rc::as_ptr(nested) as usize == chunk)
+            .and_then(|(_, source_map)| source_map.span(pc))
+    }
+}
+
+pub(crate) fn verify_mapped(chunk: &Chunk, source_map: &CompiledSourceMap) -> Result<(), Error> {
+    let top_chunk = chunk as *const Chunk as usize;
+    chunk.verify().map_err(|error| {
+        let span = error
+            .verification_site()
+            .and_then(|(failed_chunk, pc)| source_map.span(top_chunk, failed_chunk, pc));
+        error.with_span_if_missing(span)
+    })
 }
 
 fn lower(program: &[Stmt], record_source_map: bool) -> Result<Compiler, Error> {
@@ -1848,5 +1908,91 @@ impl Compiler {
         self.expr(b)?;
         self.patch_jump(end);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ErrorKind, parser};
+
+    fn replace_mapped_chunk(
+        source_map: &mut CompiledSourceMap,
+        original: &Rc<Chunk>,
+        replacement: Rc<Chunk>,
+    ) {
+        let (mapped, _) = source_map
+            .nested
+            .iter_mut()
+            .find(|(mapped, _)| Rc::ptr_eq(mapped, original))
+            .expect("compiled nested chunk has a source map");
+        *mapped = replacement;
+    }
+
+    #[test]
+    fn mapped_verification_errors_use_the_failing_top_level_instruction_span() {
+        let ast = parser::parse("value = 1\nvalue").unwrap();
+        let (mut chunk, source_map) = compile_mapped(&ast).unwrap();
+        chunk.code[3] = Instruction::Pop;
+
+        let error = verify_mapped(&chunk, &source_map).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Verify);
+        assert_eq!(
+            error.to_string(),
+            "verify error: stack underflow at instruction 3"
+        );
+        let span = &error.labels()[0].span;
+        assert_eq!(span.start.line, 2);
+        assert_eq!(span.start.column, Some(1));
+
+        let raw = chunk.verify().unwrap_err();
+        assert!(raw.labels().is_empty());
+    }
+
+    #[test]
+    fn mapped_verification_errors_follow_nested_function_and_default_chunks() {
+        let ast = parser::parse("fail = ->\n  missing\nfail()").unwrap();
+        let (mut chunk, mut source_map) = compile_mapped(&ast).unwrap();
+        let Constant::Function { chunk: inner, .. } = &mut chunk.constants[0] else {
+            panic!("function template is the first constant");
+        };
+        let original = inner.clone();
+        let mut invalid = (**inner).clone();
+        invalid.code[0] = Instruction::Pop;
+        let replacement = Rc::new(invalid);
+        *inner = replacement.clone();
+        replace_mapped_chunk(&mut source_map, &original, replacement);
+
+        let error = verify_mapped(&chunk, &source_map).unwrap_err();
+        let span = &error.labels()[0].span;
+        assert_eq!(span.start.line, 2);
+        assert_eq!(span.start.column, Some(3));
+
+        let ast = parser::parse("[value = missing] = []\n42").unwrap();
+        let (mut chunk, mut source_map) = compile_mapped(&ast).unwrap();
+        let default = chunk
+            .code
+            .iter_mut()
+            .find_map(|instruction| match instruction {
+                Instruction::Destructure(Pattern::Array(patterns)) => {
+                    patterns.iter_mut().find_map(|pattern| match pattern {
+                        Pattern::Default { default, .. } => Some(default),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .expect("destructuring pattern carries its compiled default chunk");
+        let original = default.clone();
+        let mut invalid = (**default).clone();
+        invalid.code[0] = Instruction::Pop;
+        let replacement = Rc::new(invalid);
+        *default = replacement.clone();
+        replace_mapped_chunk(&mut source_map, &original, replacement);
+
+        let error = verify_mapped(&chunk, &source_map).unwrap_err();
+        let span = &error.labels()[0].span;
+        assert_eq!(span.start.line, 1);
+        assert_eq!(span.start.column, Some(10));
     }
 }
