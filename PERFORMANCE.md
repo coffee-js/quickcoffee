@@ -17,10 +17,10 @@ make qbench
 # 或 cargo run --release --bin qbench -- --json --iterations 100
 ```
 
-要自动取得三次样本的中位数，可加 `--repeat 3`；输出中的 `repeat` 记录样本数，三个 `*_ns` 字段仍是每轮迭代总耗时的中位数：
+要自动取得稳健统计，正式报告应取至少 11 次样本；输出中的 `repeat` 记录样本数，三个 `*_ns` 字段仍是每轮迭代总耗时的中位数，配套的 `*_mad_ns` 是相对该中位数的 median absolute deviation（MAD）。MAD 为零只表示该组样本没有可观测离散度，不代表跨机器可比：
 
 ```sh
-cargo run --locked --release --bin qbench -- --json --iterations 100 --repeat 3
+cargo run --locked --release --bin qbench -- --json --iterations 100 --repeat 11
 ```
 
 与官方 QuickJS 的同机 CLI 对比使用独立的 `qcompare.v1` schema，不和上述进程内 `qbench.v1` 字段混用。先构建全部 CLI，再由调用者显式提供 QuickJS 路径：

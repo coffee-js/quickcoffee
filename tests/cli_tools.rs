@@ -695,12 +695,18 @@ fn qbench_json_is_guarded_and_machine_readable() {
             "\"repeat\":1",
             "\"expected\":\"",
             "\"compile_ns\":",
+            "\"compile_mad_ns\":",
             "\"verify_ns\":",
+            "\"verify_mad_ns\":",
             "\"execute_ns\":",
+            "\"execute_mad_ns\":",
         ] {
             assert!(line.contains(field), "missing {field} in {line}");
         }
         assert!(line.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"))));
+        assert!(line.contains("\"compile_mad_ns\":0"));
+        assert!(line.contains("\"verify_mad_ns\":0"));
+        assert!(line.contains("\"execute_mad_ns\":0"));
     }
     let text = Command::new(bin("qbench"))
         .args(["--iterations", "1"])

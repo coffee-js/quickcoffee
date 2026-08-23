@@ -292,17 +292,31 @@ fn compare_qjs(path: &str, iterations: usize, repeat: usize, json: bool) -> Resu
             }
             quickjs_samples.push(start.elapsed().as_nanos());
         }
-        let quickcoffee_ns = median(&mut quickcoffee_samples);
-        let quickjs_ns = median(&mut quickjs_samples);
+        let (quickcoffee_ns, quickcoffee_mad_ns) = median_and_mad(&mut quickcoffee_samples);
+        let (quickjs_ns, quickjs_mad_ns) = median_and_mad(&mut quickjs_samples);
         if json {
             println!(
-                "{{\"schema\":\"{COMPARISON_SCHEMA}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"quickcoffee_cli_ns\":{},\"quickjs_cli_ns\":{}}}",
-                workload.name, iterations, repeat, workload.expected, quickcoffee_ns, quickjs_ns
+                "{{\"schema\":\"{COMPARISON_SCHEMA}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"quickcoffee_cli_ns\":{},\"quickcoffee_cli_mad_ns\":{},\"quickjs_cli_ns\":{},\"quickjs_cli_mad_ns\":{}}}",
+                workload.name,
+                iterations,
+                repeat,
+                workload.expected,
+                quickcoffee_ns,
+                quickcoffee_mad_ns,
+                quickjs_ns,
+                quickjs_mad_ns
             );
         } else {
             println!(
-                "schema={COMPARISON_SCHEMA} {} iterations={} repeat={} quickcoffee_cli_ns={} quickjs_cli_ns={} expected={}",
-                workload.name, iterations, repeat, quickcoffee_ns, quickjs_ns, workload.expected
+                "schema={COMPARISON_SCHEMA} {} iterations={} repeat={} quickcoffee_cli_ns={} quickcoffee_cli_mad_ns={} quickjs_cli_ns={} quickjs_cli_mad_ns={} expected={}",
+                workload.name,
+                iterations,
+                repeat,
+                quickcoffee_ns,
+                quickcoffee_mad_ns,
+                quickjs_ns,
+                quickjs_mad_ns,
+                workload.expected
             );
         }
     }
@@ -316,6 +330,14 @@ fn json_escape(value: &str) -> String {
 fn median(samples: &mut [u128]) -> u128 {
     samples.sort_unstable();
     samples[samples.len() / 2]
+}
+
+fn median_and_mad(samples: &mut [u128]) -> (u128, u128) {
+    let center = median(samples);
+    for sample in &mut *samples {
+        *sample = sample.abs_diff(center);
+    }
+    (center, median(samples))
 }
 
 fn main() -> ExitCode {
@@ -446,13 +468,13 @@ fn main() -> ExitCode {
             }
             execute_samples.push(start.elapsed().as_nanos());
         }
-        let compile_ns = median(&mut compile_samples);
-        let verify_ns = median(&mut verify_samples);
-        let execute_ns = median(&mut execute_samples);
+        let (compile_ns, compile_mad_ns) = median_and_mad(&mut compile_samples);
+        let (verify_ns, verify_mad_ns) = median_and_mad(&mut verify_samples);
+        let (execute_ns, execute_mad_ns) = median_and_mad(&mut execute_samples);
 
         if json {
             println!(
-                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"verify_ns\":{},\"execute_ns\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{}}}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
@@ -460,20 +482,26 @@ fn main() -> ExitCode {
                 repeat,
                 json_escape(workload.expected),
                 compile_ns,
+                compile_mad_ns,
                 verify_ns,
-                execute_ns
+                verify_mad_ns,
+                execute_ns,
+                execute_mad_ns
             );
         } else {
             println!(
-                "schema={} version={} {} iterations={} repeat={} compile_ns={} verify_ns={} execute_ns={} expected={}",
+                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} expected={}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 workload.name,
                 iterations,
                 repeat,
                 compile_ns,
+                compile_mad_ns,
                 verify_ns,
+                verify_mad_ns,
                 execute_ns,
+                execute_mad_ns,
                 workload.expected
             );
         }
