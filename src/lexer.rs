@@ -1,4 +1,5 @@
 use crate::vm::Error;
+use std::{iter::Peekable, str::Chars};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -127,11 +128,11 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, Error> {
 }
 
 pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Error> {
-    let normalized = normalize_heredocs(source)?;
+    let normalized = normalize_indented_maps(&normalize_heredocs(source)?);
     let logical_lines = normalize_multiline_strings(&normalized);
     let mut out = LexOutput::new();
     let mut indents = vec![0usize];
-    let mut nesting = 0usize;
+    let mut groups = Vec::new();
     let mut continued = false;
     let mut block_comment_start = None;
     for (line_number, raw_line) in logical_lines {
@@ -158,29 +159,38 @@ pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<usize>), Erro
         if content.is_empty() || content.starts_with('#') {
             continue;
         }
-        if nesting == 0 && !continued {
+        if groups.is_empty() && !continued {
             let current = *indents.last().expect("indent stack");
-            if prefix > current {
-                indents.push(prefix);
-                out.push(Token::Indent);
-            } else if prefix < current {
-                while prefix < *indents.last().expect("indent stack") {
-                    indents.pop();
-                    out.push(Token::Dedent);
+            match prefix.cmp(&current) {
+                std::cmp::Ordering::Greater => {
+                    indents.push(prefix);
+                    out.push(Token::Indent);
                 }
-                if prefix != *indents.last().expect("indent stack") {
-                    return Err(Error::parse("inconsistent indentation").at_line(line_number));
+                std::cmp::Ordering::Less => {
+                    while prefix < *indents.last().expect("indent stack") {
+                        indents.pop();
+                        out.push(Token::Dedent);
+                    }
+                    if prefix != *indents.last().expect("indent stack") {
+                        return Err(Error::parse("inconsistent indentation").at_line(line_number));
+                    }
+                    out.push(Token::Semi);
                 }
-                out.push(Token::Semi);
+                std::cmp::Ordering::Equal => {}
             }
         }
-        lex_line(content, line_number, &mut nesting, &mut out)?;
-        continued = nesting == 0 && line_continues(out.last());
-        if nesting == 0 && !continued && !matches!(out.last(), Some(Token::Semi)) {
+        lex_line(content, line_number, &mut groups, &mut out)?;
+        continued = groups.is_empty() && line_continues(out.last());
+        let needs_separator =
+            (groups.is_empty() && !continued && !matches!(out.last(), Some(Token::Semi)))
+                || (matches!(groups.last(), Some('[' | '{'))
+                    && !continued
+                    && collection_item_can_end(out.last()));
+        if needs_separator {
             out.push(Token::Semi);
         }
     }
-    if nesting != 0 {
+    if !groups.is_empty() {
         return Err(Error::parse("unterminated grouping delimiter")
             .at_line(normalized.lines().count().max(1)));
     }
@@ -206,9 +216,22 @@ fn normalize_multiline_strings(source: &str) -> Vec<(usize, String)> {
     let physical: Vec<&str> = source.split('\n').collect();
     let mut logical = Vec::with_capacity(physical.len());
     let mut index = 0usize;
+    let mut block_comment = false;
     while index < physical.len() {
         let line_number = index + 1;
         let mut line = physical[index].to_owned();
+        let content = line.trim_start();
+        if block_comment || content.starts_with('#') {
+            if block_comment && content.contains("###") {
+                block_comment = false;
+            } else if !block_comment && content.starts_with("###") && !content[3..].contains("###")
+            {
+                block_comment = true;
+            }
+            logical.push((line_number, line));
+            index += 1;
+            continue;
+        }
         while has_unclosed_string(&line) && index + 1 < physical.len() {
             let next = physical[index + 1];
             let continued_without_space = trim_single_trailing_backslash(&mut line);
@@ -238,7 +261,7 @@ fn trim_single_trailing_backslash(line: &mut String) -> bool {
         }
         backslashes += 1;
     }
-    if backslashes.is_multiple_of(2) {
+    if backslashes % 2 == 0 {
         line.truncate(trimmed_len);
         false
     } else {
@@ -275,7 +298,59 @@ fn has_unclosed_string(line: &str) -> bool {
 fn normalize_heredocs(source: &str) -> Result<String, Error> {
     let mut chars = source.chars().peekable();
     let mut out = String::with_capacity(source.len());
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut string_quote = None;
+    let mut escaped = false;
     while let Some(ch) = chars.next() {
+        if line_comment {
+            out.push(ch);
+            if ch == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment {
+            out.push(ch);
+            if ch == '#' && chars.peek() == Some(&'#') {
+                chars.next();
+                out.push('#');
+                if chars.peek() == Some(&'#') {
+                    chars.next();
+                    out.push('#');
+                    block_comment = false;
+                }
+            }
+            continue;
+        }
+        if let Some(quote) = string_quote {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote {
+                string_quote = None;
+            }
+            continue;
+        }
+        if ch == '#' {
+            out.push(ch);
+            if chars.peek() == Some(&'#') {
+                chars.next();
+                out.push('#');
+                if chars.peek() == Some(&'#') {
+                    chars.next();
+                    out.push('#');
+                    block_comment = true;
+                } else {
+                    line_comment = true;
+                }
+            } else {
+                line_comment = true;
+            }
+            continue;
+        }
         if (ch == '\'' || ch == '"') && chars.peek() == Some(&ch) {
             chars.next();
             if chars.peek() == Some(&ch) {
@@ -322,14 +397,111 @@ fn normalize_heredocs(source: &str) -> Result<String, Error> {
             continue;
         }
         out.push(ch);
+        if ch == '\'' || ch == '"' {
+            string_quote = Some(ch);
+            escaped = false;
+        }
     }
     Ok(out)
+}
+
+/// Lowers the unbraced object form used by CoffeeScript into explicit map
+/// delimiters without adding physical lines. A block is recognized only when
+/// an indented child begins with an identifier/string key and follows a parent
+/// assignment (`record =`) or map entry (`nested:`).
+fn normalize_indented_maps(source: &str) -> String {
+    let mut output: Vec<String> = Vec::new();
+    let mut active: Vec<usize> = Vec::new();
+    for raw in source.split('\n') {
+        let indent = raw.len() - raw.trim_start_matches(' ').len();
+        let content = raw[indent..].trim_end();
+        if !content.is_empty() && !content.starts_with('#') {
+            while active.last().is_some_and(|child| indent < *child) {
+                append_map_closing(&mut output);
+                active.pop();
+            }
+            if let Some(previous) = previous_significant(&mut output) {
+                let previous_indent = previous.len() - previous.trim_start_matches(' ').len();
+                let previous_content = previous[previous_indent..].trim_end();
+                if indent > previous_indent
+                    && map_parent_line(previous_content)
+                    && map_entry_line(content)
+                {
+                    append_before_comment(previous, " {");
+                    active.push(indent);
+                }
+            }
+        }
+        output.push(raw.to_owned());
+    }
+    while !active.is_empty() {
+        append_map_closing(&mut output);
+        active.pop();
+    }
+    output.join("\n")
+}
+
+fn previous_significant(lines: &mut [String]) -> Option<&mut String> {
+    lines
+        .iter_mut()
+        .rev()
+        .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+}
+
+fn append_before_comment(line: &mut String, text: &str) {
+    if let Some(position) = line.find('#') {
+        line.insert_str(position, text);
+    } else {
+        line.push_str(text);
+    }
+}
+
+fn append_map_closing(lines: &mut [String]) {
+    if let Some(line) = previous_significant(lines) {
+        append_before_comment(line, " }");
+    }
+}
+
+fn map_parent_line(content: &str) -> bool {
+    let content = content.split('#').next().unwrap_or(content).trim_end();
+    if content.ends_with(':') {
+        return true;
+    }
+    if !content.ends_with('=') {
+        return false;
+    }
+    let before = content[..content.len() - 1].trim_end().chars().last();
+    !matches!(
+        before,
+        Some('=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^')
+    )
+}
+
+fn map_entry_line(content: &str) -> bool {
+    let Some((key, _)) = content.split_once(':') else {
+        return false;
+    };
+    let key = key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    if (key.starts_with('\'') && key.ends_with('\''))
+        || (key.starts_with('"') && key.ends_with('"'))
+    {
+        return key.len() >= 2;
+    }
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (is_xid_start(first) || first == '_')
+        && chars.all(|character| is_xid_continue(character) || character == '_')
 }
 
 fn lex_line(
     line: &str,
     line_number: usize,
-    nesting: &mut usize,
+    groups: &mut Vec<char>,
     out: &mut LexOutput,
 ) -> Result<(), Error> {
     out.set_line(line_number);
@@ -413,19 +585,7 @@ fn lex_line(
                         let escaped = chars.next().ok_or_else(|| {
                             Error::parse("unterminated string").at_line(line_number)
                         })?;
-                        value.push(match escaped {
-                            'n' => '\n',
-                            'r' => '\r',
-                            't' => '\t',
-                            '\\' => '\\',
-                            '\'' => '\'',
-                            '"' => '"',
-                            _ => {
-                                return Err(
-                                    Error::parse("unknown string escape").at_line(line_number)
-                                );
-                            }
-                        });
+                        value.push(decode_string_escape(&mut chars, escaped, line_number)?);
                     } else {
                         value.push(current);
                     }
@@ -574,27 +734,27 @@ fn lex_line(
             }
             '~' => out.push(Token::Tilde),
             '(' => {
-                *nesting += 1;
+                groups.push('(');
                 out.push(Token::LParen)
             }
             ')' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, ')', line_number)?;
                 out.push(Token::RParen)
             }
             '[' => {
-                *nesting += 1;
+                groups.push('[');
                 out.push(Token::LBracket)
             }
             ']' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, ']', line_number)?;
                 out.push(Token::RBracket)
             }
             '{' => {
-                *nesting += 1;
+                groups.push('{');
                 out.push(Token::LBrace)
             }
             '}' => {
-                close_group(nesting, line_number)?;
+                close_group(groups, '}', line_number)?;
                 out.push(Token::RBrace)
             }
             ',' => out.push(Token::Comma),
@@ -629,7 +789,7 @@ fn lex_line(
                     chars.next();
                     out.push(Token::NotEq)
                 } else {
-                    return Err(Error::parse("expected '=' after '!'").at_line(line_number));
+                    out.push(Token::Not)
                 }
             }
             '<' => {
@@ -682,6 +842,82 @@ fn lex_line(
     Ok(())
 }
 
+fn decode_string_escape(
+    chars: &mut Peekable<Chars<'_>>,
+    escaped: char,
+    line_number: usize,
+) -> Result<char, Error> {
+    let simple = match escaped {
+        '0' => Some('\0'),
+        'b' => Some('\u{0008}'),
+        'f' => Some('\u{000c}'),
+        'n' => Some('\n'),
+        'r' => Some('\r'),
+        't' => Some('\t'),
+        'v' => Some('\u{000b}'),
+        '\\' => Some('\\'),
+        '\'' => Some('\''),
+        '"' => Some('"'),
+        _ => None,
+    };
+    if let Some(character) = simple {
+        return Ok(character);
+    }
+    let (digits, radix, kind) = match escaped {
+        'x' => (2, 16, "hexadecimal"),
+        'u' => {
+            if chars.peek() == Some(&'{') {
+                chars.next();
+                let mut digits = String::new();
+                let mut closed = false;
+                while let Some(&next) = chars.peek() {
+                    if next == '}' {
+                        chars.next();
+                        closed = true;
+                        break;
+                    }
+                    if !next.is_ascii_hexdigit() || digits.len() >= 6 {
+                        return Err(Error::parse("invalid Unicode escape").at_line(line_number));
+                    }
+                    digits.push(next);
+                    chars.next();
+                }
+                if digits.is_empty() || !closed {
+                    return Err(Error::parse("invalid Unicode escape").at_line(line_number));
+                }
+                let value = u32::from_str_radix(&digits, 16)
+                    .map_err(|_| Error::parse("invalid Unicode escape").at_line(line_number))?;
+                return char::from_u32(value).ok_or_else(|| {
+                    Error::parse("Unicode escape is not a valid scalar value").at_line(line_number)
+                });
+            }
+            (4, 16, "Unicode")
+        }
+        _ => {
+            return Err(Error::parse("unknown string escape").at_line(line_number));
+        }
+    };
+    let mut value = String::new();
+    for _ in 0..digits {
+        let digit = chars.next().ok_or_else(|| {
+            Error::parse(format!("incomplete {kind} escape")).at_line(line_number)
+        })?;
+        if !digit.is_ascii_hexdigit() {
+            return Err(Error::parse(format!("invalid {kind} escape")).at_line(line_number));
+        }
+        value.push(digit);
+    }
+    let scalar = u32::from_str_radix(&value, radix)
+        .map_err(|_| Error::parse(format!("invalid {kind} escape")).at_line(line_number))?;
+    if escaped == 'u' {
+        char::from_u32(scalar).ok_or_else(|| {
+            Error::parse("Unicode escape is not a valid scalar value").at_line(line_number)
+        })
+    } else {
+        Ok(char::from_u32(scalar).expect("two hexadecimal digits form a scalar"))
+    }
+}
+
 /// A trailing operator keeps the following physical line in the same expression.
 /// This deliberately covers only explicit operators; ordinary newlines still end
 /// statements, and an arrow still opens its normal indentation block.
@@ -732,13 +968,46 @@ fn line_continues(token: Option<&Token>) -> bool {
         )
     )
 }
-fn close_group(nesting: &mut usize, line: usize) -> Result<(), Error> {
-    if *nesting == 0 {
-        Err(Error::parse("unmatched grouping delimiter").at_line(line))
-    } else {
-        *nesting -= 1;
+fn close_group(groups: &mut Vec<char>, closing: char, line: usize) -> Result<(), Error> {
+    let Some(opening) = groups.pop() else {
+        return Err(Error::parse("unmatched grouping delimiter").at_line(line));
+    };
+    let expected = match opening {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        _ => unreachable!("group stack only contains opening delimiters"),
+    };
+    if expected == closing {
         Ok(())
+    } else {
+        Err(Error::parse(format!("expected '{expected}', found '{closing}'")).at_line(line))
     }
+}
+
+fn collection_item_can_end(token: Option<&Token>) -> bool {
+    !matches!(
+        token,
+        None | Some(
+            Token::Comma
+                | Token::Semi
+                | Token::LBracket
+                | Token::LBrace
+                | Token::Colon
+                | Token::Assign
+                | Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Slash
+                | Token::And
+                | Token::Or
+                | Token::Pipe
+                | Token::Caret
+                | Token::Amp
+                | Token::Arrow
+                | Token::FatArrow
+        )
+    )
 }
 
 #[cfg(test)]
@@ -776,6 +1045,14 @@ mod tests {
         let tokens = lex("message = '''first\nsecond'''").unwrap();
         assert!(matches!(tokens[2], Token::String(ref value, false) if value == "first\nsecond"));
         assert!(lex("message = \"\"\"unfinished").is_err());
+    }
+
+    #[test]
+    fn heredoc_markers_inside_comments_and_strings_are_not_reinterpreted() {
+        let tokens = lex("###\n\"\"\"\n###\n42").unwrap();
+        assert!(tokens.contains(&Token::Number(42.)));
+        assert!(lex("# \"\"\"\n42").is_ok());
+        assert!(lex("value = '\"\"\"'\nvalue").is_ok());
     }
 
     #[test]

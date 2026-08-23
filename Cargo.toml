@@ -2,8 +2,15 @@
 name = "quickcoffee"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "A compact CoffeeScript-inspired bytecode engine"
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/coffee-js/quickcoffee"
+homepage = "https://github.com/coffee-js/quickcoffee"
+documentation = "https://docs.rs/quickcoffee"
+keywords = ["coffeescript", "bytecode", "vm", "scripting", "embedding"]
+categories = ["compilers", "embedded", "command-line-utilities"]
 default-run = "qcoffee"
 
 [lints.rust]
@@ -27,6 +34,10 @@ path = "src/bin/qdocco.rs"
 [[bin]]
 name = "qtest"
 path = "src/bin/qtest.rs"
+
+[[bin]]
+name = "qbench"
+path = "src/bin/qbench.rs"
 
 [[bench]]
 name = "core"

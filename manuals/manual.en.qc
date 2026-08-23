@@ -2,20 +2,44 @@
 ##
 ## Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 ## qcoffee - reads a QuickCoffee program from standard input.
+## qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
+## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
+## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
+## for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept non-zero signed by steps.
+## do (name, other) -> ... immediately calls and forwards same-named outer values; do -> ... remains zero-argument.
+## [head, tail...] = [1, 2, 3] binds tail to [2, 3]; array-pattern rest must be final.
 ## qtest --fuel N gives each executable documentation file its own instruction budget.
+## qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
+## qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.
+## qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.
+## qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.
+
+## qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 ## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
-## Engine::compile_program and Context::run_program share verified bytecode for repeated embedding calls.
+## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
+## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
+## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
+## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
+## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
+## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
+## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.
+## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
+## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
+## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
+## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
 ## This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.
 ## # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 ## Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
+## ! is a strict Bool alias for not; != remains strict inequality.
 ## Chained strict or numeric comparisons keep the middle value once and short-circuit.
-## The standard library is ordinary functions: print, len, type, range, str, keys, values, join, split, and assert.
+## The standard library is ordinary functions: print, len, type, range, str, abs, sum, min, max, keys, values, join, split, and assert. Numeric aggregators accept strict finite-number arrays.
 ## switch/when selects one strict-equality branch without fallthrough.
 ## try/catch/finally handles QuickCoffee runtime errors without JavaScript Error objects.
 ## Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.
+## Ranges may descend too: [3..1] yields [3, 2, 1], while [3...1] yields [3, 2].
 ## Triple-quoted heredocs preserve newlines: """...""" interpolates and '''...''' remains literal.
 ## Array slices use a[start..end] for an inclusive end and a[start...end] for an exclusive end; bounds are finite in-range integers, negatives count from the end, and a nil-safe slice skips bounds on nil.
 ## Nil-specific fallback is written as left ? right; false and zero are kept unchanged.
@@ -24,6 +48,9 @@
 ## value in array checks array membership; key of map checks only map-owned string keys.
 ## value not in array and key not of map negate those same strict checks without prototype keys.
 ## In a map literal, {name} abbreviates {name: name}.
+## Map literals support checked left-to-right spread: {...defaults, theme: 'dark'}; later keys win.
+## Map patterns may end with ...metadata to capture unlisted keys immutably.
+## Arrays and Unicode strings accept negative indices: items[-1] is the final item.
 ## Assignment patterns may nest arrays and maps; validation is atomic before bindings change.
 ## In arrays and calls, items... expands an array without JavaScript apply.
 ## Nil-safe soak suffixes record?.name, values?[i], and fn?(args) short-circuit only a nil receiver.
@@ -32,7 +59,7 @@
 ## loop body is infinite while true; break exits it and fuel still bounds it.
 ## A for expression collects body values; when and continue omit values, and break keeps the collected prefix.
 ## for bindings may use strict patterns: for [left, right] in pairs binds each pair atomically.
-## An array for loop may use by step; the positive finite integer step is evaluated once, and maps exclude it.
+## An array for loop may use by step; the non-zero finite integer step is evaluated once, negative steps start at the last item, and maps exclude it.
 ## Array for may bind a zero-based index too: for value, index in items then value + index.
 ## Postfix comprehensions use the same strict collector: value * 2 for value in items, or [value * 2 for value in items].
 ## Functions capture lexical scope; y = 2 defaults when omitted or nil, and a final rest parameter is tail....
@@ -69,8 +96,28 @@ continued == 7
 message = "hello
   world"
 message == 'hello world'
+escaped = "A\\x42\\u{43}"
+escaped == 'ABC'
 folded = (1 + 2 * 3) == 7
 folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
+indented_record =
+  first: 20
+  nested:
+    second: 22
+indented_record.nested.second == 22
+implicit_add = (left, right) -> left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
 3 not in [1, 2] and 'missing' not of {present: 1}
 loop_count = 0
 loop

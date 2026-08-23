@@ -11,7 +11,7 @@
 
 ## 宿主边界
 
-`Engine` 为可复用编译器；`Context` 持有每次执行的全局环境和可注入的原生函数。`Context::eval` 返回 `Result<Value, Error>`；原生函数仅接收 `&[Value]`，不暴露 VM 内部或原型对象。`Engine::compile_program` 与 `Context::run_program` 提供可重复执行的共享 `Program` 句柄（RFC 0046），不要求宿主管理 `Rc` 或每轮深拷贝 `Chunk`。`Value` 提供安全的类型访问器，以及 `string`、`array`、`map` 宿主构造器和基础 `From` 转换，调用方无需了解内部 `Rc` 存储。`Error::kind()` 返回稳定的 `ErrorKind::{Parse, Verify, Runtime}`，`message()` 返回不含展示前缀的详情；`position()` 在可确定时返回源码行（RFC 0043、RFC 0047），使嵌入方无需解析错误文本。
+`Engine` 为可复用编译器；`Context` 持有每次执行的全局环境和可注入的原生函数。`Context::eval` 返回 `Result<Value, Error>`；原生函数仅接收 `&[Value]`，不暴露 VM 内部或原型对象。`Engine::compile_program` 与 `Context::run_program` 提供可重复执行的共享 `Program` 句柄（RFC 0046），创建时验证并缓存验证状态（RFC 0069），不要求宿主管理 `Rc` 或每轮深拷贝 `Chunk`。`Value` 提供安全的类型访问器，以及 `string`、`array`、`map` 宿主构造器和基础 `From` 转换，调用方无需了解内部 `Rc` 存储。`Error::kind()` 返回稳定的 `ErrorKind::{Parse, Verify, Runtime}`，`message()` 返回不含展示前缀的详情；`position()` 在可确定时返回源码行（RFC 0043、RFC 0047），使嵌入方无需解析错误文本。
 
 ## CLI
 
@@ -20,3 +20,4 @@
 ## 测量
 
 以 `cargo bench`（或同等可重复 release 计时）分别测量编译和执行。基准至少覆盖核心循环、闭包/调用/区间，以及映射/过滤循环/异常控制流；报告必须记录硬件、Rust 版本、命令行、样本数、输入程序与结果，并为每个负载校验期望最终值（RFC 0045）；不得把调试构建或 I/O 计入纯 VM 吞吐数据。
+嵌入者可用 `Context::last_execution()` 读取最近一次执行的指令数与剩余 fuel；详见 RFC 0066。该统计接口不暴露 VM 帧或环境。

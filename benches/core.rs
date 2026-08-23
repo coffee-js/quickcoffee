@@ -18,6 +18,30 @@ fn main() {
             expected: "100",
         },
         Workload {
+            name: "stdlib-abs",
+            source: "abs(-42)",
+            iterations: 20_000,
+            expected: "42",
+        },
+        Workload {
+            name: "stdlib-sum",
+            source: "sum([1, 2, 3, 4])",
+            iterations: 20_000,
+            expected: "10",
+        },
+        Workload {
+            name: "stdlib-min-max",
+            source: "min([3, 1, 2]) + max([3, 1, 2])",
+            iterations: 20_000,
+            expected: "4",
+        },
+        Workload {
+            name: "stdlib-range-sum",
+            source: "sum(range(1, 100))",
+            iterations: 10_000,
+            expected: "4950",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,
@@ -66,6 +90,66 @@ fn main() {
             expected: "10",
         },
         Workload {
+            name: "string-iteration",
+            source: "sum = 0\nfor character, index in 'a☕中' then sum += index\nsum",
+            iterations: 20_000,
+            expected: "3",
+        },
+        Workload {
+            name: "stepped-string-iteration",
+            source: "sum = 0\nfor character, index in 'a☕中x' by 2 then sum += index\nsum",
+            iterations: 20_000,
+            expected: "2",
+        },
+        Workload {
+            name: "string-escapes",
+            source: "message = \"A\\x42\\u{43}\"\nlen(message) + (if message == 'ABC' then 1 else 0)",
+            iterations: 20_000,
+            expected: "4",
+        },
+        Workload {
+            name: "string-indexing",
+            source: "text = 'a☕中'\nsum = 0\ni = 0\nwhile i < 100\n  sum += len(text[1..2]) + (if text[1] == '☕' then 1 else 0)\n  i += 1\nsum",
+            iterations: 10_000,
+            expected: "300",
+        },
+        Workload {
+            name: "map-spread",
+            source: "base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c",
+            iterations: 20_000,
+            expected: "8",
+        },
+        Workload {
+            name: "negative-indexing",
+            source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
+            iterations: 20_000,
+            expected: "31",
+        },
+        Workload {
+            name: "multiline-collections",
+            source: "values = [\n  1\n  2\n  3\n]\nrecord = {\n  first: 1\n  second: 2\n}\nvalues[2] + record.first + record.second",
+            iterations: 10_000,
+            expected: "6",
+        },
+        Workload {
+            name: "indented-maps",
+            source: "record =\n  first: 1\n  nested:\n    second: 2\nrecord.nested.second + record.first",
+            iterations: 10_000,
+            expected: "3",
+        },
+        Workload {
+            name: "implicit-calls",
+            source: "add = (left, right) -> left + right\nanswer = add 20, 22\nanswer",
+            iterations: 20_000,
+            expected: "42",
+        },
+        Workload {
+            name: "execution-stats",
+            source: "sum = 0\ni = 0\nwhile i < 100\n  sum += i\n  i++\nsum",
+            iterations: 10_000,
+            expected: "4950",
+        },
+        Workload {
             name: "constant-folding",
             source: "value = (1 + 2 * 3) == 7\nvalue",
             iterations: 20_000,
@@ -88,6 +172,12 @@ fn main() {
             source: "sum = 0\nfor n in [1...100] by 3 then sum = sum + n\nsum",
             iterations: 10_000,
             expected: "1617",
+        },
+        Workload {
+            name: "signed-by-iteration",
+            source: "sum = 0\nfor n, index in [1...100] by -3 then sum += n + index\nsum",
+            iterations: 10_000,
+            expected: "3333",
         },
         Workload {
             name: "for-collection",
@@ -124,6 +214,12 @@ fn main() {
             source: "sum = 0\ni = 0\nwhile i < 100\n  [first, {point: [x, y]}] = [1, {point: [2, 3]}]\n  sum = sum + first + x + y\n  i = i + 1\nsum",
             iterations: 10_000,
             expected: "600",
+        },
+        Workload {
+            name: "destructuring-rest",
+            source: "sum = 0\ni = 0\nwhile i < 100\n  [head, tail...] = [1, 2, 3, 4]\n  sum += head + len(tail)\n  i += 1\nsum",
+            iterations: 10_000,
+            expected: "400",
         },
         Workload {
             name: "chained-comparisons",
@@ -163,8 +259,14 @@ fn measure(engine: &Engine, workload: Workload) {
     let program = engine
         .compile_program(workload.source)
         .expect("benchmark program compiles");
-    let observed = Context::new()
-        .with_fuel(100_000)
+    let start = Instant::now();
+    for _ in 0..workload.iterations {
+        let verified = program.verify().is_ok();
+        assert!(black_box(verified), "benchmark bytecode verifies");
+    }
+    let verify = start.elapsed();
+    let mut semantic_context = Context::new().with_fuel(100_000);
+    let observed = semantic_context
         .run_program(&program)
         .expect("benchmark semantic check runs");
     assert_eq!(
@@ -173,6 +275,7 @@ fn measure(engine: &Engine, workload: Workload) {
         "benchmark {} returned an unexpected value",
         workload.name
     );
+    assert!(semantic_context.last_execution().instructions > 0);
     let start = Instant::now();
     for _ in 0..workload.iterations {
         black_box(
@@ -188,6 +291,11 @@ fn measure(engine: &Engine, workload: Workload) {
         "  compile: {:.3}ms total, {:.0} programs/s",
         compile.as_secs_f64() * 1_000.,
         workload.iterations as f64 / compile.as_secs_f64()
+    );
+    println!(
+        "  verify: {:.3}ms total, {:.0} programs/s",
+        verify.as_secs_f64() * 1_000.,
+        workload.iterations as f64 / verify.as_secs_f64()
     );
     println!(
         "  execute: {:.3}ms total, {:.0} programs/s",

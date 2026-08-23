@@ -1,23 +1,51 @@
 ## Manuale QuickCoffee
 ##
+## Tabulae mappae segmenta expandere possunt; claves posteriores priores superant.
+## In forma mappae ...metadata claves omissas immutabiliter capit.
+## Indices negativi in seriebus et textu Unicode extremum elementum petunt.
 ## Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 ## qcoffee - programma QuickCoffee ex initio normali legit.
+## qcoffee --stats numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 ## qcoffee --check FILE fontem verificat sine cursu.
+## qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
+## qcoffee --interactive --stats unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
+## 'a☕中'[1] est '☕', et 'a☕中'[1..2] est '☕中'; indices stringarum scalas Unicode sequuntur.
+## for character, index in 'a☕中' then index indices Unicode scalarum [0, 1, 2] reddit; iteratio stringarum gradus nonnullos signatos by accipit.
+## do (name, other) -> ... statim vocat et valores externos eiusdem nominis tradit; do -> ... sine argumentis manet.
+## [head, tail...] = [1, 2, 3] tail ad [2, 3] ligat; rest in forma array postremum esse debet.
 ## qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
+## qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
+## qtest --json unam lineam JSON pro unoquoque documento scribit ad usum CI; --stats in stderr manet.
+## qtest --tap versiones TAP 13 et numeros certos scribit; --json et --tap simul prohibentur.
+## qtest --filter TEXT itinera congruentia eligit; qtest --list tantum documenta electa enumerat sine exsecutione.
+
+## qcoffee --json unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
 ## Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
-## Engine::compile_program et Context::run_program bytecode verificatum communicant ad iteratum cursum.
+## Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
+## Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
+## qcoffee --fingerprint FILE eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
+## qbench --json unam mensurae lineam pro unoquoque onere custodito emittit; --iterations numerum exemplorum regit.
+## Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
+## qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
+## Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis; `with_global` et `with_native` configurationem concatenatam praebent.
+## `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
+## Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
+## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
+## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.
 ## JavaScript non est: catena prototyporum, this, eval, atque JavaScript inclusum desunt.
 ## # commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
 ## Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.
 ## yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
+## ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 ## Comparationes conectae medium semel servant atque priore falso breviant.
-## Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, keys, values, join, split, assert.
+## Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, abs, sum, min, max, keys, values, join, split, assert; aggregationes numericae solum series numerorum finitorum accipiunt.
 ## Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 ## Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 ## return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.
 ## Parametri patterna stricta seriei/map habere possunt; default et rest nomina manent.
 ## Spatium integrorum `[1..3]` finem includit; `[1...3]` finem excludit.
+## Spatia descendere quoque possunt: `[3..1]` `[3, 2, 1]` reddit, `[3...1]` `[3, 2]` reddit.
 ## Sectio seriei a[start..end] finem includit, a[start...end] excludit; termini integri finiti intra limites sunt, negativi ab extremo numerantur, et sectio nil-tuta terminos nil recipiente omittit.
 ## Recessus nil-specialis left ? right scribitur; false et zero servantur.
 ## Suffixum value? non-nil tantum probat: nil? false est, false? et 0? true sunt, nomen non ligatum errorem manet.
@@ -62,8 +90,28 @@ continued == 7
 message = "hello
   world"
 message == 'hello world'
+escaped = "A\\x42\\u{43}"
+escaped == 'ABC'
 folded = (1 + 2 * 3) == 7
 folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
+indented_record =
+  first: 20
+  nested:
+    second: 22
+indented_record.nested.second == 22
+implicit_add = (left, right) -> left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
 3 not in [1, 2] and 'absens' not of {praesens: 1}
 numerus_circuli = 0
 loop

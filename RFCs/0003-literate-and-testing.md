@@ -7,7 +7,7 @@
 
 `qdocco FILE [-o OUTPUT]` 对 QuickCoffee 源文件执行语法、编译和运行时验证，并产出无需网络资源的单页 HTML。以 `##` 开头的注释行归入相邻的说明栏，其余行归入代码栏。页面在页末记录程序最终值；标准输出仍由宿主进程输出，故不作为可比较的文档产物。
 
-`qdocco --check FILE` 只执行验证，不写 HTML。任一读取、解析、编译或执行错误以非零状态退出。该工具绝不执行 Markdown、HTML、JavaScript 或非 QuickCoffee 文件内容。
+`qdocco --check FILE` 只执行验证，不写 HTML；除读取、解析、编译、验证和执行无错误外，文学源的最终值必须严格为 `true`（RFC 0094）。任一读取、解析、编译、验证、执行错误或其他最终值均以非零状态退出。该工具绝不执行 Markdown、HTML、JavaScript 或非 QuickCoffee 文件内容。
 
 ## `qtest`
 

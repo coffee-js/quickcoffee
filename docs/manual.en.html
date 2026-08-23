@@ -2,20 +2,43 @@
 <p></p>
 <p>Source is parsed, compiled to verified bytecode, and executed with a fuel budget.</p>
 <p>qcoffee - reads a QuickCoffee program from standard input.</p>
+<p>qcoffee --stats writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.</p>
 <p>qcoffee --check FILE parses, compiles, and verifies without executing FILE.</p>
+<p>qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.</p>
+<p>qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.</p>
+<p>for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept non-zero signed by steps.</p>
+<p>do (name, other) -&gt; ... immediately calls and forwards same-named outer values; do -&gt; ... remains zero-argument.</p>
+<p>[head, tail...] = [1, 2, 3] binds tail to [2, 3]; array-pattern rest must be final.</p>
 <p>qtest --fuel N gives each executable documentation file its own instruction budget.</p>
+<p>qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.</p>
+<p>qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.</p>
+<p>qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.</p>
+<p>qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.</p>
+<p>qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.</p>
 <p>Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime(&quot;message&quot;), and error.position() may give a one-based source line.</p>
-<p>Engine::compile_program and Context::run_program share verified bytecode for repeated embedding calls.</p>
+<p>Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.</p>
+<p>Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.</p>
+<p>qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.</p>
+<p>qbench --json emits one timing record per guarded workload; --iterations controls sample count.</p>
+<p>Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.</p>
+<p>qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.</p>
+<p>Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.</p>
+<p>cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.</p>
+<p>A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.</p>
+<p>Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.</p>
+<p>Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.</p>
 <p>Arguments after -- are exposed as the ordinary string array argv.</p>
 <p>This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.</p>
 <p># is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.</p>
 <p>Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.</p>
 <p>yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.</p>
+<p>! is a strict Bool alias for not; != remains strict inequality.</p>
 <p>Chained strict or numeric comparisons keep the middle value once and short-circuit.</p>
-<p>The standard library is ordinary functions: print, len, type, range, str, keys, values, join, split, and assert.</p>
+<p>The standard library is ordinary functions: print, len, type, range, str, abs, sum, min, max, keys, values, join, split, and assert. Numeric aggregators accept strict finite-number arrays.</p>
 <p>switch/when selects one strict-equality branch without fallthrough.</p>
 <p>try/catch/finally handles QuickCoffee runtime errors without JavaScript Error objects.</p>
 <p>Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.</p>
+<p>Ranges may descend too: [3..1] yields [3, 2, 1], while [3...1] yields [3, 2].</p>
 <p>Triple-quoted heredocs preserve newlines: &quot;&quot;&quot;...&quot;&quot;&quot; interpolates and '''...''' remains literal.</p>
 <p>Array slices use a[start..end] for an inclusive end and a[start...end] for an exclusive end; bounds are finite in-range integers, negatives count from the end, and a nil-safe slice skips bounds on nil.</p>
 <p>Nil-specific fallback is written as left ? right; false and zero are kept unchanged.</p>
@@ -24,6 +47,9 @@
 <p>value in array checks array membership; key of map checks only map-owned string keys.</p>
 <p>value not in array and key not of map negate those same strict checks without prototype keys.</p>
 <p>In a map literal, {name} abbreviates {name: name}.</p>
+<p>Map literals support checked left-to-right spread: {...defaults, theme: 'dark'}; later keys win.</p>
+<p>Map patterns may end with ...metadata to capture unlisted keys immutably.</p>
+<p>Arrays and Unicode strings accept negative indices: items[-1] is the final item.</p>
 <p>Assignment patterns may nest arrays and maps; validation is atomic before bindings change.</p>
 <p>In arrays and calls, items... expands an array without JavaScript apply.</p>
 <p>Nil-safe soak suffixes record?.name, values?[i], and fn?(args) short-circuit only a nil receiver.</p>
@@ -32,7 +58,7 @@
 <p>loop body is infinite while true; break exits it and fuel still bounds it.</p>
 <p>A for expression collects body values; when and continue omit values, and break keeps the collected prefix.</p>
 <p>for bindings may use strict patterns: for [left, right] in pairs binds each pair atomically.</p>
-<p>An array for loop may use by step; the positive finite integer step is evaluated once, and maps exclude it.</p>
+<p>An array for loop may use by step; the non-zero finite integer step is evaluated once, negative steps start at the last item, and maps exclude it.</p>
 <p>Array for may bind a zero-based index too: for value, index in items then value + index.</p>
 <p>Postfix comprehensions use the same strict collector: value * 2 for value in items, or [value * 2 for value in items].</p>
 <p>Functions capture lexical scope; y = 2 defaults when omitted or nil, and a final rest parameter is tail....</p>
@@ -42,9 +68,8 @@
 <p>Arithmetic also has floor division // and dividend-dependent modulo %%: -7 // 5 is -2, while -7 %% 5 is 3.</p>
 <p>return expression exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.</p>
 <p>Parameters may use strict nested array/map patterns; defaults and rest stay name-only.</p>
-<p># invalid ` source is safely ignored here</p>
-<p>#</p>
-</main><main><h1>Code</h1><pre><code>base = 20
+</main><main><h1>Code</h1><pre><code>
+base = 20
 add = (x) -&gt;
   result = x + base
   result
@@ -71,8 +96,28 @@ continued == 7
 message = &quot;hello
   world&quot;
 message == 'hello world'
+escaped = &quot;A\\x42\\u{43}&quot;
+escaped == 'ABC'
 folded = (1 + 2 * 3) == 7
 folded
+values = [
+  1
+  2
+]
+values == [1, 2]
+record = {
+  first: 20
+  second: 22
+}
+record.first + record.second == 42
+indented_record =
+  first: 20
+  nested:
+    second: 22
+indented_record.nested.second == 22
+implicit_add = (left, right) -&gt; left + right
+implicit_answer = implicit_add 20, 22
+implicit_answer == 42
 3 not in [1, 2] and 'missing' not of {present: 1}
 loop_count = 0
 loop
@@ -92,5 +137,7 @@ default_value == 42
 heredoc = &quot;&quot;&quot;answer #{add(22)}
 next&quot;&quot;&quot;
 heredoc == 'answer 42\nnext'
+### invalid ` source is safely ignored here
+###
 42 == 42
 </code></pre></main><footer>Final value: <code>true</code></footer>

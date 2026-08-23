@@ -1,9 +1,7 @@
 use crate::{
-    bytecode::Pattern,
     lexer::{Token, lex_spanned},
     vm::Error,
 };
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Expr {
@@ -19,7 +17,7 @@ pub(crate) enum Expr {
     Destructure(Pattern, Box<Expr>),
     Array(Vec<Item>),
     Range(Box<Expr>, Box<Expr>, bool),
-    Map(BTreeMap<String, Expr>),
+    Map(Vec<MapItem>),
     Unary(Unary, Box<Expr>),
     Exists(Box<Expr>),
     Binary(Box<Expr>, Binary, Box<Expr>),
@@ -52,6 +50,21 @@ pub(crate) enum Expr {
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
     Throw(Box<Expr>),
     Do(Box<Expr>),
+}
+#[derive(Clone, Debug)]
+pub(crate) enum MapItem {
+    Entry(String, Expr),
+    Splat(Expr),
+}
+#[derive(Clone, Debug)]
+pub(crate) enum Pattern {
+    Ignore,
+    Bind(String),
+    Rest(String),
+    Default(Box<Pattern>, Box<Expr>),
+    Array(Vec<Pattern>),
+    Map(Vec<(String, Pattern)>),
+    MapRest(Vec<(String, Pattern)>, String),
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Item {
@@ -159,6 +172,13 @@ impl Parser {
             false
         }
     }
+    fn eat_collection_separator(&mut self) -> bool {
+        let mut found = false;
+        while self.eat(&Token::Semi) || self.eat(&Token::Comma) {
+            found = true;
+        }
+        found
+    }
     fn expect(&mut self, expected: &Token) -> Result<(), Error> {
         if self.eat(expected) {
             Ok(())
@@ -262,7 +282,19 @@ impl Parser {
                             self.at = saved;
                             return None;
                         };
-                        items.push(pattern);
+                        if self.eat(&Token::Ellipsis) {
+                            let Pattern::Bind(name) = pattern else {
+                                self.at = saved;
+                                return None;
+                            };
+                            items.push(Pattern::Rest(name));
+                            if !self.eat(&Token::RBracket) {
+                                self.at = saved;
+                                return None;
+                            }
+                            break;
+                        }
+                        items.push(self.pattern_default(pattern).ok()?);
                         if self.eat(&Token::RBracket) {
                             break;
                         }
@@ -276,10 +308,28 @@ impl Parser {
             }
             Token::LBrace => {
                 let mut fields = vec![];
+                let mut rest = None;
                 if !self.eat(&Token::RBrace) {
                     loop {
+                        if self.eat(&Token::Ellipsis) {
+                            let Token::Ident(name) = self.next() else {
+                                self.at = saved;
+                                return None;
+                            };
+                            rest = Some(name);
+                            if !self.eat(&Token::RBrace) {
+                                self.at = saved;
+                                return None;
+                            }
+                            break;
+                        }
                         let key = match self.next() {
                             Token::Ident(key) => key,
+                            Token::String(key, interpolate)
+                                if !interpolate || !key.contains("#{") =>
+                            {
+                                key
+                            }
                             _ => {
                                 self.at = saved;
                                 return None;
@@ -290,11 +340,11 @@ impl Parser {
                                 self.at = saved;
                                 return None;
                             };
-                            pattern
+                            self.pattern_default(pattern).ok()?
                         } else if key == "_" {
-                            Pattern::Ignore
+                            self.pattern_default(Pattern::Ignore).ok()?
                         } else {
-                            Pattern::Bind(key.clone())
+                            self.pattern_default(Pattern::Bind(key.clone())).ok()?
                         };
                         fields.push((key, value));
                         if self.eat(&Token::RBrace) {
@@ -306,7 +356,10 @@ impl Parser {
                         }
                     }
                 }
-                Pattern::Map(fields)
+                match rest {
+                    Some(name) => Pattern::MapRest(fields, name),
+                    None => Pattern::Map(fields),
+                }
             }
             _ => {
                 self.at = saved;
@@ -314,6 +367,14 @@ impl Parser {
             }
         };
         Some(pattern)
+    }
+    fn pattern_default(&mut self, pattern: Pattern) -> Result<Pattern, Error> {
+        if self.eat(&Token::Assign) {
+            let default = self.expr(0)?;
+            Ok(Pattern::Default(Box::new(pattern), Box::new(default)))
+        } else {
+            Ok(pattern)
+        }
     }
     fn body(&mut self) -> Result<Expr, Error> {
         self.eat(&Token::Then);
@@ -409,7 +470,8 @@ impl Parser {
                 left = Expr::Call(Box::new(left), args);
                 continue;
             }
-            if self.eat(&Token::LBracket) {
+            if matches!(self.peek(), Token::LBracket) && !self.bracket_is_collection_literal() {
+                self.next();
                 let start = self.expr(0)?;
                 let inclusive = if self.eat(&Token::RangeInclusive) {
                     Some(true)
@@ -520,6 +582,17 @@ impl Parser {
             }
             if min == 0 && self.eat(&Token::For) {
                 left = self.for_tail(left)?;
+                continue;
+            }
+            if self.can_be_called(&left)
+                && self.implicit_argument_starts(self.at)
+                && !matches!(
+                    (self.peek(), self.tokens.get(self.at + 1)),
+                    (Token::Not, Some(Token::In | Token::Of))
+                )
+            {
+                let args = self.implicit_arguments()?;
+                left = Expr::Call(Box::new(left), args);
                 continue;
             }
             let negated_membership = match (self.peek(), self.tokens.get(self.at + 1)) {
@@ -636,6 +709,84 @@ impl Parser {
                     | Token::LBrace
             )
         )
+    }
+    fn bracket_is_collection_literal(&self) -> bool {
+        if !matches!(self.peek(), Token::LBracket) {
+            return false;
+        }
+        let mut depth = 0usize;
+        for token in self.tokens.iter().skip(self.at) {
+            match token {
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Comma | Token::Semi if depth == 1 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+    fn implicit_argument_starts(&self, index: usize) -> bool {
+        matches!(
+            self.tokens.get(index),
+            Some(
+                Token::Number(_)
+                    | Token::String(_, _)
+                    | Token::Ident(_)
+                    | Token::True
+                    | Token::False
+                    | Token::Nil
+                    | Token::Not
+                    | Token::LParen
+                    | Token::Arrow
+                    | Token::FatArrow
+                    | Token::LBracket
+                    | Token::LBrace
+                    | Token::Do
+            )
+        )
+    }
+    fn can_be_called(&self, expression: &Expr) -> bool {
+        matches!(
+            expression,
+            Expr::Name(_)
+                | Expr::Member(_, _)
+                | Expr::Call(_, _)
+                | Expr::SoakCall(_, _)
+                | Expr::SoakMember(_, _)
+                | Expr::Function(_, _, _)
+                | Expr::Class(_, _, _)
+                | Expr::Do(_)
+        )
+    }
+    fn implicit_arguments(&mut self) -> Result<Vec<Item>, Error> {
+        let mut args = vec![];
+        loop {
+            let item = self.expr(0)?;
+            args.push(if self.eat(&Token::Ellipsis) {
+                Item::Splat(item)
+            } else {
+                Item::Expr(item)
+            });
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+            if matches!(
+                (self.tokens.get(self.at), self.tokens.get(self.at + 1)),
+                (Some(Token::Ident(_)), Some(Token::Colon))
+            ) {
+                self.at -= 1;
+                break;
+            }
+            if !self.implicit_argument_starts(self.at) {
+                return Err(self.parse_error("expected implicit call argument after comma"));
+            }
+        }
+        Ok(args)
     }
     fn prefix(&mut self) -> Result<Expr, Error> {
         match self.next() {
@@ -812,7 +963,21 @@ impl Parser {
                 ))
             }
             Token::Throw => Ok(Expr::Throw(Box::new(self.expr(0)?))),
-            Token::Do => Ok(Expr::Do(Box::new(self.expr(0)?))),
+            Token::Do => {
+                let function = self.expr(0)?;
+                if let Expr::Function(params, rest, _) = &function {
+                    let valid = rest.is_none()
+                        && params.iter().all(|param| {
+                            param.default.is_none() && matches!(param.pattern, Pattern::Bind(_))
+                        });
+                    if !valid {
+                        return Err(self.parse_error(
+                            "do function forwarding requires plain required name parameters",
+                        ));
+                    }
+                }
+                Ok(Expr::Do(Box::new(function)))
+            }
             Token::LParen => {
                 if let Some(params) = self.lambda_params()? {
                     self.expect_arrow()?;
@@ -837,6 +1002,7 @@ impl Parser {
                 Box::new(self.body_after_arrow()?),
             )),
             Token::LBracket => {
+                self.eat_collection_separator();
                 if self.eat(&Token::RBracket) {
                     return Ok(Expr::Array(vec![]));
                 }
@@ -869,7 +1035,7 @@ impl Parser {
                     } else {
                         Item::Expr(start)
                     }];
-                    while self.eat(&Token::Comma) {
+                    while self.eat_collection_separator() {
                         if self.eat(&Token::RBracket) {
                             return Ok(Expr::Array(items));
                         }
@@ -885,28 +1051,44 @@ impl Parser {
                 }
             }
             Token::LBrace => {
-                let mut m = BTreeMap::new();
+                let mut m = vec![];
+                self.eat_collection_separator();
                 if self.eat(&Token::RBrace) {
                     return Ok(Expr::Map(m));
                 }
                 loop {
-                    let key = self.next();
-                    let k = match &key {
-                        Token::Ident(s) | Token::String(s, _) => s.clone(),
-                        _ => return Err(self.parse_error("map key must be identifier or string")),
-                    };
-                    let value = if self.eat(&Token::Colon) {
-                        self.expr(0)?
-                    } else if matches!(key, Token::Ident(_)) {
-                        Expr::Name(k.clone())
+                    if self.eat(&Token::Ellipsis) {
+                        m.push(MapItem::Splat(self.expr(0)?));
                     } else {
-                        return Err(self.parse_error("string map keys require ':' and a value"));
-                    };
-                    m.insert(k, value);
+                        let key = self.next();
+                        let k = match &key {
+                            Token::Ident(s) | Token::String(s, _) => s.clone(),
+                            _ => {
+                                return Err(
+                                    self.parse_error("map key must be identifier or string")
+                                );
+                            }
+                        };
+                        let value = if self.eat(&Token::Colon) {
+                            self.expr(0)?
+                        } else if matches!(key, Token::Ident(_)) {
+                            Expr::Name(k.clone())
+                        } else {
+                            return Err(self.parse_error("string map keys require ':' and a value"));
+                        };
+                        m.push(MapItem::Entry(k, value));
+                    }
+                    let mut had_line_separator = false;
+                    while self.eat(&Token::Semi) {
+                        had_line_separator = true;
+                    }
                     if self.eat(&Token::RBrace) {
                         break;
                     }
-                    self.expect(&Token::Comma)?;
+                    if !had_line_separator {
+                        self.expect(&Token::Comma)?;
+                        while self.eat(&Token::Semi) {}
+                    }
                 }
                 Ok(Expr::Map(m))
             }
@@ -976,7 +1158,7 @@ impl Parser {
         let iterable = self.expr(0)?;
         let step = if self.eat(&Token::By) {
             if map {
-                return Err(self.parse_error("by is supported only for array iteration"));
+                return Err(self.parse_error("by is supported only for enumerable iteration"));
             }
             Some(Box::new(self.expr(0)?))
         } else {

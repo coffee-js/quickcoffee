@@ -1,5 +1,5 @@
 use quickcoffee::{
-    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Value, compile,
+    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Program, Value, compile,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -15,6 +15,123 @@ fn arithmetic_precedence_and_arrays() {
     assert!(chunk.verify().is_ok());
     assert_eq!(eval("if true then 2 else missing").as_number(), Some(2.));
     assert!(Context::new().eval("1.5 & 1").is_err());
+}
+#[test]
+fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
+    assert_eq!(
+        eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),
+        Some(2.)
+    );
+    assert_eq!(
+        eval("{name = 'coffee', count = len(name)} = {}\ncount").as_number(),
+        Some(6.)
+    );
+    assert_eq!(
+        eval("f = ([first = 10, second = first + 1]) -> second\nf([nil])").as_number(),
+        Some(11.)
+    );
+    assert!(Context::new().eval("[x = 1, y] = []").is_err());
+    assert!(Context::new().eval("[x = 1] = [2, 3]").is_err());
+    let chunk = compile("[x = 1] = []\nx").unwrap();
+    assert!(chunk.verify().is_ok());
+}
+#[test]
+fn map_literals_support_checked_left_to_right_spread() {
+    assert_eq!(
+        eval("base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c").as_number(),
+        Some(8.)
+    );
+    assert_eq!(eval("{...{a: 1}, ...{a: 2}}.a").as_number(), Some(2.));
+    assert!(Context::new().eval("{...1}").is_err());
+    assert!(compile("{...{a: 1}, b: 2}").unwrap().verify().is_ok());
+}
+#[test]
+fn map_destructuring_rest_captures_unlisted_keys_atomically() {
+    assert_eq!(
+        eval("{id, ...metadata} = {id: 7, role: 'admin', active: true}\nmetadata.role").to_string(),
+        "admin"
+    );
+    assert_eq!(
+        eval("{id, ...metadata} = {id: 7}\nlen(keys(metadata))").as_number(),
+        Some(0.)
+    );
+    assert!(
+        Context::new()
+            .eval("{id, ...metadata} = {id: 7, role: 'admin'}\nmetadata.id")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("{id, ...metadata} = {role: 'admin'}")
+            .is_err()
+    );
+    assert!(
+        compile("{id, ...metadata} = {id: 7, role: 'admin'}")
+            .unwrap()
+            .verify()
+            .is_ok()
+    );
+}
+#[test]
+fn arrays_and_strings_support_unicode_safe_negative_indices() {
+    assert_eq!(eval("[10, 20, 30][-1]").as_number(), Some(30.));
+    assert_eq!(eval("'a☕中'[-2]").to_string(), "☕");
+    assert!(Context::new().eval("[1][-2]").is_err());
+    assert!(Context::new().eval("'a'[1]").is_err());
+}
+#[test]
+fn implicit_calls_accept_single_nested_and_comma_separated_arguments() {
+    assert_eq!(
+        eval("add = (left, right) -> left + right\nadd 20, 22").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("increment = (value) -> value + 1\nincrement 2 * 3").as_number(),
+        Some(7.)
+    );
+    assert_eq!(
+        eval("increment = (value) -> value + 1\ndouble = (value) -> value * 2\ndouble increment 2")
+            .as_number(),
+        Some(6.)
+    );
+    assert_eq!(eval("len [1, 2, 3]").as_number(), Some(3.));
+    assert!(Context::new().eval("add(20 22)").is_err());
+}
+#[test]
+fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
+    let mut cx = Context::new().with_fuel(100);
+    assert_eq!(cx.eval("1 + 2").unwrap().as_number(), Some(3.));
+    let success = cx.last_execution();
+    assert!(success.instructions > 0);
+    assert_eq!(success.instructions + success.fuel_remaining, 100);
+    assert!(cx.eval("(").is_err());
+    assert_eq!(cx.last_execution(), success);
+
+    let error = cx.eval("unknown_name").unwrap_err();
+    assert!(error.message().contains("unknown name"));
+    let failed = cx.last_execution();
+    assert!(failed.instructions > 0);
+    assert!(failed.instructions + failed.fuel_remaining <= 100);
+
+    let invalid_program = Program::from(Chunk::default());
+    assert!(cx.run_program(&invalid_program).is_err());
+    assert_eq!(cx.last_execution(), failed);
+
+    let mut exhausted = cx.with_fuel(5);
+    assert!(exhausted.eval("while true then 1").is_err());
+    let fuel = exhausted.last_execution();
+    assert_eq!(fuel.instructions, 5);
+    assert_eq!(fuel.fuel_remaining, 0);
+}
+#[test]
+fn embedding_context_can_adjust_fuel_without_losing_globals() {
+    let mut context = Context::new().with_fuel(5);
+    context.set_global("answer", Value::from(42_i64));
+    assert_eq!(context.fuel(), 5);
+    assert!(context.eval("while true then answer").is_err());
+    context.set_fuel(100);
+    assert_eq!(context.fuel(), 100);
+    assert_eq!(context.eval("answer").unwrap().as_number(), Some(42.));
 }
 #[test]
 fn explicit_operator_line_continuation_preserves_expression_and_layout() {
@@ -60,6 +177,52 @@ fn ordinary_quoted_strings_join_physical_lines_without_leaking_layout() {
     assert_eq!(error.position().map(|position| position.line), Some(1));
 }
 #[test]
+fn quoted_strings_decode_common_hex_and_unicode_escapes() {
+    assert_eq!(
+        eval(r#""\0\b\f\n\r\t\v\x41\u0042\u{1F600}""#).as_str(),
+        Some("\0\u{0008}\u{000c}\n\r\t\u{000b}AB😀")
+    );
+    assert_eq!(eval("'\\n\\u0041'").as_str(), Some("\nA"));
+    for source in [
+        r#""\x4""#,
+        r#""\u12""#,
+        r#""\u{}""#,
+        r#""\u{110000}""#,
+        r#""\q""#,
+    ] {
+        let error = Context::new().eval(source).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Parse);
+    }
+    let error = Context::new().eval("value = 1\n\"\\q\"").unwrap_err();
+    assert_eq!(error.position().map(|position| position.line), Some(2));
+}
+#[test]
+fn multiline_arrays_and_maps_accept_line_separators_without_commas() {
+    assert_eq!(
+        eval("values = [\n  1\n  2\n  3\n]\nvalues").to_string(),
+        "[1, 2, 3]"
+    );
+    assert_eq!(
+        eval("record = {\n  first: 1\n  nested: [\n    2\n    3\n  ]\n}\nrecord.first + record.nested[1]").as_number(),
+        Some(4.)
+    );
+    assert_eq!(eval("[1,\n 2,\n]").to_string(), "[1, 2]");
+    assert!(Context::new().eval("sum(\n 1\n 2\n)").is_err());
+    assert!(Context::new().eval("[1}").is_err());
+}
+#[test]
+fn indented_map_literals_lower_recursively_without_changing_assignment_continuation() {
+    assert_eq!(
+        eval("record =\n  first: 1\n  nested:\n    second: 2\n  third: 3\nrecord.nested.second + record.third").as_number(),
+        Some(5.)
+    );
+    assert_eq!(eval("value =\n  1 + 2\nvalue").as_number(), Some(3.));
+    assert_eq!(
+        eval("make = ->\n  record =\n    answer: 42\n  record.answer\nmake()").as_number(),
+        Some(42.)
+    );
+}
+#[test]
 fn floor_division_and_dividend_dependent_modulo_are_strict_numeric_operators() {
     assert_eq!(
         eval("[-7 // 5, -7 % 5, -7 %% 5, 7 // -5, 7 %% -5]").to_string(),
@@ -77,6 +240,18 @@ fn floor_division_and_dividend_dependent_modulo_are_strict_numeric_operators() {
             .eval("record = {value: 1}\nrecord.value //= 2")
             .is_err()
     );
+}
+#[test]
+fn bang_is_a_strict_boolean_alias_for_not() {
+    assert_eq!(
+        eval("[!true, !false, not true, not false]").to_string(),
+        "[false, true, false, true]"
+    );
+    assert_eq!(eval("!!true").as_bool(), Some(true));
+    assert!(Context::new().eval("!1").is_err());
+    let chunk = compile("value = true\n!value").unwrap();
+    assert!(chunk.verify().is_ok());
+    assert!(chunk.disassemble().contains("Not"));
 }
 #[test]
 fn strict_bitwise_operators_use_signed_32_bit_numbers() {
@@ -325,6 +500,7 @@ fn coffeescript_block_comments_are_ignored_and_require_a_closing_delimiter() {
     assert_eq!(eval("### one line ###\n42").as_number(), Some(42.));
     assert!(Context::new().eval("### never closed\n42").is_err());
     assert!(compile("### ignored ###\n42").unwrap().verify().is_ok());
+    assert_eq!(eval("###\n\"\"\"\n###\n42").as_number(), Some(42.));
 }
 #[test]
 fn short_circuit_returns_operands() {
@@ -704,6 +880,15 @@ fn shared_programs_repeat_without_copying_bytecode() {
     assert_eq!(cx.run_program(&top_level).unwrap().as_number(), Some(4.));
 }
 #[test]
+fn bytecode_fingerprints_are_stable_and_content_based() {
+    let first = quickcoffee::compile_program("1 + 2").unwrap();
+    let clone = first.clone();
+    let other = quickcoffee::compile_program("1 + 3").unwrap();
+    assert_eq!(first.fingerprint(), clone.fingerprint());
+    assert_ne!(first.fingerprint(), other.fingerprint());
+    assert_ne!(first.fingerprint(), 0);
+}
+#[test]
 fn while_and_fuel() {
     assert_eq!(
         eval("n = 0\nwhile n < 3 then n = n + 1\nn").as_number(),
@@ -783,6 +968,10 @@ fn for_loops_break_and_continue_are_bytecode_control_flow() {
         "[0, 2]"
     );
     assert_eq!(
+        eval("for value, index in [10, 20, 30, 40] by -2 then [value, index]").to_string(),
+        "[[40, 3], [20, 1]]"
+    );
+    assert_eq!(
         eval("for value, index in [10..14] when value % 2 == 0 then index").to_string(),
         "[0, 2, 4]"
     );
@@ -792,6 +981,79 @@ fn for_loops_break_and_continue_are_bytecode_control_flow() {
             .verify()
             .is_ok()
     );
+}
+#[test]
+fn string_iteration_uses_unicode_scalars_and_optional_scalar_indices() {
+    assert_eq!(
+        eval("for character in 'a☕中' then character").to_string(),
+        "[a, ☕, 中]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中' then index").to_string(),
+        "[0, 1, 2]"
+    );
+    assert_eq!(
+        eval("text = 'ab'\nfor character in text then character").to_string(),
+        "[a, b]"
+    );
+    assert_eq!(
+        eval("for character in 'a☕中' when character == '☕' then character").to_string(),
+        "[☕]"
+    );
+    assert_eq!(
+        eval("for character in 'a☕中x' by 2 then character").to_string(),
+        "[a, 中]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中x' by 2 then index").to_string(),
+        "[0, 2]"
+    );
+    assert_eq!(
+        eval("for character, index in 'a☕中x' by -2 then [character, index]").to_string(),
+        "[[x, 3], [☕, 1]]"
+    );
+    assert_eq!(
+        eval("step = 2\nfor character in 'a☕中x' by step then character").to_string(),
+        "[a, 中]"
+    );
+    assert_eq!(
+        eval("for character in 'a☕中x' by 2 when character != '中' then character").to_string(),
+        "[a]"
+    );
+    assert_eq!(
+        eval("for character in '' by 2 then character").to_string(),
+        "[]"
+    );
+    assert!(
+        Context::new()
+            .eval("for character in 'abc' by 0 then character")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("for character in 'abc' by 1.5 then character")
+            .is_err()
+    );
+    let chunk = compile("for character in 'abc' then character").unwrap();
+    assert!(chunk.verify().is_ok());
+    assert!(chunk.disassemble().contains("IterStartEnumerable"));
+}
+#[test]
+fn do_iifes_forward_same_named_outer_arguments() {
+    assert_eq!(
+        eval("value = 41\ndo (value) -> value + 1").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("left = 20\nright = 22\ndo (left, right) -> left + right").as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("for filename in ['a', 'b'] then do (filename) -> filename").to_string(),
+        "[a, b]"
+    );
+    assert_eq!(eval("do -> 42").as_number(), Some(42.));
+    assert!(Context::new().eval("do (value = 1) -> value").is_err());
 }
 #[test]
 fn for_loop_bindings_support_strict_recursive_patterns_atomically() {
@@ -864,7 +1126,7 @@ fn postfix_for_comprehensions_reuse_strict_iteration_and_collection_rules() {
     assert!(Context::new().eval("[n for n in [1], 2]").is_err());
 }
 #[test]
-fn array_for_by_uses_a_strict_once_evaluated_positive_integer_step() {
+fn array_for_by_uses_a_strict_once_evaluated_signed_integer_step() {
     assert_eq!(
         eval("sum = 0\nfor n in [1..9] by 3 then sum = sum + n\nsum").as_number(),
         Some(12.)
@@ -896,6 +1158,10 @@ fn array_for_by_uses_a_strict_once_evaluated_positive_integer_step() {
             .unwrap()
             .verify()
             .is_ok()
+    );
+    assert_eq!(
+        eval("for n in [1..5] by -2 then n").to_string(),
+        "[5, 3, 1]"
     );
 }
 #[test]
@@ -931,8 +1197,11 @@ fn maps_ranges_and_indexing() {
     );
     assert!(Context::new().eval("{'name'}").is_err());
     assert_eq!(eval("range(2, 5)[1]").as_number(), Some(3.));
+    assert_eq!(eval("range(5, 2)").to_string(), "[5, 4, 3]");
     assert_eq!(eval("[2..4]").to_string(), "[2, 3, 4]");
     assert_eq!(eval("[2...4]").to_string(), "[2, 3]");
+    assert_eq!(eval("[4..2]").to_string(), "[4, 3, 2]");
+    assert_eq!(eval("[4...2]").to_string(), "[4, 3]");
     assert!(Context::new().eval("[1.5..3]").is_err());
     assert!(Context::new().eval("[0...1000001]").is_err());
     let mut cx = Context::new();
@@ -940,6 +1209,36 @@ fn maps_ranges_and_indexing() {
         Ok(Value::Array(Rc::new(vec![Value::Number(99.)])))
     });
     assert_eq!(cx.eval("[2..4]").unwrap().to_string(), "[2, 3, 4]");
+}
+#[test]
+fn string_indexing_and_slices_use_unicode_scalar_boundaries() {
+    assert_eq!(eval("len('a☕中')").as_number(), Some(3.));
+    assert_eq!(eval("'a☕中'[0]").as_str(), Some("a"));
+    assert_eq!(eval("'a☕中'[1]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[1..2]").as_str(), Some("☕中"));
+    assert_eq!(eval("'a☕中'[1...2]").as_str(), Some("☕"));
+    assert_eq!(eval("'a☕中'[-2..-1]").as_str(), Some("☕中"));
+    assert_eq!(eval("text = 'a☕中'\ntext[2]").as_str(), Some("中"));
+    assert!(Context::new().eval("'a☕中'[3]").is_err());
+    assert!(Context::new().eval("'a☕中'[0.5]").is_err());
+    assert!(Context::new().eval("'a☕中'[0..3]").is_err());
+    assert!(Context::new().eval("{text: 'abc'}[0..1]").is_err());
+    assert!(matches!(eval("none = nil\nnone?[missing..1]"), Value::Nil));
+    let calls = Rc::new(Cell::new(0));
+    let counter = calls.clone();
+    let mut cx = Context::new();
+    cx.add_native("bound", move |_| {
+        let call = counter.get() + 1;
+        counter.set(call);
+        Ok(Value::Number(if call == 1 { 1. } else { 2. }))
+    });
+    assert_eq!(
+        cx.eval("'a☕中'[bound()..bound()]").unwrap().as_str(),
+        Some("☕中")
+    );
+    assert_eq!(calls.get(), 2);
+    let chunk = compile("'a☕中'[1..2]").unwrap();
+    assert!(chunk.verify().is_ok());
 }
 #[test]
 fn array_slices_use_strict_once_evaluated_bounds_and_nil_safe_suffixes() {
@@ -1042,6 +1341,32 @@ fn redesigned_standard_library_is_function_based_not_prototype_based() {
     assert!(Context::new().eval("assert(false, 'expected')").is_err());
 }
 #[test]
+fn numeric_standard_library_is_strict_and_total() {
+    assert_eq!(eval("abs(-3)").as_number(), Some(3.));
+    assert_eq!(eval("sum([])").as_number(), Some(0.));
+    assert_eq!(
+        eval("min([3, 1, 2]) + max([3, 1, 2])").as_number(),
+        Some(4.)
+    );
+    for source in [
+        "abs()",
+        "abs('3')",
+        "sum(1)",
+        "sum([1, '2'])",
+        "min([])",
+        "max([true])",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+    let mut host = Context::new();
+    host.set_global("nan", Value::Number(f64::NAN));
+    assert!(host.eval("abs(nan)").is_err());
+    assert!(host.eval("sum([nan])").is_err());
+}
+#[test]
 fn array_destructuring_is_strict_and_has_an_explicit_ignore_name() {
     assert_eq!(
         eval("left, right = [20, 22]\nleft + right").as_number(),
@@ -1071,6 +1396,27 @@ fn map_destructuring_supports_renaming_and_is_atomic() {
     assert!(cx.eval("{stable, absent} = {stable: 1}").is_err());
     assert_eq!(cx.eval("stable").unwrap().as_number(), Some(9.));
     assert!(cx.eval("absent").is_err());
+}
+#[test]
+fn map_destructuring_accepts_literal_string_keys() {
+    assert_eq!(
+        eval("{\"first-name\": first} = {\"first-name\": 'Ada'}\nfirst").as_str(),
+        Some("Ada")
+    );
+    assert_eq!(
+        eval("{'answer': value} = {answer: 42}\nvalue").as_number(),
+        Some(42.)
+    );
+    assert!(
+        Context::new()
+            .eval("{\"missing-key\": value} = {other: 1}")
+            .is_err()
+    );
+    assert!(
+        Context::new()
+            .eval("{\"#{missing}\": value} = {other: 1}")
+            .is_err()
+    );
 }
 #[test]
 fn nested_destructuring_is_strict_and_atomic() {
@@ -1108,6 +1454,48 @@ fn nested_destructuring_is_strict_and_atomic() {
         ],
     };
     assert!(bad_destructure.verify().is_err());
+    let bad_rest_pattern = Chunk {
+        constants: vec![Constant::Value(Value::array(vec![]))],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::Destructure(Pattern::Rest("tail".into())),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_rest_pattern.verify().is_err());
+    let bad_rest_position = Chunk {
+        constants: vec![Constant::Value(Value::array(vec![]))],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::Destructure(Pattern::Array(vec![
+                Pattern::Rest("tail".into()),
+                Pattern::Bind("next".into()),
+            ])),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_rest_position.verify().is_err());
+}
+#[test]
+fn array_destructuring_rest_binds_an_immutable_tail() {
+    assert_eq!(
+        eval("[head, tail...] = [1, 2, 3]\nlen(tail) + head").as_number(),
+        Some(3.)
+    );
+    assert_eq!(eval("[head, tail...] = [1]\ntail").to_string(), "[]");
+    assert_eq!(
+        eval("collect = ([head, tail...]) -> [head, tail]\ncollect([1, 2, 3])").to_string(),
+        "[1, [2, 3]]"
+    );
+    assert_eq!(
+        eval("for [head, tail...] in [[1, 2, 3], [4]] then len(tail) + head").to_string(),
+        "[3, 4]"
+    );
+    assert!(Context::new().eval("[head, tail...] = []").is_err());
+    assert!(Context::new().eval("[head..., tail] = [1, 2]").is_err());
+    assert!(Context::new().eval("[head..., tail...] = [1, 2]").is_err());
+    let chunk = compile("[head, tail...] = [1, 2, 3]").unwrap();
+    assert!(chunk.verify().is_ok());
 }
 #[test]
 fn rejects_js_and_unknown_names() {
@@ -1134,6 +1522,11 @@ fn verifier_rejects_untrusted_bad_bytecode() {
     };
     assert!(bad_constant.verify().is_err());
     assert!(Context::new().run(bad_constant).is_err());
+    let bad_program = Program::from(Chunk {
+        constants: vec![],
+        code: vec![Instruction::Pop, Instruction::Return],
+    });
+    assert!(Context::new().run_program(&bad_program).is_err());
     let bad_jump = Chunk {
         constants: vec![],
         code: vec![Instruction::Jump(9), Instruction::Return],
@@ -1198,4 +1591,23 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
     };
     assert!(bad_nested_function.verify().is_err());
+
+    let mut deeply_nested = Pattern::Ignore;
+    for _ in 0..300 {
+        deeply_nested = Pattern::Array(vec![deeply_nested]);
+    }
+    let bad_deep_pattern = Chunk {
+        constants: vec![],
+        code: vec![Instruction::Destructure(deeply_nested), Instruction::Return],
+    };
+    assert!(bad_deep_pattern.verify().is_err());
+
+    let bad_ignored_rest = Chunk {
+        constants: vec![],
+        code: vec![
+            Instruction::Destructure(Pattern::Array(vec![Pattern::Rest("_".into())])),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_ignored_rest.verify().is_err());
 }

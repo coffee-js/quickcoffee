@@ -2,18 +2,50 @@ use crate::{
     bytecode::{Chunk, Constant, Instruction, Pattern},
     compile,
 };
-use std::{cell::RefCell, collections::BTreeMap, fmt, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    rc::Rc,
+};
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
 
+/// Stable type tag for values crossing the embedding boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueKind {
+    /// The sole empty value.
+    Nil,
+    /// A strict boolean.
+    Bool,
+    /// An IEEE-754 number.
+    Number,
+    /// An immutable UTF-8 string.
+    String,
+    /// An immutable array.
+    Array,
+    /// An immutable string-keyed map.
+    Map,
+    /// An opaque bytecode or native function.
+    Function,
+}
+
+/// An immutable value crossing the QuickCoffee/host boundary.
 #[derive(Clone)]
 pub enum Value {
+    /// The sole empty value.
     Nil,
+    /// A strict boolean.
     Bool(bool),
+    /// An IEEE-754 number used by the language.
     Number(f64),
+    /// An immutable UTF-8 string.
     String(Rc<str>),
+    /// An immutable array of values.
     Array(Rc<Vec<Value>>),
+    /// An immutable map with string keys.
     Map(Rc<BTreeMap<String, Value>>),
+    /// An opaque bytecode or native function.
     Function(Rc<Function>),
 }
 impl fmt::Debug for Value {
@@ -61,6 +93,22 @@ impl fmt::Display for Value {
     }
 }
 impl Value {
+    /// Returns a stable type tag without exposing the internal container representation.
+    pub fn kind(&self) -> ValueKind {
+        match self {
+            Self::Nil => ValueKind::Nil,
+            Self::Bool(_) => ValueKind::Bool,
+            Self::Number(_) => ValueKind::Number,
+            Self::String(_) => ValueKind::String,
+            Self::Array(_) => ValueKind::Array,
+            Self::Map(_) => ValueKind::Map,
+            Self::Function(_) => ValueKind::Function,
+        }
+    }
+    /// Returns whether this value is the language's `nil` value.
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Self::Nil)
+    }
     /// Builds a QuickCoffee string without exposing its `Rc<str>` storage.
     pub fn string(value: impl Into<Rc<str>>) -> Self {
         Self::String(value.into())
@@ -82,6 +130,7 @@ impl Value {
                 .collect(),
         ))
     }
+    /// Returns the number, if this value is numeric.
     pub fn as_number(&self) -> Option<f64> {
         if let Self::Number(x) = self {
             Some(*x)
@@ -89,6 +138,7 @@ impl Value {
             None
         }
     }
+    /// Returns the boolean, if this value is boolean.
     pub fn as_bool(&self) -> Option<bool> {
         if let Self::Bool(x) = self {
             Some(*x)
@@ -96,6 +146,7 @@ impl Value {
             None
         }
     }
+    /// Returns the UTF-8 view, if this value is a string.
     pub fn as_str(&self) -> Option<&str> {
         if let Self::String(x) = self {
             Some(x)
@@ -103,6 +154,7 @@ impl Value {
             None
         }
     }
+    /// Returns an immutable slice, if this value is an array.
     pub fn as_array(&self) -> Option<&[Value]> {
         if let Self::Array(values) = self {
             Some(values)
@@ -110,6 +162,7 @@ impl Value {
             None
         }
     }
+    /// Returns an immutable map view, if this value is a map.
     pub fn as_map(&self) -> Option<&BTreeMap<String, Value>> {
         if let Self::Map(values) = self {
             Some(values)
@@ -146,13 +199,17 @@ impl From<&str> for Value {
 /// Stable category for an error crossing the Rust embedding boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
+    /// Lexing or parsing failed.
     Parse,
+    /// Untrusted bytecode failed verification.
     Verify,
+    /// Execution or a host callback failed.
     Runtime,
 }
 /// One-based source line attached to a lexical or parse diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourcePosition {
+    /// One-based line number.
     pub line: usize,
 }
 impl fmt::Display for ErrorKind {
@@ -164,6 +221,7 @@ impl fmt::Display for ErrorKind {
         }
     }
 }
+/// A structured error suitable for CLI display or host-side branching.
 #[derive(Debug, Clone)]
 pub struct Error {
     kind: ErrorKind,
@@ -225,6 +283,7 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+/// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
 /// Opaque callable values are constructed by QuickCoffee or `Context::add_native`.
 pub struct Function {
@@ -261,43 +320,87 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
     p.and_then(|p| lookup(&p, n))
 }
 
+/// A reusable compiler that does not hold execution state.
 #[derive(Clone, Default)]
 pub struct Engine;
-/// A verified, reference-counted compiled program for repeated execution.
+/// A reference-counted compiled program for repeated execution.
 ///
 /// The shared storage is private so embedding callers do not need to manage
 /// `Rc` themselves; cloning a `Program` is cheap and does not copy bytecode.
+/// Programs produced by [`Engine::compile_program`] are verified immediately;
+/// programs wrapped from a raw [`Chunk`] verify on their first execution.
+#[derive(Debug)]
+struct ProgramInner {
+    chunk: Rc<Chunk>,
+    verified: Cell<bool>,
+}
+/// A cheaply cloneable, verified bytecode program for repeated execution.
 #[derive(Clone, Debug)]
-pub struct Program(Rc<Chunk>);
+pub struct Program(Rc<ProgramInner>);
 impl From<Chunk> for Program {
     fn from(chunk: Chunk) -> Self {
-        Self(Rc::new(chunk))
+        Self(Rc::new(ProgramInner {
+            chunk: Rc::new(chunk),
+            verified: Cell::new(false),
+        }))
     }
 }
 impl Program {
+    /// Verifies the program and caches a successful result.
     pub fn verify(&self) -> Result<(), Error> {
-        self.0.verify()
+        let result = self.0.chunk.verify();
+        if result.is_ok() {
+            self.0.verified.set(true);
+        }
+        result
     }
+    /// Returns a human-readable disassembly of the shared bytecode.
     pub fn disassemble(&self) -> String {
-        self.0.disassemble()
+        self.0.chunk.disassemble()
+    }
+    /// Returns the deterministic fingerprint of the shared bytecode.
+    pub fn fingerprint(&self) -> u64 {
+        self.0.chunk.fingerprint()
+    }
+    fn ensure_verified(&self) -> Result<(), Error> {
+        if self.0.verified.get() {
+            Ok(())
+        } else {
+            self.verify()
+        }
     }
 }
 impl Engine {
+    /// Creates a stateless compiler.
     pub fn new() -> Self {
         Self
     }
+    /// Compiles and verifies source into an owned bytecode chunk.
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
         compile(source)
     }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
-        Ok(self.compile(source)?.into())
+        let program: Program = self.compile(source)?.into();
+        program.verify()?;
+        Ok(program)
     }
 }
+/// Public counters for the most recent bytecode execution in a context.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExecutionStats {
+    /// Number of VM instructions attempted, including the instruction that
+    /// produced a runtime error.
+    pub instructions: u64,
+    /// Fuel left after the execution stopped.
+    pub fuel_remaining: u64,
+}
+/// An execution context containing globals, builtins, and a per-run fuel budget.
 pub struct Context {
     engine: Engine,
     global: Env,
     fuel: u64,
+    last_execution: ExecutionStats,
 }
 impl Default for Context {
     fn default() -> Self {
@@ -305,27 +408,56 @@ impl Default for Context {
     }
 }
 impl Context {
+    /// Creates a context with standard library builtins and the default fuel budget.
     pub fn new() -> Self {
         let global = env(None);
         let mut x = Self {
             engine: Engine::new(),
             global,
             fuel: 1_000_000,
+            last_execution: ExecutionStats::default(),
         };
         x.install_builtins();
         x
     }
+    /// Returns a builder-style context with the supplied fuel budget.
     pub fn with_fuel(mut self, fuel: u64) -> Self {
-        self.fuel = fuel;
+        self.set_fuel(fuel);
         self
     }
+    /// Sets the instruction budget used by the next and subsequent runs.
+    ///
+    /// A context keeps its globals and registered native functions, so an
+    /// embedding host can adjust a budget between runs without rebuilding it.
+    pub fn set_fuel(&mut self, fuel: u64) {
+        self.fuel = fuel;
+    }
+    /// Returns the instruction budget configured for each new run.
+    pub fn fuel(&self) -> u64 {
+        self.fuel
+    }
+    /// Returns counters from the most recent successful or failed execution.
+    /// Compilation and verification errors do not replace the previous record.
+    pub fn last_execution(&self) -> ExecutionStats {
+        self.last_execution
+    }
+    /// Installs or replaces an immutable global value visible to later runs.
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
         self.global.borrow_mut().values.insert(name.into(), value);
+    }
+    /// Returns this context after installing an immutable global value.
+    ///
+    /// This builder-style form is equivalent to [`Context::set_global`] and
+    /// is convenient when configuring an embedding context inline.
+    pub fn with_global(mut self, name: impl Into<String>, value: Value) -> Self {
+        self.set_global(name, value);
+        self
     }
     /// Reads a global value without exposing the VM environment or running code.
     pub fn get_global(&self, name: &str) -> Option<Value> {
         lookup(&self.global, name)
     }
+    /// Registers a host callback as an opaque callable global.
     pub fn add_native<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&[Value]) -> Result<Value, Error> + 'static,
@@ -337,17 +469,35 @@ impl Context {
             })),
         );
     }
+    /// Returns this context after registering a host callback as a global.
+    ///
+    /// This builder-style form is equivalent to [`Context::add_native`].
+    pub fn with_native<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(&[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.add_native(name, f);
+        self
+    }
+    /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {
         let program = self.engine.compile_program(source)?;
         self.run_program(&program)
     }
+    /// Verifies and executes an owned bytecode chunk.
     pub fn run(&mut self, chunk: Chunk) -> Result<Value, Error> {
         self.run_program(&chunk.into())
     }
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
-        program.verify()?;
-        Vm { fuel: self.fuel }.run(Rc::clone(&program.0), self.global.clone())
+        program.ensure_verified()?;
+        let mut vm = Vm {
+            fuel: self.fuel,
+            instructions: 0,
+        };
+        let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
+        self.last_execution = vm.stats();
+        result
     }
     fn install_builtins(&mut self) {
         self.add_native("print", |xs| {
@@ -365,7 +515,7 @@ impl Context {
                 return Err(Error::runtime("len expects one argument"));
             }
             let n = match &xs[0] {
-                Value::String(x) => x.len(),
+                Value::String(x) => x.chars().count(),
                 Value::Array(x) => x.len(),
                 Value::Map(x) => x.len(),
                 _ => return Err(Error::runtime("len expects string, array, or map")),
@@ -399,6 +549,34 @@ impl Context {
                 return Err(Error::runtime("str expects one argument"));
             }
             Ok(Value::String(Rc::from(xs[0].to_string())))
+        });
+        self.add_native("abs", |xs| {
+            if xs.len() != 1 {
+                return Err(Error::runtime("abs expects one number"));
+            }
+            let value = number(xs[0].clone())?;
+            if !value.is_finite() {
+                return Err(Error::runtime("abs expects a finite number"));
+            }
+            Ok(Value::Number(value.abs()))
+        });
+        self.add_native("sum", |xs| {
+            let values = numeric_array(xs, "sum")?;
+            Ok(Value::Number(values.into_iter().sum()))
+        });
+        self.add_native("min", |xs| {
+            let values = numeric_array(xs, "min")?;
+            let Some(value) = values.into_iter().reduce(f64::min) else {
+                return Err(Error::runtime("min expects a non-empty array"));
+            };
+            Ok(Value::Number(value))
+        });
+        self.add_native("max", |xs| {
+            let values = numeric_array(xs, "max")?;
+            let Some(value) = values.into_iter().reduce(f64::max) else {
+                return Err(Error::runtime("max expects a non-empty array"));
+            };
+            Ok(Value::Number(value))
         });
         self.add_native("keys", |xs| {
             if xs.len() != 1 {
@@ -494,7 +672,12 @@ enum IterationKind {
     Array {
         values: Rc<Vec<Value>>,
         position: usize,
-        step: usize,
+        step: i64,
+    },
+    String {
+        values: Rc<Vec<Value>>,
+        position: usize,
+        step: i64,
     },
     Map {
         entries: Vec<(String, Value)>,
@@ -503,6 +686,7 @@ enum IterationKind {
 }
 struct Vm {
     fuel: u64,
+    instructions: u64,
 }
 enum Step {
     Continue,
@@ -510,6 +694,22 @@ enum Step {
     Call { callee: Value, args: Vec<Value> },
 }
 impl Vm {
+    fn eval_default(&mut self, chunk: Rc<Chunk>, env: Env) -> Result<Value, Error> {
+        let mut nested = Vm {
+            fuel: self.fuel,
+            instructions: self.instructions,
+        };
+        let result = nested.run(chunk, env);
+        self.fuel = nested.fuel;
+        self.instructions = nested.instructions;
+        result
+    }
+    fn stats(&self) -> ExecutionStats {
+        ExecutionStats {
+            instructions: self.instructions,
+            fuel_remaining: self.fuel,
+        }
+    }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
         let mut frames = vec![Frame {
             chunk,
@@ -524,6 +724,7 @@ impl Vm {
                 return Err(Error::runtime("execution fuel exhausted"));
             }
             self.fuel -= 1;
+            self.instructions += 1;
             let step = (|| -> Result<Step, Error> {
                 let frame = frames.last_mut().expect("VM has an initial frame");
                 let op = frame
@@ -560,7 +761,14 @@ impl Vm {
                     Instruction::Destructure(pattern) => {
                         let value = pop(frame)?;
                         let mut bindings = vec![];
-                        bind_pattern(&pattern, &value, &mut bindings)?;
+                        let env = frame.env.clone();
+                        let snapshot = env.borrow().values.clone();
+                        if let Err(error) =
+                            bind_pattern(self, &pattern, Some(&value), &mut bindings, &env)
+                        {
+                            env.borrow_mut().values = snapshot;
+                            return Err(error);
+                        }
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -688,17 +896,50 @@ impl Vm {
                         let value = pop(frame)?;
                         return Err(Error::runtime(format!("thrown: {value}")));
                     }
-                    Instruction::IterStartArray => {
+                    Instruction::IterStartEnumerable => {
                         let step = array_iteration_step(pop(frame)?)?;
                         match pop(frame)? {
-                            Value::Array(values) => frame.iterators.push(Iteration {
-                                kind: IterationKind::Array {
-                                    values,
-                                    position: 0,
-                                    step,
-                                },
-                            }),
-                            _ => return Err(Error::runtime("for expects an array iterable")),
+                            Value::Array(values) => {
+                                // Negative steps traverse from the final element so the
+                                // optional index remains the actual array position.
+                                let position = if step < 0 {
+                                    values.len().saturating_sub(1)
+                                } else {
+                                    0
+                                };
+                                frame.iterators.push(Iteration {
+                                    kind: IterationKind::Array {
+                                        values,
+                                        position,
+                                        step,
+                                    },
+                                });
+                            }
+                            Value::String(value) => {
+                                frame.iterators.push(Iteration {
+                                    kind: IterationKind::String {
+                                        values: Rc::new(
+                                            value
+                                                .chars()
+                                                .map(|character| {
+                                                    Value::String(Rc::from(character.to_string()))
+                                                })
+                                                .collect(),
+                                        ),
+                                        position: if step < 0 {
+                                            value.chars().count().saturating_sub(1)
+                                        } else {
+                                            0
+                                        },
+                                        step,
+                                    },
+                                });
+                            }
+                            _ => {
+                                return Err(Error::runtime(
+                                    "for expects an array or string iterable",
+                                ));
+                            }
                         }
                     }
                     Instruction::IterStartMap => match pop(frame)? {
@@ -733,7 +974,24 @@ impl Vm {
                                         }
                                     });
                                     if value.is_some() {
-                                        *position = position.saturating_add(*step);
+                                        advance_position(position, *step);
+                                    }
+                                    value
+                                }
+                                IterationKind::String {
+                                    values,
+                                    position,
+                                    step,
+                                } => {
+                                    let value = values.get(*position).cloned().map(|value| {
+                                        if patterns.len() == 2 {
+                                            vec![value, Value::Number(*position as f64)]
+                                        } else {
+                                            vec![value]
+                                        }
+                                    });
+                                    if value.is_some() {
+                                        advance_position(position, *step);
                                     }
                                     value
                                 }
@@ -763,8 +1021,19 @@ impl Vm {
                                 }
                             } else {
                                 let mut bindings = vec![];
+                                let snapshot = frame.env.borrow().values.clone();
                                 for (pattern, value) in patterns.iter().zip(values.iter()) {
-                                    bind_pattern(pattern, value, &mut bindings)?;
+                                    let env = frame.env.clone();
+                                    if let Err(error) = bind_pattern(
+                                        self,
+                                        pattern,
+                                        Some(value),
+                                        &mut bindings,
+                                        &env,
+                                    ) {
+                                        frame.env.borrow_mut().values = snapshot;
+                                        return Err(error);
+                                    }
                                 }
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
@@ -804,6 +1073,21 @@ impl Vm {
                             values.extend(segment.iter().cloned());
                         }
                         frame.stack.push(Value::Array(Rc::new(values)));
+                    }
+                    Instruction::MergeMaps(n) => {
+                        let segments = take(frame, n)?;
+                        let mut values = BTreeMap::new();
+                        for segment in segments {
+                            let Value::Map(segment) = segment else {
+                                return Err(Error::runtime("map spread expects a map"));
+                            };
+                            values.extend(
+                                segment
+                                    .iter()
+                                    .map(|(key, value)| (key.clone(), value.clone())),
+                            );
+                        }
+                        frame.stack.push(Value::Map(Rc::new(values)));
                     }
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
@@ -911,13 +1195,14 @@ impl Vm {
                         return Ok(value);
                     }
                 }
-                Ok(Step::Call { callee, args }) => {
-                    if let Err(error) = call(&mut frames, callee, args)
-                        && !handle_error(&mut frames, &error)
-                    {
-                        return Err(error);
+                Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if !handle_error(&mut frames, &error) {
+                            return Err(error);
+                        }
                     }
-                }
+                },
                 Err(error) => {
                     if !handle_error(&mut frames, &error) {
                         return Err(error);
@@ -927,7 +1212,12 @@ impl Vm {
         }
     }
 }
-fn call(frames: &mut Vec<Frame>, callee: Value, args: Vec<Value>) -> Result<(), Error> {
+fn call(
+    vm: &mut Vm,
+    frames: &mut Vec<Frame>,
+    callee: Value,
+    args: Vec<Value>,
+) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
             FunctionKind::Native(function) => {
@@ -957,7 +1247,13 @@ fn call(frames: &mut Vec<Frame>, callee: Value, args: Vec<Value>) -> Result<(), 
                 for (index, pattern) in params.iter().enumerate() {
                     let value = args.get(index).cloned().unwrap_or(Value::Nil);
                     let mut bindings = vec![];
-                    bind_pattern(pattern, &value, &mut bindings)?;
+                    let snapshot = local.borrow().values.clone();
+                    if let Err(error) =
+                        bind_pattern(vm, pattern, Some(&value), &mut bindings, &local)
+                    {
+                        local.borrow_mut().values = snapshot;
+                        return Err(error);
+                    }
                     let mut environment = local.borrow_mut();
                     for (key, value) in bindings {
                         environment.values.insert(key, value);
@@ -1023,6 +1319,27 @@ fn numbers(xs: &[Value]) -> Result<(f64, f64), Error> {
     }
     Ok((number(xs[0].clone())?, number(xs[1].clone())?))
 }
+fn numeric_array(xs: &[Value], name: &str) -> Result<Vec<f64>, Error> {
+    if xs.len() != 1 {
+        return Err(Error::runtime(format!("{name} expects one array")));
+    }
+    let Value::Array(values) = &xs[0] else {
+        return Err(Error::runtime(format!("{name} expects an array")));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let value = number(value.clone())?;
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(Error::runtime(format!(
+                    "{name} expects finite numeric elements"
+                )))
+            }
+        })
+        .collect()
+}
 fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> {
     if !start.is_finite()
         || !end.is_finite()
@@ -1037,30 +1354,49 @@ fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> 
     }
     let start = start as i64;
     let end = end as i64;
-    let end = if inclusive {
-        end.checked_add(1)
-            .ok_or_else(|| Error::runtime("inclusive range end is too large"))?
+    let start_i = i128::from(start);
+    let end_i = i128::from(end);
+    let (count, direction) = if start <= end {
+        let limit = if inclusive { end_i + 1 } else { end_i };
+        (limit - start_i, 1_i128)
     } else {
-        end
+        let limit = if inclusive { end_i - 1 } else { end_i };
+        (start_i - limit, -1_i128)
     };
-    let count = (i128::from(end) - i128::from(start)).max(0);
     if count > MAX_RANGE_ITEMS {
         return Err(Error::runtime("range is too large"));
     }
     Ok(Value::Array(Rc::new(
-        (start..end)
-            .map(|value| Value::Number(value as f64))
+        (0..count as usize)
+            .map(|offset| Value::Number((start_i + offset as i128 * direction) as f64))
             .collect(),
     )))
 }
-fn array_iteration_step(value: Value) -> Result<usize, Error> {
+fn array_iteration_step(value: Value) -> Result<i64, Error> {
     let Value::Number(step) = value else {
-        return Err(Error::runtime("for by step must be a positive integer"));
+        return Err(Error::runtime(
+            "for by step must be a non-zero finite integer",
+        ));
     };
-    if !step.is_finite() || step.fract() != 0. || step < 1. || step > usize::MAX as f64 {
-        return Err(Error::runtime("for by step must be a positive integer"));
+    if !step.is_finite()
+        || step.fract() != 0.
+        || step == 0.
+        || step < i64::MIN as f64
+        || step > i64::MAX as f64
+    {
+        return Err(Error::runtime(
+            "for by step must be a non-zero finite integer",
+        ));
     }
-    Ok(step as usize)
+    Ok(step as i64)
+}
+fn advance_position(position: &mut usize, step: i64) {
+    if step >= 0 {
+        *position = position.saturating_add(step as usize);
+    } else {
+        let amount = step.unsigned_abs() as usize;
+        *position = position.checked_sub(amount).unwrap_or(usize::MAX);
+    }
 }
 fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
@@ -1133,41 +1469,121 @@ fn jump(f: &mut Frame, delta: i32) -> Result<(), Error> {
     Ok(())
 }
 fn bind_pattern(
+    vm: &mut Vm,
     pattern: &Pattern,
-    value: &Value,
+    value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
+    env: &Env,
 ) -> Result<(), Error> {
     match pattern {
-        Pattern::Ignore => Ok(()),
+        Pattern::Ignore => value.map_or_else(
+            || Err(Error::runtime("missing value for pattern")),
+            |_| Ok(()),
+        ),
         Pattern::Bind(name) => {
+            let value = value.ok_or_else(|| Error::runtime("missing value for pattern"))?;
             bindings.push((name.clone(), value.clone()));
+            if name != "_" {
+                env.borrow_mut().values.insert(name.clone(), value.clone());
+            }
             Ok(())
         }
+        Pattern::Rest(name) => {
+            let value = value.ok_or_else(|| Error::runtime("missing value for rest pattern"))?;
+            bindings.push((name.clone(), value.clone()));
+            if name != "_" {
+                env.borrow_mut().values.insert(name.clone(), value.clone());
+            }
+            Ok(())
+        }
+        Pattern::Default { pattern, default } => {
+            let value = match value {
+                Some(value) if !matches!(value, Value::Nil) => value.clone(),
+                _ => vm.eval_default(default.clone(), env.clone())?,
+            };
+            bind_pattern(vm, pattern, Some(&value), bindings, env)
+        }
         Pattern::Array(patterns) => {
-            let Value::Array(values) = value else {
+            let Some(Value::Array(values)) = value else {
                 return Err(Error::runtime("array destructuring expects an array"));
             };
-            if values.len() != patterns.len() {
+            let rest_index = patterns
+                .iter()
+                .position(|pattern| matches!(pattern, Pattern::Rest(_)));
+            let required_len = patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, pattern)| {
+                    !matches!(pattern, Pattern::Default { .. } | Pattern::Rest(_))
+                })
+                .map(|(index, _)| index + 1)
+                .max()
+                .unwrap_or(0);
+            let fixed_len = rest_index.unwrap_or(required_len);
+            if values.len() < fixed_len || (rest_index.is_none() && values.len() > patterns.len()) {
                 return Err(Error::runtime(format!(
                     "array destructuring expected {} values, got {}",
-                    patterns.len(),
+                    if rest_index.is_some() {
+                        format!("at least {fixed_len}")
+                    } else {
+                        patterns.len().to_string()
+                    },
                     values.len()
                 )));
             }
-            for (pattern, value) in patterns.iter().zip(values.iter()) {
-                bind_pattern(pattern, value, bindings)?;
+            for (index, pattern) in patterns.iter().enumerate() {
+                if let Pattern::Rest(name) = pattern {
+                    let rest = Value::Array(Rc::new(values[index..].to_vec()));
+                    bindings.push((name.clone(), rest.clone()));
+                    if name != "_" {
+                        env.borrow_mut().values.insert(name.clone(), rest);
+                    }
+                    break;
+                }
+                bind_pattern(vm, pattern, values.get(index), bindings, env)?;
             }
             Ok(())
         }
         Pattern::Map(fields) => {
-            let Value::Map(map) = value else {
+            let Some(Value::Map(map)) = value else {
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields {
-                let value = map
-                    .get(key)
-                    .ok_or_else(|| Error::runtime(format!("map key '{key}' not found")))?;
-                bind_pattern(pattern, value, bindings)?;
+                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
+            }
+            Ok(())
+        }
+        Pattern::MapRest { fields, rest } => {
+            let Some(Value::Map(map)) = value else {
+                return Err(Error::runtime("map destructuring expects a map"));
+            };
+            for (key, pattern) in fields.iter() {
+                bind_pattern(vm, pattern, map.get(key), bindings, env).map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
+            }
+            let explicit_fields: BTreeSet<&str> =
+                fields.iter().map(|(field, _)| field.as_str()).collect();
+            let mut remaining = BTreeMap::new();
+            for (key, item) in map.iter() {
+                if !explicit_fields.contains(key.as_str()) {
+                    remaining.insert(key.clone(), item.clone());
+                }
+            }
+            let rest_value = Value::Map(Rc::new(remaining));
+            bindings.push((rest.clone(), rest_value.clone()));
+            if rest != "_" {
+                env.borrow_mut().values.insert(rest.clone(), rest_value);
             }
             Ok(())
         }
@@ -1175,10 +1591,15 @@ fn bind_pattern(
 }
 fn index(target: Value, key: Value) -> Result<Value, Error> {
     match (target, key) {
-        (Value::Array(xs), Value::Number(i)) if i >= 0. && i.fract() == 0. => xs
-            .get(i as usize)
+        (Value::Array(xs), Value::Number(i)) if i.is_finite() && i.fract() == 0. => xs
+            .get(sequence_index(i, xs.len(), "array")?)
             .cloned()
             .ok_or_else(|| Error::runtime("array index out of range")),
+        (Value::String(text), Value::Number(i)) if i.is_finite() && i.fract() == 0. => text
+            .chars()
+            .nth(sequence_index(i, text.chars().count(), "string")?)
+            .map(|character| Value::String(Rc::from(character.to_string())))
+            .ok_or_else(|| Error::runtime("string index out of range")),
         (Value::Map(m), Value::String(k)) => m
             .get(k.as_ref())
             .cloned()
@@ -1186,21 +1607,54 @@ fn index(target: Value, key: Value) -> Result<Value, Error> {
         _ => Err(Error::runtime("invalid index operation")),
     }
 }
+fn sequence_index(index: f64, len: usize, kind: &str) -> Result<usize, Error> {
+    let index = index as i128;
+    let len = len as i128;
+    let resolved = if index < 0 { len + index } else { index };
+    if resolved < 0 || resolved >= len {
+        return Err(Error::runtime(format!("{kind} index out of range")));
+    }
+    Ok(resolved as usize)
+}
 fn slice(target: Value, start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
-    let Value::Array(values) = target else {
-        return Err(Error::runtime("slice expects an array"));
-    };
-    let start = slice_bound(start, values.len(), "slice start")?;
-    let mut end = slice_bound(end, values.len(), "slice end")?;
-    if inclusive {
-        end = end
-            .checked_add(1)
-            .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+    match target {
+        Value::Array(values) => {
+            let start = slice_bound(start, values.len(), "slice start")?;
+            let mut end = slice_bound(end, values.len(), "slice end")?;
+            if inclusive {
+                end = end
+                    .checked_add(1)
+                    .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+            }
+            if start > end || end > values.len() {
+                return Err(Error::runtime("slice bounds out of range"));
+            }
+            Ok(Value::Array(Rc::new(values[start..end].to_vec())))
+        }
+        Value::String(text) => {
+            let scalar_len = text.chars().count();
+            let start = slice_bound(start, scalar_len, "slice start")?;
+            let mut end = slice_bound(end, scalar_len, "slice end")?;
+            if inclusive {
+                end = end
+                    .checked_add(1)
+                    .ok_or_else(|| Error::runtime("inclusive slice end is too large"))?;
+            }
+            if start > end || end > scalar_len {
+                return Err(Error::runtime("slice bounds out of range"));
+            }
+            let start_byte = text
+                .char_indices()
+                .nth(start)
+                .map_or(text.len(), |(offset, _)| offset);
+            let end_byte = text
+                .char_indices()
+                .nth(end)
+                .map_or(text.len(), |(offset, _)| offset);
+            Ok(Value::String(Rc::from(&text[start_byte..end_byte])))
+        }
+        _ => Err(Error::runtime("slice expects an array or string")),
     }
-    if start > end || end > values.len() {
-        return Err(Error::runtime("slice bounds out of range"));
-    }
-    Ok(Value::Array(Rc::new(values[start..end].to_vec())))
 }
 fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
     let Value::Number(value) = value else {
