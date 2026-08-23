@@ -88,6 +88,17 @@ fn module_directives_are_not_accepted_by_single_file_compilation() {
 }
 
 #[test]
+fn module_parse_errors_carry_the_host_canonical_name() {
+    let error = Engine::new()
+        .compile_module("pkg://rules/../invoice", "value = 1\n@")
+        .unwrap_err();
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("pkg://rules/../invoice")
+    );
+}
+
+#[test]
 fn memory_loader_only_resolves_exact_names() {
     let loader = MemoryModuleLoader::new();
     let error = loader.load("./missing", "main").unwrap_err();

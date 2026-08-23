@@ -110,6 +110,29 @@ fn source_diagnostics_expose_primary_labels_and_precise_columns() {
 }
 
 #[test]
+fn named_embedding_sources_preserve_opaque_names_without_changing_anonymous_calls() {
+    const NAME: &str = "virtual://rules/../invoice.qc";
+    let engine = Engine::new();
+    let error = engine.compile_named(NAME, "value = 1\n@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+
+    let error = engine.compile_program_named(NAME, "@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+    let error = Context::new().eval_named(NAME, "@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+
+    let error = quickcoffee::compile_named(NAME, "@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+    let error = quickcoffee::compile_program_named(NAME, "@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+    let error = quickcoffee::eval_named(NAME, "@").unwrap_err();
+    assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
+
+    let anonymous = engine.compile("@").unwrap_err();
+    assert_eq!(anonymous.labels()[0].span.source_name, None);
+}
+
+#[test]
 fn public_fuel_and_execution_stats_bound_untrusted_programs() {
     let mut context = Context::new().with_fuel(8);
     let error = context.eval("while true then 1").unwrap_err();

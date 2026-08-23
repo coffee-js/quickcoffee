@@ -11,7 +11,7 @@
 
 1. `qcoffee --json -e SOURCE`、`qcoffee --json FILE` 和 `qcoffee --json -` 各输出恰好一行 JSON；成功时形如 `{"ok":true,"value":VALUE}`，`nil` 映射为 JSON `null`。
 2. QuickCoffee 的 Bool、有限 Number、String、Array、Map 递归映射为对应 JSON 值；函数是 `{"$quickcoffee":"function"}`，以保留其为不可序列化宿主值的类型信息。Map 键按确定性字典序输出，字符串和控制字符采用 JSON 转义。
-3. 编译或执行失败时退出码仍为 `1`，标准输出形如 `{"ok":false,"kind":KIND,"message":TEXT,"line":N}`；`line` 无来源时为 `null`。读取文件失败使用 `stage:"read"` 与 `kind:"io"`。错误模式不向标准错误重复输出详情。
+3. 编译或执行失败时退出码仍为 `1`，标准输出至少包含 `{"ok":false,"kind":KIND,"message":TEXT,"line":N}` 这些字段；`line` 无位置时为 `null`。RFC 0128 起，命名输入的诊断 label 有来源时增加可选字符串字段 `source`。读取文件失败使用 `stage:"read"` 与 `kind:"io"`。错误模式不向标准错误重复输出详情。
 4. `--json` 只适用于单次执行，不得与 `--interactive`、`--check`、`--dump-bytecode` 或 `--fingerprint` 合用；`--stats` 仍可使用且只写标准错误。
 5. JSON 协议不改变普通输出、退出码、fuel 或 QuickCoffee 值模型；它不引入 JavaScript `undefined`、原型或隐式转换。
 

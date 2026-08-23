@@ -356,6 +356,14 @@ impl Error {
         }];
         self
     }
+    pub(crate) fn with_source_name(mut self, source_name: &str) -> Self {
+        for label in &mut self.labels {
+            if label.span.source_name.is_none() {
+                label.span.source_name = Some(source_name.to_owned());
+            }
+        }
+        self
+    }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -492,10 +500,23 @@ impl Engine {
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
         compile(source)
     }
+    /// Compiles and verifies source while attaching an opaque host-provided
+    /// name to any source labels produced on failure.
+    pub fn compile_named(&self, source_name: &str, source: &str) -> Result<Chunk, Error> {
+        crate::compile_named(source_name, source)
+    }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
         let program: Program = self.compile(source)?.into();
         program.verify()?;
+        Ok(program)
+    }
+    /// Compiles named source into cheaply cloneable shared bytecode.
+    pub fn compile_program_named(&self, source_name: &str, source: &str) -> Result<Program, Error> {
+        let program: Program = self.compile_named(source_name, source)?.into();
+        program
+            .verify()
+            .map_err(|error| error.with_source_name(source_name))?;
         Ok(program)
     }
 }
@@ -685,6 +706,12 @@ impl Context {
     /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {
         let program = self.engine.compile_program(source)?;
+        self.run_program(&program)
+    }
+    /// Compiles, verifies, and executes source while attaching an opaque
+    /// host-provided name to source labels produced during compilation.
+    pub fn eval_named(&mut self, source_name: &str, source: &str) -> Result<Value, Error> {
+        let program = self.engine.compile_program_named(source_name, source)?;
         self.run_program(&program)
     }
     /// Verifies and executes an owned bytecode chunk.

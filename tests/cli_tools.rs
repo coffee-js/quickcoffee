@@ -543,6 +543,23 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 }
 
 #[test]
+fn qcoffee_json_file_errors_include_the_opaque_input_path() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-named-source-{}.qc", std::process::id()));
+    fs::write(&temp, "value = 1\n@\n").unwrap();
+    let path = temp.to_str().unwrap();
+    let output = Command::new(bin("qcoffee"))
+        .args(["--json", path])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!("\"source\":\"{path}\"")));
+    assert!(stdout.ends_with(",\"line\":2}\n"));
+    assert!(output.stderr.is_empty());
+    let _ = fs::remove_file(temp);
+}
+
+#[test]
 fn qcoffee_json_reports_values_and_structured_errors() {
     let value = Command::new(bin("qcoffee"))
         .args(["--json", "-e", "{answer: 42, ok: true}"])
