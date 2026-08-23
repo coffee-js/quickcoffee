@@ -17,7 +17,7 @@ Comparationes strictae vel numericae conecti possunt: `1 < middle() < 3` medium 
 Utere `qcoffee -e "print(range(1, 4))"`; `qcoffee --check FILE` fontem compilat atque verificat sine cursu; `--fuel N` numerum instructionum finit. Bibliotheca parva habet `print`, `len`, `type`, `range(a, b)`, `str`, `keys`, `values`, `join`, `split`, et `assert`; finis in `range` exclusus est.
 
 `qcoffee -` fontem ex initio normali legit; `qcoffee --dump-bytecode -` illum fontem sine cursu explicat.
-`qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; cum `--check` aut `--dump-bytecode` coniungi non potest.
+`qcoffee --stats` numeros instructionum et alimenti reliqui ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 
 `qcoffee --interactive` (vel `-i`) unum Context inter lineas servat; `:help` imperia ostendit, `:quit`/`:exit` sessionem finiunt. Input per fistulam promptum non accipit.
 `for character, index in 'a☕中' then index` indices `[0, 1, 2]` reddit; stringae per scalas Unicode iterantur et `by` non admittunt.

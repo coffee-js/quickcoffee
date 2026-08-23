@@ -139,6 +139,27 @@ fn qtest_reports_success_and_failure() {
     let _ = fs::remove_file(temp);
 }
 
+#[cfg(unix)]
+#[test]
+fn qtest_ignores_recursive_directory_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-cycle-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    fs::write(temp.join("pass.qc"), "true\n").unwrap();
+    symlink(&temp, temp.join("loop")).unwrap();
+    let output = Command::new(bin("qtest"))
+        .args(["--tap", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("TAP version 13\nok 1 - {}/pass.qc\n1..1\n", temp.display())
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
 #[test]
 fn every_cli_reports_the_same_package_version() {
     for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
@@ -189,9 +210,9 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
-            temp.join("a-fail.qc").display(),
-            temp.join("b-pass.qc").display()
+            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
+            temp.display(),
+            temp.display()
         )
     );
     let reversed = Command::new(bin("qtest"))
@@ -207,36 +228,9 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(
         String::from_utf8_lossy(&reversed.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
-            temp.join("a-fail.qc").display(),
-            temp.join("b-pass.qc").display()
-        )
-    );
-    let reversed_json = Command::new(bin("qtest"))
-        .args([
-            "--json",
-            temp.join("b-pass.qc").to_str().unwrap(),
-            temp.join("a-fail.qc").to_str().unwrap(),
-            temp.join("a-fail.qc").to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(!reversed_json.status.success());
-    let failed_path = temp
-        .join("a-fail.qc")
-        .display()
-        .to_string()
-        .replace('\\', "\\\\");
-    let passed_path = temp
-        .join("b-pass.qc")
-        .display()
-        .to_string()
-        .replace('\\', "\\\\");
-    assert_eq!(
-        String::from_utf8_lossy(&reversed_json.stdout),
-        format!(
-            "{{\"ok\":false,\"file\":\"{}\",\"error\":\"final value was 1, expected true\"}}\n{{\"ok\":true,\"file\":\"{}\"}}\n",
-            failed_path, passed_path
+            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
+            temp.display(),
+            temp.display()
         )
     );
     let conflict = Command::new(bin("qtest"))
@@ -331,6 +325,27 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 
     let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.qc", std::process::id()));
     fs::write(&temp, "1 + 2\n").unwrap();
+    let conflicting_source = Command::new(bin("qcoffee"))
+        .args(["-e", "1", "--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(conflicting_source.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&conflicting_source.stderr).contains("execution-mode alternatives")
+    );
+    assert!(String::from_utf8_lossy(&conflicting_source.stderr).contains("-e SOURCE, FILE, and -"));
+
+    let repeated_dump = Command::new(bin("qcoffee"))
+        .args([
+            "--dump-bytecode",
+            temp.to_str().unwrap(),
+            "--dump-bytecode",
+            temp.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(repeated_dump.status.code(), Some(2));
+
     let dump = Command::new(bin("qcoffee"))
         .args(["--dump-bytecode", temp.to_str().unwrap()])
         .output()

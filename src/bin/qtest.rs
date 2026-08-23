@@ -2,16 +2,27 @@
 
 use quickcoffee::{Context, Value};
 use std::{
+    collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
-fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+fn collect(
+    path: &Path,
+    files: &mut Vec<PathBuf>,
+    visited_directories: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     if metadata.is_file() {
         files.push(path.to_path_buf());
         return Ok(());
+    }
+    if metadata.is_dir() {
+        let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
+        if !visited_directories.insert(canonical) {
+            return Ok(());
+        }
     }
     let mut entries: Vec<_> = fs::read_dir(path)
         .map_err(|error| error.to_string())?
@@ -21,7 +32,7 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in entries {
         let child = entry.path();
         if child.is_dir() {
-            collect(&child, files)?;
+            collect(&child, files, visited_directories)?;
         } else if child.extension().is_some_and(|extension| extension == "qc") {
             files.push(child);
         }
@@ -101,8 +112,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let mut files = vec![];
+    let mut visited_directories = HashSet::new();
     for input in inputs {
-        if let Err(error) = collect(Path::new(&input), &mut files) {
+        if let Err(error) = collect(Path::new(&input), &mut files, &mut visited_directories) {
             if tap {
                 println!("TAP version 13");
                 println!("Bail out! {input}: {error}");

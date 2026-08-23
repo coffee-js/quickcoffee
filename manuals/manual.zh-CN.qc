@@ -2,7 +2,7 @@
 ##
 ## QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 fuel 限制的 VM 执行。
 ## qcoffee - 可从标准输入读取 QuickCoffee 程序。
-## qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变。
+## qcoffee --stats 将指令数与剩余燃料写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
 ## qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 ## qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 ## qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。

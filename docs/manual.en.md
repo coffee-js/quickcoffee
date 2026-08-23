@@ -17,7 +17,7 @@ Adjacent strict or numeric comparisons may chain: `1 < middle() < 3` evaluates `
 Run `qcoffee -e "print(range(1, 4))"`, `qcoffee --fuel 10000 program.qc`, `qcoffee --check program.qc`, or `qcoffee --dump-bytecode program.qc`. `--check` parses, compiles, and verifies without executing. Fuel limits executed instructions; exhaustion is a safe error. The small standard library contains `print`, `len`, `type`, end-exclusive `range(a, b)`, `str`, `keys`, `values`, `join`, `split`, and `assert`.
 
 `qcoffee -` reads source from standard input, which is convenient in pipelines; `qcoffee --dump-bytecode -` disassembles that same input instead of executing it.
-`qcoffee --stats` writes instruction and remaining-fuel counters to stderr while preserving program stdout; it cannot be combined with `--check` or `--dump-bytecode`.
+`qcoffee --stats` writes instruction and remaining-fuel counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 
 `qcoffee --interactive` (or `-i`) keeps one Context across input lines; `:help` lists commands and `:quit`/`:exit` leave the session. Piped input receives no prompts.
 With `--stats`, each non-empty interactive line that executes or reaches a runtime error writes its instruction and remaining-fuel counters to stderr; parse and verify errors write no fresh record.
