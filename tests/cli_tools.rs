@@ -333,6 +333,7 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(
         String::from_utf8_lossy(&conflicting_source.stderr).contains("execution-mode alternatives")
     );
+    assert!(String::from_utf8_lossy(&conflicting_source.stderr).contains("-e SOURCE, FILE, and -"));
 
     let repeated_dump = Command::new(bin("qcoffee"))
         .args([
