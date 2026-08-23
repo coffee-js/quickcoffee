@@ -6,6 +6,12 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 fn usage() {
     eprintln!("Usage: qdocco [--check | --markdown] FILE [-o OUTPUT]\n       qdocco --version");
 }
+fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
 fn escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -127,6 +133,10 @@ fn main() -> ExitCode {
     if !check {
         let destination =
             output.unwrap_or_else(|| input.with_extension(if markdown { "md" } else { "html" }));
+        if same_path(&input, &destination) {
+            eprintln!("output path must differ from the input source");
+            return ExitCode::from(2);
+        }
         let document = if markdown {
             render_markdown(&source, &result.to_string())
         } else {

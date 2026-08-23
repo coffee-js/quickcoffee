@@ -72,6 +72,13 @@ fn qdocco_renders_escaped_source_and_checks() {
     );
     let fenced_document = fs::read_to_string(&fenced_output).unwrap();
     assert!(fenced_document.contains("`````quickcoffee\n# ````\ntrue\n`````"));
+    let overwrite = Command::new(bin("qdocco"))
+        .args([input.to_str().unwrap(), "-o", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(overwrite.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("output path must differ"));
+    assert_eq!(fs::read_to_string(&input).unwrap(), "## <Guide>\n1 + 2\n");
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])
         .output()
