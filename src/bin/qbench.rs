@@ -1,4 +1,4 @@
-use quickcoffee::{Context, Engine, Program};
+use quickcoffee::{Context, Engine};
 use std::{env, process::ExitCode, time::Instant};
 
 struct Workload {
@@ -35,21 +35,7 @@ fn usage() {
 }
 
 fn json_escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    for character in value.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            character if character.is_control() => {
-                out.push_str(&format!("\\u{:04x}", character as u32));
-            }
-            character => out.push(character),
-        }
-    }
-    out
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn main() -> ExitCode {
@@ -81,14 +67,13 @@ fn main() -> ExitCode {
         let start = Instant::now();
         for _ in 0..iterations {
             engine
-                .compile_unverified(workload.source)
+                .compile(workload.source)
                 .expect("qbench workload must compile");
         }
         let compile_ns = start.elapsed().as_nanos();
         let program = engine
-            .compile_unverified(workload.source)
+            .compile_program(workload.source)
             .expect("qbench workload must compile");
-        let program: Program = program.into();
 
         let start = Instant::now();
         for _ in 0..iterations {
@@ -98,7 +83,7 @@ fn main() -> ExitCode {
 
         let start = Instant::now();
         for _ in 0..iterations {
-            let mut context = Context::new();
+            let mut context = Context::new().with_fuel(100_000);
             let value = context
                 .run_program(&program)
                 .expect("qbench workload must execute");
