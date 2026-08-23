@@ -189,9 +189,54 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}/a-fail.qc\n# final value was 1, expected true\nok 2 - {}/b-pass.qc\n1..2\n",
-            temp.display(),
-            temp.display()
+            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
+            temp.join("a-fail.qc").display(),
+            temp.join("b-pass.qc").display()
+        )
+    );
+    let reversed = Command::new(bin("qtest"))
+        .args([
+            "--tap",
+            temp.join("b-pass.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!reversed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&reversed.stdout),
+        format!(
+            "TAP version 13\nnot ok 1 - {}\n# final value was 1, expected true\nok 2 - {}\n1..2\n",
+            temp.join("a-fail.qc").display(),
+            temp.join("b-pass.qc").display()
+        )
+    );
+    let reversed_json = Command::new(bin("qtest"))
+        .args([
+            "--json",
+            temp.join("b-pass.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+            temp.join("a-fail.qc").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!reversed_json.status.success());
+    let failed_path = temp
+        .join("a-fail.qc")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let passed_path = temp
+        .join("b-pass.qc")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    assert_eq!(
+        String::from_utf8_lossy(&reversed_json.stdout),
+        format!(
+            "{{\"ok\":false,\"file\":\"{}\",\"error\":\"final value was 1, expected true\"}}\n{{\"ok\":true,\"file\":\"{}\"}}\n",
+            failed_path, passed_path
         )
     );
     let conflict = Command::new(bin("qtest"))

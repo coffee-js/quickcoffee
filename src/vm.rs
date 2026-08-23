@@ -870,23 +870,21 @@ impl Vm {
                                 });
                             }
                             Value::String(value) => {
-                                let values: Rc<Vec<Value>> = Rc::new(
-                                    value
-                                        .chars()
-                                        .map(|character| {
-                                            Value::String(Rc::from(character.to_string()))
-                                        })
-                                        .collect(),
-                                );
-                                let position = if step < 0 {
-                                    values.len().saturating_sub(1)
-                                } else {
-                                    0
-                                };
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
-                                        values,
-                                        position,
+                                        values: Rc::new(
+                                            value
+                                                .chars()
+                                                .map(|character| {
+                                                    Value::String(Rc::from(character.to_string()))
+                                                })
+                                                .collect(),
+                                        ),
+                                        position: if step < 0 {
+                                            value.chars().count().saturating_sub(1)
+                                        } else {
+                                            0
+                                        },
                                         step,
                                     },
                                 });
