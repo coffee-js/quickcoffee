@@ -25,7 +25,7 @@ jobs:
     env:
       BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
       CANDIDATE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-      BENCHMARK_COMMAND: alternating base/head qbench --only NAME --json --iterations 2000 --repeat 11
+      BENCHMARK_COMMAND: alternating base/head qbench --only BASELINE_NAME --json --iterations 2000 --repeat 11; candidate-only workloads measured separately
     steps:
       - name: Check out candidate
         uses: actions/checkout@v5
@@ -69,11 +69,26 @@ jobs:
           candidate_qbench="${RUNNER_TEMP}/quickcoffee-qbench-candidate/release/qbench"
           "${baseline_qbench}" --list >"${artifact_dir}/baseline-workloads.txt"
           "${candidate_qbench}" --list >"${artifact_dir}/candidate-workloads.txt"
-          diff -u \
-            "${artifact_dir}/baseline-workloads.txt" \
-            "${artifact_dir}/candidate-workloads.txt"
+          sort -u "${artifact_dir}/baseline-workloads.txt" \
+            >"${artifact_dir}/baseline-workloads-sorted.txt"
+          sort -u "${artifact_dir}/candidate-workloads.txt" \
+            >"${artifact_dir}/candidate-workloads-sorted.txt"
+          comm -23 \
+            "${artifact_dir}/baseline-workloads-sorted.txt" \
+            "${artifact_dir}/candidate-workloads-sorted.txt" \
+            >"${artifact_dir}/removed-workloads.txt"
+          comm -13 \
+            "${artifact_dir}/baseline-workloads-sorted.txt" \
+            "${artifact_dir}/candidate-workloads-sorted.txt" \
+            >"${artifact_dir}/candidate-only-workloads.txt"
+          if [[ -s "${artifact_dir}/removed-workloads.txt" ]]; then
+            echo "Candidate removes baseline workloads:" >&2
+            sed 's/^/  - /' "${artifact_dir}/removed-workloads.txt" >&2
+            exit 1
+          fi
           : >"${artifact_dir}/baseline.jsonl"
           : >"${artifact_dir}/candidate.jsonl"
+          : >"${artifact_dir}/candidate-only.jsonl"
           index=0
           while IFS= read -r workload; do
             if (( index % 2 == 0 )); then
@@ -88,7 +103,12 @@ jobs:
                 --json --iterations 2000 --repeat 11 >>"${artifact_dir}/baseline.jsonl"
             fi
             index=$((index + 1))
-          done <"${artifact_dir}/candidate-workloads.txt"
+          done <"${artifact_dir}/baseline-workloads.txt"
+          while IFS= read -r workload; do
+            "${candidate_qbench}" --only "${workload}" \
+              --json --iterations 2000 --repeat 11 \
+              >>"${artifact_dir}/candidate-only.jsonl"
+          done <"${artifact_dir}/candidate-only-workloads.txt"
 
       - name: Compare with MAD-aware non-blocking policy
         working-directory: candidate
@@ -106,6 +126,16 @@ jobs:
             --candidate-ref "${CANDIDATE_REF}" \
             --benchmark-command "${BENCHMARK_COMMAND}" \
             --github-annotations
+          if [[ -s "${artifact_dir}/candidate-only-workloads.txt" ]]; then
+            {
+              echo
+              echo "### Candidate-only workloads"
+              echo
+              echo "Measured successfully without a baseline comparison:"
+              sed 's/^/- `/' "${artifact_dir}/candidate-only-workloads.txt" \
+                | sed 's/$/`/'
+            } >>"${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: Upload raw runs and comparison
         if: always()
