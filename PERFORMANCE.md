@@ -78,6 +78,14 @@ RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_star
 
 该优化仍保留父环境动态查找，尚未实现经 verifier 证明的静态 local/capture slot、Context relocation 或成员名 intern。`Program` 私有执行计划的构建发生在 `compile_program`，不包含在现有 `qbench` / `qcompare` 的 `compile_ns`（其测量 `Engine::compile`）中；因此本节只对已列出的热执行与 Context 构造数据作结论，后续需为 sidecar 构建成本增加独立门禁。
 
+### issue #100 编译器解析的隔离叶函数槽位
+
+2026-08-24 在同一开发机上，以修改前 `main` 与 issue #100 的 release 二进制顺序执行 11 样本。第一阶段只把必填简单参数、直接局部赋值且不含调用、闭包创建、解构、迭代绑定或异常处理的隔离叶函数放入私有当前帧槽位；顶层、可逃逸函数、capture/global 名称和裸 `Chunk` 仍走既有路径。
+
+进程内 `qbench --iterations 2000 --repeat 11` 的 `closures-and-ranges` 执行中位数从 `111.830 ms` 降至 `71.304 ms`（改善 **36.2%**，修改后 MAD `1.758 ms`）；每次执行的 656 条指令、246 次名称读取、52 次名称写入、49 次调用和 49 次环境分配计数保持一致。无函数调用的 `execution-stats` 从 `70.232 ms` 到 `68.471 ms`，2.5% 差异在本轮噪声范围内，没有显示新的标量热路径回退。
+
+同轮 `qcompare --compare-iterations 1 --repeat 11` 中，`function-loop` 的 QuickCoffee hot 中位数从 `247.598 ms` 降至 `173.761 ms`（改善 **29.8%**），修改后为 QuickJS `10.381 ms` 的 **16.74×**。`scalar-loop` 的 QuickCoffee 中位数从 `325.427 ms` 到 `326.988 ms`（回退 0.48%），修改后同轮为 QuickJS 的 `9.31×`；五条集合/Unicode 负载的 QuickCoffee 中位数变化均不超过 2%。本轮标量比值进入 `10×`，但该变化不是 issue #100 带来的收益，不能用来替代后续跨轮稳定性验证，也不表示 #80 的 capture slot、成员名 intern 或 sidecar 成本工作已经完成。
+
 调试单一回归时，先用 `qbench --list` 查看确定性的内建负载名，再用 `qbench --only NAME` 只运行该负载；不指定 `--only` 始终运行完整集合，持续门禁口径不变。
 
 `qbench` 为每个内建负载输出一行 JSON，分别记录编译、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
@@ -642,7 +650,7 @@ make bench
 
 在同一 Darwin arm64 开发机上，`cargo bench --bench core` 的 `map-spread` workload（20,000 次）单次样本为：编译 91.995 ms，验证 2.767 ms，执行 48.784 ms。映射展开为每个显式项生成单项映射，再由 `MergeMaps` 合并；后续键覆盖前值。
 
-解释器使用显式调用帧和 fuel 计数；环境以稳定插入槽位保存值并以有序映射维护名称索引，编译 `Program` 对当前环境的名称读写使用带完整名称守卫的私有提示，父环境仍动态查找。数组与映射值以不可变 `Rc` 容器分享。切片为保持独立不可变值而复制所选元素，故其热路径吞吐低于纯索引。这换取了 API 简洁与可验证性，尚未进行静态 capture slot、成员名 intern、寄存器分配或垃圾回收优化。后续优化必须保持 RFC 0002 的字节码验证与 fuel 语义，并更新本报告。
+解释器使用显式调用帧和 fuel 计数；环境以稳定插入槽位保存值并以有序映射维护名称索引，编译 `Program` 对当前环境的名称读写使用带完整名称守卫的私有提示，并对一组经保守判定的隔离叶函数使用当前帧局部槽位，父环境仍动态查找。数组与映射值以不可变 `Rc` 容器分享。切片为保持独立不可变值而复制所选元素，故其热路径吞吐低于纯索引。这换取了 API 简洁与可验证性，尚未进行静态 capture slot、通用可逃逸 local slot、成员名 intern、寄存器分配或垃圾回收优化。后续优化必须保持 RFC 0002 的字节码验证与 fuel 语义，并更新本报告。
 
 ## RFC 0123 托管分配剖析
 
