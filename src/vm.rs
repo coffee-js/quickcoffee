@@ -477,6 +477,7 @@ enum FunctionKind {
         chunk: Rc<Chunk>,
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
+        fast_parameters: Option<Vec<Option<usize>>>,
         env: Env,
     },
     Native {
@@ -588,34 +589,127 @@ struct ProgramExecutionPlan {
 }
 #[derive(Debug)]
 struct ChunkBindingSlots {
-    // Programs are shared across Contexts. Every hint is therefore validated
-    // against the current environment's complete name before it is used.
-    by_pc: Vec<Cell<Option<usize>>>,
+    local_names: Vec<Rc<str>>,
+    local_by_pc: Vec<Option<usize>>,
+    isolated_frame: bool,
+    // Unresolved/global names retain the guarded hint path because Programs
+    // are shared across Contexts with independently ordered environments.
+    cached_by_pc: Vec<Cell<Option<usize>>>,
+}
+impl ChunkBindingSlots {
+    fn fast_parameter_slots(
+        &self,
+        params: &[Pattern],
+        required: usize,
+        rest: Option<&str>,
+    ) -> Option<Vec<Option<usize>>> {
+        if !self.isolated_frame || required != params.len() || rest.is_some() {
+            return None;
+        }
+        let mut slots = Vec::with_capacity(params.len());
+        for pattern in params {
+            match pattern {
+                Pattern::Bind(name) => slots.push(Some(
+                    self.local_names
+                        .binary_search_by(|candidate| candidate.as_ref().cmp(name))
+                        .ok()?,
+                )),
+                Pattern::Ignore => slots.push(None),
+                _ => return None,
+            }
+        }
+        Some(slots)
+    }
 }
 impl ProgramExecutionPlan {
     fn new(chunk: &Rc<Chunk>) -> Self {
         let mut chunks = BTreeMap::new();
-        Self::register_chunk(chunk, &mut chunks);
+        Self::register_chunk(chunk, BTreeSet::new(), &mut chunks);
         Self { chunks }
     }
 
-    fn register_chunk(chunk: &Rc<Chunk>, chunks: &mut BTreeMap<usize, Rc<ChunkBindingSlots>>) {
+    fn register_chunk(
+        chunk: &Rc<Chunk>,
+        mut local_names: BTreeSet<String>,
+        chunks: &mut BTreeMap<usize, Rc<ChunkBindingSlots>>,
+    ) {
         let key = Rc::as_ptr(chunk) as usize;
         if chunks.contains_key(&key) {
             return;
         }
+        for instruction in &chunk.code {
+            match instruction {
+                Instruction::Store(name) | Instruction::Try { name, .. } => {
+                    if name != "_" {
+                        local_names.insert(name.clone());
+                    }
+                }
+                Instruction::Destructure(pattern) => {
+                    Self::collect_pattern_bindings(pattern, &mut local_names)
+                }
+                Instruction::IterNext { patterns, .. } => {
+                    for pattern in patterns {
+                        Self::collect_pattern_bindings(pattern, &mut local_names);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let local_names = local_names.into_iter().map(Rc::from).collect::<Vec<_>>();
+        let local_indices = local_names
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(slot, name)| (name, slot))
+            .collect::<BTreeMap<Rc<str>, usize>>();
+        let local_by_pc = chunk
+            .code
+            .iter()
+            .map(|instruction| match instruction {
+                Instruction::Load(name)
+                | Instruction::LoadOrNil(name)
+                | Instruction::Store(name) => local_indices.get(name.as_str()).copied(),
+                _ => None,
+            })
+            .collect();
+        let isolated_frame = !chunk.code.iter().any(|instruction| {
+            matches!(
+                instruction,
+                Instruction::Destructure(_)
+                    | Instruction::IterNext { .. }
+                    | Instruction::Try { .. }
+                    | Instruction::EndTry
+                    | Instruction::MakeFunction(_)
+                    | Instruction::Call(_)
+                    | Instruction::CallSpread
+            )
+        });
         chunks.insert(
             key,
             Rc::new(ChunkBindingSlots {
-                by_pc: (0..chunk.code.len()).map(|_| Cell::new(None)).collect(),
+                local_names,
+                local_by_pc,
+                isolated_frame,
+                cached_by_pc: (0..chunk.code.len()).map(|_| Cell::new(None)).collect(),
             }),
         );
         for constant in &chunk.constants {
-            if let Constant::Function { params, chunk, .. } = constant {
+            if let Constant::Function {
+                params,
+                rest,
+                chunk,
+                ..
+            } = constant
+            {
+                let mut function_locals = BTreeSet::new();
                 for pattern in params {
+                    Self::collect_pattern_bindings(pattern, &mut function_locals);
                     Self::register_pattern(pattern, chunks);
                 }
-                Self::register_chunk(chunk, chunks);
+                if let Some(rest) = rest {
+                    function_locals.insert(rest.clone());
+                }
+                Self::register_chunk(chunk, function_locals, chunks);
             }
         }
         for instruction in &chunk.code {
@@ -631,11 +725,41 @@ impl ProgramExecutionPlan {
         }
     }
 
+    fn collect_pattern_bindings(pattern: &Pattern, names: &mut BTreeSet<String>) {
+        match pattern {
+            Pattern::Bind(name) | Pattern::Rest(name) => {
+                if name != "_" {
+                    names.insert(name.clone());
+                }
+            }
+            Pattern::Default { pattern, .. } => Self::collect_pattern_bindings(pattern, names),
+            Pattern::Array(patterns) => {
+                for pattern in patterns {
+                    Self::collect_pattern_bindings(pattern, names);
+                }
+            }
+            Pattern::Map(fields) => {
+                for (_, pattern) in fields {
+                    Self::collect_pattern_bindings(pattern, names);
+                }
+            }
+            Pattern::MapRest { fields, rest } => {
+                for (_, pattern) in fields {
+                    Self::collect_pattern_bindings(pattern, names);
+                }
+                if rest != "_" {
+                    names.insert(rest.clone());
+                }
+            }
+            Pattern::Ignore => {}
+        }
+    }
+
     fn register_pattern(pattern: &Pattern, chunks: &mut BTreeMap<usize, Rc<ChunkBindingSlots>>) {
         match pattern {
             Pattern::Default { pattern, default } => {
                 Self::register_pattern(pattern, chunks);
-                Self::register_chunk(default, chunks);
+                Self::register_chunk(default, BTreeSet::new(), chunks);
             }
             Pattern::Array(patterns) => {
                 for pattern in patterns {
@@ -1261,14 +1385,22 @@ struct Frame {
     debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
     env: Env,
-    binding_slots: Option<Rc<ChunkBindingSlots>>,
+    bindings: FrameBindings,
 }
-fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
-    let cached = frame
-        .binding_slots
-        .as_ref()
-        .and_then(|slots| slots.by_pc.get(pc));
-    let environment = frame.env.borrow();
+enum FrameBindings {
+    Raw,
+    Guarded(Rc<ChunkBindingSlots>),
+    Fast {
+        slots: Rc<ChunkBindingSlots>,
+        locals: Vec<Option<Value>>,
+    },
+}
+fn lookup_environment(
+    environment: &Env,
+    cached: Option<&Cell<Option<usize>>>,
+    name: &str,
+) -> Option<Value> {
+    let environment = environment.borrow();
     if let Some(slot) = cached.and_then(Cell::get) {
         if let Some(value) = environment.get_cached(name, slot) {
             return Some(value);
@@ -1284,12 +1416,13 @@ fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
     drop(environment);
     parent.and_then(|parent| lookup(&parent, name))
 }
-fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
-    let cached = frame
-        .binding_slots
-        .as_ref()
-        .and_then(|slots| slots.by_pc.get(pc));
-    let mut environment = frame.env.borrow_mut();
+fn store_environment(
+    environment: &Env,
+    cached: Option<&Cell<Option<usize>>>,
+    name: &str,
+    value: Value,
+) {
+    let mut environment = environment.borrow_mut();
     if let Some(slot) = cached.and_then(Cell::get) {
         match environment.set_cached(name, slot, value) {
             Ok(()) => return,
@@ -1305,6 +1438,39 @@ fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
     let slot = environment.set_local(name, value);
     if let Some(cached) = cached {
         cached.set(Some(slot));
+    }
+}
+fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
+    match &frame.bindings {
+        FrameBindings::Fast { slots, locals } => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                if let Some(value) = locals.get(slot)?.clone() {
+                    return Some(value);
+                }
+                let parent = frame.env.borrow().parent.clone();
+                return parent.and_then(|parent| lookup(&parent, name));
+            }
+            lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
+        }
+        FrameBindings::Guarded(slots) => {
+            lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
+        }
+        FrameBindings::Raw => lookup_environment(&frame.env, None, name),
+    }
+}
+fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
+    match &mut frame.bindings {
+        FrameBindings::Fast { slots, locals } => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                locals[slot] = Some(value);
+                return;
+            }
+            store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
+        }
+        FrameBindings::Guarded(slots) => {
+            store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
+        }
+        FrameBindings::Raw => store_environment(&frame.env, None, name, value),
     }
 }
 struct Handler {
@@ -1472,7 +1638,9 @@ impl Vm {
             debug_info: self.initial_debug_info.clone(),
             execution_plan,
             env: global,
-            binding_slots,
+            bindings: binding_slots
+                .map(FrameBindings::Guarded)
+                .unwrap_or(FrameBindings::Raw),
         }];
         loop {
             if self
@@ -1946,6 +2114,13 @@ impl Vm {
                             chunk,
                         } => {
                             let debug_info = frame.debug_info.clone();
+                            let fast_parameters = frame
+                                .execution_plan
+                                .as_ref()
+                                .and_then(|plan| plan.slots(chunk))
+                                .and_then(|slots| {
+                                    slots.fast_parameter_slots(params, *required, rest.as_deref())
+                                });
                             frame.stack.push(Value::Function(Rc::new(Function {
                                 inner: FunctionKind::Bytecode {
                                     params: params.clone(),
@@ -1954,6 +2129,7 @@ impl Vm {
                                     chunk: chunk.clone(),
                                     debug_info,
                                     execution_plan: frame.execution_plan.clone(),
+                                    fast_parameters,
                                     env: frame.env.clone(),
                                 },
                             })));
@@ -2057,6 +2233,7 @@ fn call(
                 chunk,
                 debug_info,
                 execution_plan,
+                fast_parameters,
                 env: captured,
             } => {
                 if vm.call_depth >= vm.max_call_depth {
@@ -2076,35 +2253,55 @@ fn call(
                         args.len()
                     )));
                 }
+                let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(chunk));
+                let fast_locals = fast_parameters.as_ref().zip(binding_slots.as_ref()).map(
+                    |(parameter_slots, binding_slots)| {
+                        let mut values = vec![None; binding_slots.local_names.len()];
+                        for (slot, value) in parameter_slots.iter().zip(&args) {
+                            if let Some(slot) = slot {
+                                values[*slot] = Some(value.clone());
+                            }
+                        }
+                        values
+                    },
+                );
                 let local = env(Some(captured.clone()));
                 vm.record_environment_allocation();
-                for (index, pattern) in params.iter().enumerate() {
-                    let value = args.get(index).cloned().unwrap_or(Value::Nil);
-                    let mut bindings = vec![];
-                    let snapshot = local.borrow().snapshot();
-                    if let Err(error) = bind_pattern(
-                        vm,
-                        pattern,
-                        Some(&value),
-                        &mut bindings,
-                        &local,
-                        debug_info.as_ref(),
-                        execution_plan.as_ref(),
-                    ) {
-                        local.borrow_mut().restore(snapshot);
-                        return Err(error);
+                if fast_locals.is_none() {
+                    for (index, pattern) in params.iter().enumerate() {
+                        let value = args.get(index).cloned().unwrap_or(Value::Nil);
+                        let mut bindings = vec![];
+                        let snapshot = local.borrow().snapshot();
+                        if let Err(error) = bind_pattern(
+                            vm,
+                            pattern,
+                            Some(&value),
+                            &mut bindings,
+                            &local,
+                            debug_info.as_ref(),
+                            execution_plan.as_ref(),
+                        ) {
+                            local.borrow_mut().restore(snapshot);
+                            return Err(error);
+                        }
+                        let mut environment = local.borrow_mut();
+                        for (key, value) in bindings {
+                            environment.set_local(&key, value);
+                        }
                     }
-                    let mut environment = local.borrow_mut();
-                    for (key, value) in bindings {
-                        environment.set_local(&key, value);
+                    if let Some(rest) = rest {
+                        local
+                            .borrow_mut()
+                            .set_local(rest, Value::Array(Rc::new(args[params.len()..].to_vec())));
+                        vm.record_value_allocations(1);
                     }
                 }
-                if let Some(rest) = rest {
-                    local
-                        .borrow_mut()
-                        .set_local(rest, Value::Array(Rc::new(args[params.len()..].to_vec())));
-                    vm.record_value_allocations(1);
-                }
+                let bindings = match (binding_slots, fast_locals) {
+                    (Some(slots), Some(locals)) => FrameBindings::Fast { slots, locals },
+                    (Some(slots), None) => FrameBindings::Guarded(slots),
+                    (None, None) => FrameBindings::Raw,
+                    (None, Some(_)) => unreachable!("fast locals require a binding plan"),
+                };
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
@@ -2114,7 +2311,7 @@ fn call(
                     debug_info: debug_info.clone(),
                     execution_plan: execution_plan.clone(),
                     env: local,
-                    binding_slots: execution_plan.as_ref().and_then(|plan| plan.slots(chunk)),
+                    bindings,
                 });
                 vm.call_depth += 1;
                 vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
@@ -2727,5 +2924,93 @@ mod tests {
         run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
         run_pair(&optimized, &reference, &mut optimized_b, &mut reference_b);
         run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
+    }
+
+    #[test]
+    fn compiler_resolved_frame_slots_preserve_leaf_calls_persistence_and_failure_state() {
+        assert_cached_and_reference(
+            "increment = (value) -> value + 1\nsum = 0\ni = 0\nwhile i < 100\n  sum = increment(sum)\n  i++\nsum",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "outer = 7\nread = (condition) ->\n  if condition then outer = 9\n  outer\n[read(false), read(true), outer]",
+            1_000,
+        );
+        let leaf = Engine::new()
+            .compile_program("increment = (value) -> value + 1\nincrement(41)")
+            .unwrap();
+        let Constant::Function {
+            params,
+            required,
+            rest,
+            chunk,
+        } = &leaf.0.chunk.constants[0]
+        else {
+            panic!("first constant is the leaf function template");
+        };
+        let leaf_slots = leaf
+            .0
+            .execution_plan
+            .as_ref()
+            .and_then(|plan| plan.slots(chunk))
+            .unwrap();
+        assert!(
+            leaf_slots
+                .fast_parameter_slots(params, *required, rest.as_deref())
+                .is_some()
+        );
+
+        let repeated = Engine::new()
+            .compile_program("i ?= 0\nlimit = i + 3\nwhile i < limit then i++\ni")
+            .unwrap();
+        let repeated_reference = repeated.without_binding_slots();
+        let slots = repeated
+            .0
+            .execution_plan
+            .as_ref()
+            .and_then(|plan| plan.slots(&repeated.0.chunk))
+            .unwrap();
+        assert!(slots.isolated_frame);
+        let mut optimized_context = Context::new();
+        let mut reference_context = Context::new();
+        for expected in ["3", "6"] {
+            assert_eq!(
+                optimized_context
+                    .run_program(&repeated)
+                    .unwrap()
+                    .to_string(),
+                expected
+            );
+            assert_eq!(
+                reference_context
+                    .run_program(&repeated_reference)
+                    .unwrap()
+                    .to_string(),
+                expected
+            );
+            assert_eq!(
+                optimized_context.last_execution(),
+                reference_context.last_execution()
+            );
+        }
+
+        let exhausted = Engine::new()
+            .compile_program(
+                "spin = (limit) ->\n  i = 0\n  while i < limit\n    i++\n  i\nspin(1000)",
+            )
+            .unwrap();
+        let exhausted_reference = exhausted.without_binding_slots();
+        let mut optimized_context = Context::new().with_fuel(50);
+        let mut reference_context = Context::new().with_fuel(50);
+        assert_result_equal(
+            optimized_context.run_program(&exhausted),
+            reference_context.run_program(&exhausted_reference),
+        );
+        assert_eq!(
+            optimized_context.last_execution(),
+            reference_context.last_execution()
+        );
+        assert!(optimized_context.get_global("i").is_none());
+        assert!(reference_context.get_global("i").is_none());
     }
 }
