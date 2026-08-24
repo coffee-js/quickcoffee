@@ -474,6 +474,7 @@ enum FunctionKind {
         rest: Option<String>,
         chunk: Rc<Chunk>,
         debug_info: Option<Rc<ProgramDebugInfo>>,
+        execution_plan: Option<Rc<ProgramExecutionPlan>>,
         env: Env,
     },
     Native {
@@ -483,19 +484,80 @@ enum FunctionKind {
 }
 type Env = Rc<RefCell<Environment>>;
 struct Environment {
-    values: BTreeMap<String, Value>,
+    indices: BTreeMap<Rc<str>, usize>,
+    slots: Vec<(Rc<str>, Value)>,
     parent: Option<Env>,
+}
+// Pattern binding is atomic, so both the name index and its stable slots must
+// roll back together when a nested/default pattern fails.
+#[derive(Clone)]
+struct EnvironmentSnapshot {
+    indices: BTreeMap<Rc<str>, usize>,
+    slots: Vec<(Rc<str>, Value)>,
+}
+impl Environment {
+    fn get_local(&self, name: &str) -> Option<Value> {
+        let slot = *self.indices.get(name)?;
+        self.slots.get(slot).map(|(_, value)| value.clone())
+    }
+
+    fn get_local_with_slot(&self, name: &str) -> Option<(usize, Value)> {
+        let slot = *self.indices.get(name)?;
+        self.slots.get(slot).map(|(_, value)| (slot, value.clone()))
+    }
+
+    fn get_cached(&self, name: &str, slot: usize) -> Option<Value> {
+        self.slots
+            .get(slot)
+            .filter(|(stored, _)| stored.as_ref() == name)
+            .map(|(_, value)| value.clone())
+    }
+
+    fn set_local(&mut self, name: &str, value: Value) -> usize {
+        if let Some(slot) = self.indices.get(name).copied() {
+            self.slots[slot].1 = value;
+            return slot;
+        }
+        let slot = self.slots.len();
+        let name: Rc<str> = Rc::from(name);
+        self.indices.insert(name.clone(), slot);
+        self.slots.push((name, value));
+        slot
+    }
+
+    fn set_cached(&mut self, name: &str, slot: usize, value: Value) -> Result<(), Value> {
+        match self.slots.get_mut(slot) {
+            Some((stored, current)) if stored.as_ref() == name => {
+                *current = value;
+                Ok(())
+            }
+            _ => Err(value),
+        }
+    }
+
+    fn snapshot(&self) -> EnvironmentSnapshot {
+        EnvironmentSnapshot {
+            indices: self.indices.clone(),
+            slots: self.slots.clone(),
+        }
+    }
+
+    fn restore(&mut self, snapshot: EnvironmentSnapshot) {
+        self.indices = snapshot.indices;
+        self.slots = snapshot.slots;
+    }
 }
 fn env(parent: Option<Env>) -> Env {
     Rc::new(RefCell::new(Environment {
-        values: BTreeMap::new(),
+        indices: BTreeMap::new(),
+        slots: vec![],
         parent,
     }))
 }
 fn lookup(e: &Env, n: &str) -> Option<Value> {
     let b = e.borrow();
-    if let Some(v) = b.values.get(n) {
-        return Some(v.clone());
+    if let Some(value) = b.get_local(n) {
+        return Some(value);
     }
     let p = b.parent.clone();
     drop(b);
@@ -516,6 +578,82 @@ struct ProgramInner {
     chunk: Rc<Chunk>,
     verified: Cell<bool>,
     debug_info: Option<Rc<ProgramDebugInfo>>,
+    execution_plan: Option<Rc<ProgramExecutionPlan>>,
+}
+#[derive(Debug)]
+struct ProgramExecutionPlan {
+    chunks: BTreeMap<usize, Rc<ChunkBindingSlots>>,
+}
+#[derive(Debug)]
+struct ChunkBindingSlots {
+    // Programs are shared across Contexts. Every hint is therefore validated
+    // against the current environment's complete name before it is used.
+    by_pc: Vec<Cell<Option<usize>>>,
+}
+impl ProgramExecutionPlan {
+    fn new(chunk: &Rc<Chunk>) -> Self {
+        let mut chunks = BTreeMap::new();
+        Self::register_chunk(chunk, &mut chunks);
+        Self { chunks }
+    }
+
+    fn register_chunk(chunk: &Rc<Chunk>, chunks: &mut BTreeMap<usize, Rc<ChunkBindingSlots>>) {
+        let key = Rc::as_ptr(chunk) as usize;
+        if chunks.contains_key(&key) {
+            return;
+        }
+        chunks.insert(
+            key,
+            Rc::new(ChunkBindingSlots {
+                by_pc: (0..chunk.code.len()).map(|_| Cell::new(None)).collect(),
+            }),
+        );
+        for constant in &chunk.constants {
+            if let Constant::Function { params, chunk, .. } = constant {
+                for pattern in params {
+                    Self::register_pattern(pattern, chunks);
+                }
+                Self::register_chunk(chunk, chunks);
+            }
+        }
+        for instruction in &chunk.code {
+            match instruction {
+                Instruction::Destructure(pattern) => Self::register_pattern(pattern, chunks),
+                Instruction::IterNext { patterns, .. } => {
+                    for pattern in patterns {
+                        Self::register_pattern(pattern, chunks);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn register_pattern(pattern: &Pattern, chunks: &mut BTreeMap<usize, Rc<ChunkBindingSlots>>) {
+        match pattern {
+            Pattern::Default { pattern, default } => {
+                Self::register_pattern(pattern, chunks);
+                Self::register_chunk(default, chunks);
+            }
+            Pattern::Array(patterns) => {
+                for pattern in patterns {
+                    Self::register_pattern(pattern, chunks);
+                }
+            }
+            Pattern::Map(fields) | Pattern::MapRest { fields, .. } => {
+                for (_, pattern) in fields {
+                    Self::register_pattern(pattern, chunks);
+                }
+            }
+            Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => {}
+        }
+    }
+
+    fn slots(&self, chunk: &Rc<Chunk>) -> Option<Rc<ChunkBindingSlots>> {
+        self.chunks
+            .get(&(Rc::as_ptr(chunk) as usize))
+            .map(Rc::clone)
+    }
 }
 #[derive(Debug)]
 struct ProgramDebugInfo {
@@ -555,6 +693,7 @@ impl From<Chunk> for Program {
             chunk: Rc::new(chunk),
             verified: Cell::new(false),
             debug_info: None,
+            execution_plan: None,
         }))
     }
 }
@@ -566,10 +705,21 @@ impl Program {
     ) -> Self {
         let chunk = Rc::new(chunk);
         let debug_info = Rc::new(ProgramDebugInfo::new(&chunk, source_map, source_name));
+        let execution_plan = Rc::new(ProgramExecutionPlan::new(&chunk));
         Self(Rc::new(ProgramInner {
             chunk,
             verified: Cell::new(true),
             debug_info: Some(debug_info),
+            execution_plan: Some(execution_plan),
+        }))
+    }
+    #[cfg(test)]
+    fn without_binding_slots(&self) -> Self {
+        Self(Rc::new(ProgramInner {
+            chunk: Rc::clone(&self.0.chunk),
+            verified: Cell::new(self.0.verified.get()),
+            debug_info: self.0.debug_info.clone(),
+            execution_plan: None,
         }))
     }
     /// Verifies the program and caches a successful result.
@@ -676,6 +826,24 @@ pub struct Context {
     last_execution: ExecutionStats,
 }
 
+thread_local! {
+    // Native builtin functions are immutable. Sharing their template avoids
+    // rebuilding names and closures while each Context still owns its slots.
+    static BUILTIN_ENVIRONMENT: EnvironmentSnapshot = {
+        let global = env(None);
+        let mut context = Context {
+            engine: Engine::new(),
+            global: global.clone(),
+            fuel: 1_000_000,
+            max_call_depth: 1_024,
+            cancellation: None,
+            last_execution: ExecutionStats::default(),
+        };
+        context.install_builtins();
+        global.borrow().snapshot()
+    };
+}
+
 fn one_value_allocation(_: &Value) -> u64 {
     1
 }
@@ -696,16 +864,17 @@ impl Context {
     /// Creates a context with standard library builtins and the default fuel budget.
     pub fn new() -> Self {
         let global = env(None);
-        let mut x = Self {
+        BUILTIN_ENVIRONMENT.with(|builtins| {
+            global.borrow_mut().restore(builtins.clone());
+        });
+        Self {
             engine: Engine::new(),
             global,
             fuel: 1_000_000,
             max_call_depth: 1_024,
             cancellation: None,
             last_execution: ExecutionStats::default(),
-        };
-        x.install_builtins();
-        x
+        }
     }
     /// Returns a builder-style context with the supplied fuel budget.
     pub fn with_fuel(mut self, fuel: u64) -> Self {
@@ -759,7 +928,8 @@ impl Context {
     }
     /// Installs or replaces an immutable global value visible to later runs.
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
-        self.global.borrow_mut().values.insert(name.into(), value);
+        let name = name.into();
+        self.global.borrow_mut().set_local(&name, value);
     }
     /// Returns this context after installing an immutable global value.
     ///
@@ -850,6 +1020,7 @@ impl Context {
             value_allocations: 0,
             environment_allocations: 0,
             initial_debug_info: program.0.debug_info.clone(),
+            execution_plan: program.0.execution_plan.clone(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -866,7 +1037,7 @@ impl Context {
         }
     }
     pub(crate) fn get_local(&self, name: &str) -> Option<Value> {
-        self.global.borrow().values.get(name).cloned()
+        self.global.borrow().get_local(name)
     }
     pub(crate) fn set_execution_stats(&mut self, stats: ExecutionStats) {
         self.last_execution = stats;
@@ -1057,7 +1228,53 @@ struct Frame {
     iterators: Vec<Iteration>,
     handlers: Vec<Handler>,
     debug_info: Option<Rc<ProgramDebugInfo>>,
+    execution_plan: Option<Rc<ProgramExecutionPlan>>,
     env: Env,
+    binding_slots: Option<Rc<ChunkBindingSlots>>,
+}
+fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
+    let cached = frame
+        .binding_slots
+        .as_ref()
+        .and_then(|slots| slots.by_pc.get(pc));
+    let environment = frame.env.borrow();
+    if let Some(slot) = cached.and_then(Cell::get) {
+        if let Some(value) = environment.get_cached(name, slot) {
+            return Some(value);
+        }
+    }
+    if let Some((slot, value)) = environment.get_local_with_slot(name) {
+        if let Some(cached) = cached {
+            cached.set(Some(slot));
+        }
+        return Some(value);
+    }
+    let parent = environment.parent.clone();
+    drop(environment);
+    parent.and_then(|parent| lookup(&parent, name))
+}
+fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
+    let cached = frame
+        .binding_slots
+        .as_ref()
+        .and_then(|slots| slots.by_pc.get(pc));
+    let mut environment = frame.env.borrow_mut();
+    if let Some(slot) = cached.and_then(Cell::get) {
+        match environment.set_cached(name, slot, value) {
+            Ok(()) => return,
+            Err(value) => {
+                let slot = environment.set_local(name, value);
+                if let Some(cached) = cached {
+                    cached.set(Some(slot));
+                }
+                return;
+            }
+        }
+    }
+    let slot = environment.set_local(name, value);
+    if let Some(cached) = cached {
+        cached.set(Some(slot));
+    }
 }
 struct Handler {
     catch_pc: usize,
@@ -1100,6 +1317,7 @@ struct Vm {
     value_allocations: u64,
     environment_allocations: u64,
     initial_debug_info: Option<Rc<ProgramDebugInfo>>,
+    execution_plan: Option<Rc<ProgramExecutionPlan>>,
 }
 enum Step {
     Continue,
@@ -1161,6 +1379,7 @@ impl Vm {
         chunk: Rc<Chunk>,
         env: Env,
         debug_info: Option<Rc<ProgramDebugInfo>>,
+        execution_plan: Option<Rc<ProgramExecutionPlan>>,
     ) -> Result<Value, Error> {
         let mut nested = Vm {
             fuel: self.fuel,
@@ -1178,6 +1397,7 @@ impl Vm {
             value_allocations: self.value_allocations,
             environment_allocations: self.environment_allocations,
             initial_debug_info: debug_info,
+            execution_plan,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -1210,6 +1430,8 @@ impl Vm {
         }
     }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
+        let execution_plan = self.execution_plan.clone();
+        let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(&chunk));
         let mut frames = vec![Frame {
             chunk,
             pc: 0,
@@ -1217,7 +1439,9 @@ impl Vm {
             iterators: vec![],
             handlers: vec![],
             debug_info: self.initial_debug_info.clone(),
+            execution_plan,
             env: global,
+            binding_slots,
         }];
         loop {
             if self
@@ -1245,19 +1469,19 @@ impl Vm {
             self.instructions += 1;
             let step = (|| -> Result<Step, Error> {
                 let frame = frames.last_mut().expect("VM has an initial frame");
-                let op = frame
-                    .chunk
+                let instruction_pc = frame.pc;
+                let chunk = frame.chunk.clone();
+                let op = chunk
                     .code
-                    .get(frame.pc)
-                    .cloned()
+                    .get(instruction_pc)
                     .ok_or_else(|| Error::runtime("instruction pointer escaped chunk"))?;
                 frame.pc += 1;
-                self.record_profile(&op);
+                self.record_profile(op);
                 match op {
                     Instruction::Constant(i) => match frame
                         .chunk
                         .constants
-                        .get(i)
+                        .get(*i)
                         .ok_or_else(|| Error::runtime("invalid constant"))?
                     {
                         Constant::Value(v) => frame.stack.push(v.clone()),
@@ -1266,37 +1490,38 @@ impl Vm {
                         }
                     },
                     Instruction::Load(n) => frame.stack.push(
-                        lookup(&frame.env, &n)
+                        lookup_frame(frame, instruction_pc, n)
                             .ok_or_else(|| Error::runtime(format!("unknown name '{n}'")))?,
                     ),
                     Instruction::LoadOrNil(n) => frame
                         .stack
-                        .push(lookup(&frame.env, &n).unwrap_or(Value::Nil)),
+                        .push(lookup_frame(frame, instruction_pc, n).unwrap_or(Value::Nil)),
                     Instruction::Store(n) => {
                         let v = pop(frame)?;
-                        frame.env.borrow_mut().values.insert(n, v.clone());
+                        store_frame(frame, instruction_pc, n, v.clone());
                         frame.stack.push(v)
                     }
                     Instruction::Destructure(pattern) => {
                         let value = pop(frame)?;
                         let mut bindings = vec![];
                         let env = frame.env.clone();
-                        let snapshot = env.borrow().values.clone();
+                        let snapshot = env.borrow().snapshot();
                         if let Err(error) = bind_pattern(
                             self,
-                            &pattern,
+                            pattern,
                             Some(&value),
                             &mut bindings,
                             &env,
                             frame.debug_info.as_ref(),
+                            frame.execution_plan.as_ref(),
                         ) {
-                            env.borrow_mut().values = snapshot;
+                            env.borrow_mut().restore(snapshot);
                             return Err(error);
                         }
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
-                                environment.values.insert(name, item);
+                                environment.set_local(&name, item);
                             }
                         }
                         drop(environment);
@@ -1385,7 +1610,7 @@ impl Vm {
                             .stack
                             .push(Value::Bool(values.contains_key(key.as_ref())));
                     }
-                    Instruction::Jump(delta) => jump(frame, delta)?,
+                    Instruction::Jump(delta) => jump(frame, *delta)?,
                     Instruction::JumpIfFalse(delta) => {
                         if !truth(
                             frame
@@ -1394,21 +1619,21 @@ impl Vm {
                                 .cloned()
                                 .ok_or_else(|| Error::runtime("stack underflow"))?,
                         )? {
-                            jump(frame, delta)?
+                            jump(frame, *delta)?
                         }
                     }
                     Instruction::JumpIfNil(delta) => {
                         if matches!(frame.stack.last(), Some(Value::Nil)) {
-                            jump(frame, delta)?
+                            jump(frame, *delta)?
                         }
                     }
                     Instruction::Try { catch, name } => frame.handlers.push(Handler {
-                        catch_pc: (frame.pc as i64 + catch as i64)
+                        catch_pc: (frame.pc as i64 + *catch as i64)
                             .try_into()
                             .map_err(|_| Error::runtime("invalid catch target"))?,
                         stack_depth: frame.stack.len(),
                         iterator_depth: frame.iterators.len(),
-                        name,
+                        name: name.clone(),
                     }),
                     Instruction::EndTry => {
                         frame
@@ -1537,14 +1762,14 @@ impl Vm {
                                 matches!(pattern, Pattern::Bind(_) | Pattern::Ignore)
                             }) {
                                 let mut environment = frame.env.borrow_mut();
-                                for (pattern, value) in patterns.into_iter().zip(values) {
+                                for (pattern, value) in patterns.iter().zip(values) {
                                     if let Pattern::Bind(name) = pattern {
-                                        environment.values.insert(name, value);
+                                        environment.set_local(name, value);
                                     }
                                 }
                             } else {
                                 let mut bindings = vec![];
-                                let snapshot = frame.env.borrow().values.clone();
+                                let snapshot = frame.env.borrow().snapshot();
                                 for (pattern, value) in patterns.iter().zip(values.iter()) {
                                     let env = frame.env.clone();
                                     if let Err(error) = bind_pattern(
@@ -1554,19 +1779,20 @@ impl Vm {
                                         &mut bindings,
                                         &env,
                                         frame.debug_info.as_ref(),
+                                        frame.execution_plan.as_ref(),
                                     ) {
-                                        frame.env.borrow_mut().values = snapshot;
+                                        frame.env.borrow_mut().restore(snapshot);
                                         return Err(error);
                                     }
                                 }
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
-                                    environment.values.insert(name, value);
+                                    environment.set_local(&name, value);
                                 }
                             }
                         } else {
                             frame.iterators.pop();
-                            jump(frame, end)?;
+                            jump(frame, *end)?;
                         }
                     }
                     Instruction::IterEnd => {
@@ -1576,7 +1802,7 @@ impl Vm {
                             .ok_or_else(|| Error::runtime("iterator stack underflow"))?;
                     }
                     Instruction::MakeArray(n) => {
-                        let v = take(frame, n)?;
+                        let v = take(frame, *n)?;
                         frame.stack.push(Value::Array(Rc::new(v)));
                         self.record_value_allocations(1);
                     }
@@ -1593,7 +1819,7 @@ impl Vm {
                         frame.stack.push(Value::Array(values));
                     }
                     Instruction::MergeArrays(n) => {
-                        let segments = take(frame, n)?;
+                        let segments = take(frame, *n)?;
                         let mut values = vec![];
                         for segment in segments {
                             let Value::Array(segment) = segment else {
@@ -1605,7 +1831,7 @@ impl Vm {
                         self.record_value_allocations(1);
                     }
                     Instruction::MergeMaps(n) => {
-                        let segments = take(frame, n)?;
+                        let segments = take(frame, *n)?;
                         let mut values = BTreeMap::new();
                         for segment in segments {
                             let Value::Map(segment) = segment else {
@@ -1626,14 +1852,14 @@ impl Vm {
                         let (Value::Number(start), Value::Number(end)) = (start, end) else {
                             return Err(Error::runtime("range bounds must be numbers"));
                         };
-                        frame.stack.push(numeric_range(start, end, inclusive)?);
+                        frame.stack.push(numeric_range(start, end, *inclusive)?);
                         self.record_value_allocations(1);
                     }
                     Instruction::MakeMap(keys) => {
                         let v = take(frame, keys.len())?;
                         frame
                             .stack
-                            .push(Value::Map(Rc::new(keys.into_iter().zip(v).collect())));
+                            .push(Value::Map(Rc::new(keys.iter().cloned().zip(v).collect())));
                         self.record_value_allocations(1);
                     }
                     Instruction::Stringify => {
@@ -1642,7 +1868,7 @@ impl Vm {
                         self.record_value_allocations(1);
                     }
                     Instruction::Concat(n) => {
-                        let values = take(frame, n)?;
+                        let values = take(frame, *n)?;
                         let mut output = String::new();
                         for value in values {
                             let Value::String(value) = value else {
@@ -1664,20 +1890,22 @@ impl Vm {
                         let target = pop(frame)?;
                         frame
                             .stack
-                            .push(slice(self, target, start, end, inclusive)?)
+                            .push(slice(self, target, start, end, *inclusive)?)
                     }
-                    Instruction::Member(name) => match pop(frame)? {
-                        Value::Map(map) => {
-                            frame.stack.push(map.get(&name).cloned().ok_or_else(|| {
-                                Error::runtime(format!("map key '{name}' not found"))
-                            })?)
+                    Instruction::Member(name) => {
+                        match pop(frame)? {
+                            Value::Map(map) => {
+                                frame.stack.push(map.get(name.as_str()).cloned().ok_or_else(
+                                    || Error::runtime(format!("map key '{name}' not found")),
+                                )?)
+                            }
+                            _ => return Err(Error::runtime("member access expects a map")),
                         }
-                        _ => return Err(Error::runtime("member access expects a map")),
-                    },
+                    }
                     Instruction::MakeFunction(i) => match frame
                         .chunk
                         .constants
-                        .get(i)
+                        .get(*i)
                         .ok_or_else(|| Error::runtime("invalid function template"))?
                     {
                         Constant::Function {
@@ -1694,6 +1922,7 @@ impl Vm {
                                     rest: rest.clone(),
                                     chunk: chunk.clone(),
                                     debug_info,
+                                    execution_plan: frame.execution_plan.clone(),
                                     env: frame.env.clone(),
                                 },
                             })));
@@ -1702,7 +1931,7 @@ impl Vm {
                         _ => return Err(Error::runtime("value used as function template")),
                     },
                     Instruction::Call(n) => {
-                        let args = take(frame, n)?;
+                        let args = take(frame, *n)?;
                         let callee = pop(frame)?;
                         return Ok(Step::Call { callee, args });
                     }
@@ -1796,6 +2025,7 @@ fn call(
                 rest,
                 chunk,
                 debug_info,
+                execution_plan,
                 env: captured,
             } => {
                 if vm.call_depth >= vm.max_call_depth {
@@ -1820,7 +2050,7 @@ fn call(
                 for (index, pattern) in params.iter().enumerate() {
                     let value = args.get(index).cloned().unwrap_or(Value::Nil);
                     let mut bindings = vec![];
-                    let snapshot = local.borrow().values.clone();
+                    let snapshot = local.borrow().snapshot();
                     if let Err(error) = bind_pattern(
                         vm,
                         pattern,
@@ -1828,20 +2058,20 @@ fn call(
                         &mut bindings,
                         &local,
                         debug_info.as_ref(),
+                        execution_plan.as_ref(),
                     ) {
-                        local.borrow_mut().values = snapshot;
+                        local.borrow_mut().restore(snapshot);
                         return Err(error);
                     }
                     let mut environment = local.borrow_mut();
                     for (key, value) in bindings {
-                        environment.values.insert(key, value);
+                        environment.set_local(&key, value);
                     }
                 }
                 if let Some(rest) = rest {
-                    local.borrow_mut().values.insert(
-                        rest.clone(),
-                        Value::Array(Rc::new(args[params.len()..].to_vec())),
-                    );
+                    local
+                        .borrow_mut()
+                        .set_local(rest, Value::Array(Rc::new(args[params.len()..].to_vec())));
                     vm.record_value_allocations(1);
                 }
                 frames.push(Frame {
@@ -1851,7 +2081,9 @@ fn call(
                     iterators: vec![],
                     handlers: vec![],
                     debug_info: debug_info.clone(),
+                    execution_plan: execution_plan.clone(),
                     env: local,
+                    binding_slots: execution_plan.as_ref().and_then(|plan| plan.slots(chunk)),
                 });
                 vm.call_depth += 1;
                 vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
@@ -1875,8 +2107,7 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
             frame
                 .env
                 .borrow_mut()
-                .values
-                .insert(handler.name, Value::String(Rc::from(error.to_string())));
+                .set_local(&handler.name, Value::String(Rc::from(error.to_string())));
             vm.record_value_allocations(1);
             frame.pc = handler.catch_pc;
             return true;
@@ -2064,6 +2295,7 @@ fn bind_pattern(
     bindings: &mut Vec<(String, Value)>,
     env: &Env,
     debug_info: Option<&Rc<ProgramDebugInfo>>,
+    execution_plan: Option<&Rc<ProgramExecutionPlan>>,
 ) -> Result<(), Error> {
     match pattern {
         Pattern::Ignore => value.map_or_else(
@@ -2074,7 +2306,7 @@ fn bind_pattern(
             let value = value.ok_or_else(|| Error::runtime("missing value for pattern"))?;
             bindings.push((name.clone(), value.clone()));
             if name != "_" {
-                env.borrow_mut().values.insert(name.clone(), value.clone());
+                env.borrow_mut().set_local(name, value.clone());
             }
             Ok(())
         }
@@ -2082,16 +2314,29 @@ fn bind_pattern(
             let value = value.ok_or_else(|| Error::runtime("missing value for rest pattern"))?;
             bindings.push((name.clone(), value.clone()));
             if name != "_" {
-                env.borrow_mut().values.insert(name.clone(), value.clone());
+                env.borrow_mut().set_local(name, value.clone());
             }
             Ok(())
         }
         Pattern::Default { pattern, default } => {
             let value = match value {
                 Some(value) if !matches!(value, Value::Nil) => value.clone(),
-                _ => vm.eval_default(default.clone(), env.clone(), debug_info.cloned())?,
+                _ => vm.eval_default(
+                    default.clone(),
+                    env.clone(),
+                    debug_info.cloned(),
+                    execution_plan.cloned(),
+                )?,
             };
-            bind_pattern(vm, pattern, Some(&value), bindings, env, debug_info)
+            bind_pattern(
+                vm,
+                pattern,
+                Some(&value),
+                bindings,
+                env,
+                debug_info,
+                execution_plan,
+            )
         }
         Pattern::Array(patterns) => {
             let Some(Value::Array(values)) = value else {
@@ -2127,11 +2372,19 @@ fn bind_pattern(
                     vm.record_value_allocations(1);
                     bindings.push((name.clone(), rest.clone()));
                     if name != "_" {
-                        env.borrow_mut().values.insert(name.clone(), rest);
+                        env.borrow_mut().set_local(name, rest);
                     }
                     break;
                 }
-                bind_pattern(vm, pattern, values.get(index), bindings, env, debug_info)?;
+                bind_pattern(
+                    vm,
+                    pattern,
+                    values.get(index),
+                    bindings,
+                    env,
+                    debug_info,
+                    execution_plan,
+                )?;
             }
             Ok(())
         }
@@ -2140,15 +2393,22 @@ fn bind_pattern(
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields {
-                bind_pattern(vm, pattern, map.get(key), bindings, env, debug_info).map_err(
-                    |error| {
-                        if map.contains_key(key) {
-                            error
-                        } else {
-                            Error::runtime(format!("map key '{key}' not found"))
-                        }
-                    },
-                )?;
+                bind_pattern(
+                    vm,
+                    pattern,
+                    map.get(key),
+                    bindings,
+                    env,
+                    debug_info,
+                    execution_plan,
+                )
+                .map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
             }
             Ok(())
         }
@@ -2157,15 +2417,22 @@ fn bind_pattern(
                 return Err(Error::runtime("map destructuring expects a map"));
             };
             for (key, pattern) in fields.iter() {
-                bind_pattern(vm, pattern, map.get(key), bindings, env, debug_info).map_err(
-                    |error| {
-                        if map.contains_key(key) {
-                            error
-                        } else {
-                            Error::runtime(format!("map key '{key}' not found"))
-                        }
-                    },
-                )?;
+                bind_pattern(
+                    vm,
+                    pattern,
+                    map.get(key),
+                    bindings,
+                    env,
+                    debug_info,
+                    execution_plan,
+                )
+                .map_err(|error| {
+                    if map.contains_key(key) {
+                        error
+                    } else {
+                        Error::runtime(format!("map key '{key}' not found"))
+                    }
+                })?;
             }
             let explicit_fields: BTreeSet<&str> =
                 fields.iter().map(|(field, _)| field.as_str()).collect();
@@ -2179,7 +2446,7 @@ fn bind_pattern(
             vm.record_value_allocations(1);
             bindings.push((rest.clone(), rest_value.clone()));
             if rest != "_" {
-                env.borrow_mut().values.insert(rest.clone(), rest_value);
+                env.borrow_mut().set_local(rest, rest_value);
             }
             Ok(())
         }
@@ -2275,4 +2542,159 @@ fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
     let value = value as i64;
     let index = if value < 0 { len as i64 + value } else { value };
     usize::try_from(index).map_err(|_| Error::runtime(format!("{name} out of range")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_result_equal(left: Result<Value, Error>, right: Result<Value, Error>) {
+        match (left, right) {
+            (Ok(left), Ok(right)) => assert!(
+                equal(&left, &right),
+                "optimized value {left:?} differs from reference {right:?}"
+            ),
+            (Err(left), Err(right)) => {
+                assert_eq!(left.kind(), right.kind());
+                assert_eq!(left.message(), right.message());
+                assert_eq!(left.labels(), right.labels());
+                assert_eq!(left.resource_limit(), right.resource_limit());
+            }
+            (left, right) => panic!("optimized/reference result mismatch: {left:?} vs {right:?}"),
+        }
+    }
+
+    fn assert_cached_and_reference(source: &str, fuel: u64) {
+        let optimized = Engine::new()
+            .compile_program_named("differential.qc", source)
+            .expect("differential source must compile");
+        let reference = optimized.without_binding_slots();
+        assert_eq!(optimized.disassemble(), reference.disassemble());
+        assert_eq!(optimized.fingerprint(), reference.fingerprint());
+        let mut optimized_context = Context::new().with_fuel(fuel);
+        let mut reference_context = Context::new().with_fuel(fuel);
+        let optimized_result = optimized_context.run_program(&optimized);
+        let reference_result = reference_context.run_program(&reference);
+        assert_result_equal(optimized_result, reference_result);
+        assert_eq!(
+            optimized_context.last_execution(),
+            reference_context.last_execution()
+        );
+    }
+
+    #[test]
+    fn binding_slots_match_reference_for_dynamic_shadowing_and_layouts() {
+        assert_cached_and_reference(
+            "x = 1\nf = ->\n  i = 0\n  out = []\n  while i < 2\n    out = [out..., x]\n    x = 2 if i == 0\n    i++\n  out\nf()",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "f = (flag) ->\n  extra = 1 if flag\n  x = 2\n  extra ?= 0\n  x + extra\n[f(false), f(true), f(false)]",
+            10_000,
+        );
+    }
+
+    #[test]
+    fn binding_slots_match_reference_for_patterns_closures_and_handlers() {
+        assert_cached_and_reference(
+            "base = 10\nmake = (offset = 1) ->\n  ([left, right], {factor}) ->\n    sum = 0\n    for value, index in [left, right]\n      sum += value * factor + index + base + offset\n    try\n      throw 'boom' if sum < 0\n      sum\n    catch error\n      0\nfn = make(2)\nfn([1, 2], {factor: 3})",
+            20_000,
+        );
+        assert_cached_and_reference(
+            "x = 1\ni = 0\nwhile i < 2\n  try\n    {x, missing} = {x: i + 2}\n  catch error\n    nil\n  i++\nx",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "outer = 40\nf = ->\n  try\n    [outer, missing] = [1]\n  catch error\n    outer\nf()",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "side = 40\nf = ->\n  try\n    [local = (side = 1), {needed}] = [nil, {}]\n  catch error\n    side\nf()",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "f = (flag, first = (padding = 1 if flag), value = (x ?= 2)) -> value\n[f(false), f(true), f(false)]",
+            10_000,
+        );
+    }
+
+    #[test]
+    fn binding_slots_preserve_errors_labels_fuel_and_raw_chunks() {
+        assert_cached_and_reference("known = 1\nknown + missing", 100);
+        assert_cached_and_reference("i = 0\nloop\n  i++", 50);
+        assert_cached_and_reference("[left, right] = [1]", 100);
+
+        let chunk = Engine::new().compile("value = 1\nvalue + 1").unwrap();
+        let raw = Program::from(chunk);
+        assert!(raw.0.execution_plan.is_none());
+        assert_eq!(Context::new().run_program(&raw).unwrap().to_string(), "2");
+    }
+
+    #[test]
+    fn retained_functions_keep_their_program_binding_plan_across_eval() {
+        let engine = Engine::new();
+        let define = engine
+            .compile_program("base = 40\nadd = (value) -> value + base\nadd")
+            .unwrap();
+        let call = engine.compile_program("base = 41\nadd(1)").unwrap();
+        let define_reference = define.without_binding_slots();
+        let call_reference = call.without_binding_slots();
+
+        let mut optimized = Context::new();
+        let mut reference = Context::new();
+        optimized.run_program(&define).unwrap();
+        reference.run_program(&define_reference).unwrap();
+        assert_result_equal(
+            optimized.run_program(&call),
+            reference.run_program(&call_reference),
+        );
+        assert_eq!(optimized.last_execution(), reference.last_execution());
+        assert_eq!(optimized.get_global("base").unwrap().to_string(), "41");
+        assert_eq!(reference.get_global("base").unwrap().to_string(), "41");
+    }
+
+    #[test]
+    fn shared_program_binding_slots_are_guarded_across_context_layouts() {
+        let optimized = Engine::new()
+            .compile_program(
+                "f = (flag) ->\n  extra = 1 if flag\n  local = 2\n  extra ?= 0\n  local + extra\n[f(flag), x]",
+            )
+            .unwrap();
+        let reference = optimized.without_binding_slots();
+
+        let mut optimized_a = Context::new();
+        optimized_a.set_global("x", Value::Number(40.));
+        optimized_a.set_global("flag", Value::Bool(false));
+        let mut optimized_b = Context::new();
+        optimized_b.set_global("padding", Value::Nil);
+        optimized_b.set_global("x", Value::Number(41.));
+        optimized_b.set_global("flag", Value::Bool(true));
+
+        let mut reference_a = Context::new();
+        reference_a.set_global("x", Value::Number(40.));
+        reference_a.set_global("flag", Value::Bool(false));
+        let mut reference_b = Context::new();
+        reference_b.set_global("padding", Value::Nil);
+        reference_b.set_global("x", Value::Number(41.));
+        reference_b.set_global("flag", Value::Bool(true));
+
+        fn run_pair(
+            optimized: &Program,
+            reference: &Program,
+            optimized_context: &mut Context,
+            reference_context: &mut Context,
+        ) {
+            assert_result_equal(
+                optimized_context.run_program(optimized),
+                reference_context.run_program(reference),
+            );
+            assert_eq!(
+                optimized_context.last_execution(),
+                reference_context.last_execution()
+            );
+        }
+        run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
+        run_pair(&optimized, &reference, &mut optimized_b, &mut reference_b);
+        run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
+    }
 }
