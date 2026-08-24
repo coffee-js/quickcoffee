@@ -74,7 +74,7 @@ RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_star
 | `unicode-scalar-iterate` | 3.908 | 2.051（0.004） | 47.5% | 2.09× |
 | `unicode-scalar-index` | 11.026 | 5.834（0.018） | 47.1% | 3.58× |
 
-七条集合负载现已全部进入 `20×` 内，固定自身键映射读取不再越过集合门槛；但首要的标量循环仍未进入 `10×`，函数调用也仍是明显热点，所以 #80 不能据此关闭。`qbench` 的同机修改前后 11 样本还显示 `loop-core` 执行中位数从 `32.376 ms` 降至 `14.962 ms`（改善 53.8%），`closures-and-ranges` 从 `43.963 ms` 降至 `27.183 ms`（改善 38.2%）。内建环境模板按线程复用后，短程序反复创建 Context 的 `constant-folding`（200,000 次）为 `120.666 ms`，低于未修改 `main` 的 `349.676 ms`（改善 65.5%），避免用长循环收益掩盖启动型回退。
+五条集合/Unicode 目标负载现已全部进入 `20×` 内，固定自身键映射读取不再越过集合门槛；但首要的标量循环仍未进入 `10×`，函数循环仍为 `24.89×`，所以 #80 不能据此关闭。`qbench` 的同机修改前后 11 样本还显示 `loop-core` 执行中位数从 `32.376 ms` 降至 `14.962 ms`（改善 53.8%），`closures-and-ranges` 从 `43.963 ms` 降至 `27.183 ms`（改善 38.2%）。内建环境模板按线程复用后，短程序反复创建 Context 的 `constant-folding`（200,000 次）为 `120.666 ms`，低于未修改 `main` 的 `349.676 ms`（改善 65.5%），避免用长循环收益掩盖启动型回退。
 
 该优化仍保留父环境动态查找，尚未实现经 verifier 证明的静态 local/capture slot、Context relocation 或成员名 intern。`Program` 私有执行计划的构建发生在 `compile_program`，不包含在现有 `qbench` / `qcompare` 的 `compile_ns`（其测量 `Engine::compile`）中；因此本节只对已列出的热执行与 Context 构造数据作结论，后续需为 sidecar 构建成本增加独立门禁。
 
