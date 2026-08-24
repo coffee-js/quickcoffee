@@ -489,7 +489,8 @@ enum FunctionKind {
 type Env = Rc<RefCell<Environment>>;
 struct Environment {
     indices: BTreeMap<Rc<str>, usize>,
-    slots: Vec<(Rc<str>, Option<Value>)>,
+    slots: Vec<(Rc<str>, Value)>,
+    initialized: Vec<bool>,
     parent: Option<Env>,
 }
 // Pattern binding is atomic, so both the name index and its stable slots must
@@ -497,76 +498,102 @@ struct Environment {
 #[derive(Clone)]
 struct EnvironmentSnapshot {
     indices: BTreeMap<Rc<str>, usize>,
-    slots: Vec<(Rc<str>, Option<Value>)>,
+    slots: Vec<(Rc<str>, Value)>,
+    initialized: Vec<bool>,
 }
 impl Environment {
+    fn is_initialized(&self, slot: usize) -> bool {
+        self.initialized.get(slot).copied().unwrap_or(true)
+    }
+
     fn get_local(&self, name: &str) -> Option<Value> {
         let slot = *self.indices.get(name)?;
-        self.slots.get(slot)?.1.clone()
+        self.is_initialized(slot)
+            .then(|| self.slots.get(slot).map(|(_, value)| value.clone()))?
     }
 
     fn get_local_with_slot(&self, name: &str) -> Option<(usize, Value)> {
         let slot = *self.indices.get(name)?;
-        self.slots.get(slot)?.1.clone().map(|value| (slot, value))
+        self.is_initialized(slot)
+            .then(|| self.slots.get(slot).map(|(_, value)| (slot, value.clone())))?
     }
 
     fn get_cached(&self, name: &str, slot: usize) -> Option<Value> {
         self.slots
             .get(slot)
             .filter(|(stored, _)| stored.as_ref() == name)
-            .and_then(|(_, value)| value.clone())
+            .filter(|_| self.is_initialized(slot))
+            .map(|(_, value)| value.clone())
     }
 
     fn get_resolved(&self, slot: usize) -> Option<Option<Value>> {
-        self.slots.get(slot).map(|(_, value)| value.clone())
+        let (_, value) = self.slots.get(slot)?;
+        Some(self.is_initialized(slot).then(|| value.clone()))
     }
 
     fn set_resolved(&mut self, slot: usize, value: Value) -> Result<(), Value> {
-        let Some((_, current)) = self.slots.get_mut(slot) else {
+        if slot >= self.slots.len() {
             return Err(value);
-        };
-        *current = Some(value);
+        }
+        if let Some(initialized) = self.initialized.get_mut(slot) {
+            *initialized = true;
+        }
+        self.slots[slot].1 = value;
         Ok(())
     }
 
     fn set_local(&mut self, name: &str, value: Value) -> usize {
         if let Some(slot) = self.indices.get(name).copied() {
-            self.slots[slot].1 = Some(value);
+            if let Some(initialized) = self.initialized.get_mut(slot) {
+                *initialized = true;
+            }
+            self.slots[slot].1 = value;
             return slot;
         }
         let slot = self.slots.len();
         let name: Rc<str> = Rc::from(name);
         self.indices.insert(name.clone(), slot);
-        self.slots.push((name, Some(value)));
+        self.slots.push((name, value));
+        if !self.initialized.is_empty() {
+            self.initialized.push(true);
+        }
         slot
     }
 
     fn set_cached(&mut self, name: &str, slot: usize, value: Value) -> Result<(), Value> {
-        match self.slots.get_mut(slot) {
-            Some((stored, current)) if stored.as_ref() == name => {
-                *current = Some(value);
-                Ok(())
-            }
-            _ => Err(value),
+        if !self
+            .slots
+            .get(slot)
+            .is_some_and(|(stored, _)| stored.as_ref() == name)
+        {
+            return Err(value);
         }
+        if let Some(initialized) = self.initialized.get_mut(slot) {
+            *initialized = true;
+        }
+        self.slots[slot].1 = value;
+        Ok(())
     }
 
     fn snapshot(&self) -> EnvironmentSnapshot {
         EnvironmentSnapshot {
             indices: self.indices.clone(),
             slots: self.slots.clone(),
+            initialized: self.initialized.clone(),
         }
     }
 
     fn restore(&mut self, snapshot: EnvironmentSnapshot) {
         self.indices = snapshot.indices;
         self.slots = snapshot.slots;
+        self.initialized = snapshot.initialized;
     }
 }
 fn env(parent: Option<Env>) -> Env {
     Rc::new(RefCell::new(Environment {
         indices: BTreeMap::new(),
         slots: vec![],
+        initialized: vec![],
         parent,
     }))
 }
@@ -577,10 +604,15 @@ fn env_with_unset_slots(parent: Env, names: &[Rc<str>]) -> Env {
         .enumerate()
         .map(|(slot, name)| (name, slot))
         .collect();
-    let slots = names.iter().cloned().map(|name| (name, None)).collect();
+    let slots = names
+        .iter()
+        .cloned()
+        .map(|name| (name, Value::Nil))
+        .collect();
     Rc::new(RefCell::new(Environment {
         indices,
         slots,
+        initialized: vec![false; names.len()],
         parent: Some(parent),
     }))
 }
@@ -619,6 +651,7 @@ struct ChunkBindingSlots {
     local_names: Vec<Rc<str>>,
     local_by_pc: Vec<Option<usize>>,
     isolated_frame: bool,
+    shared_environment: bool,
     // Unresolved/global names retain the guarded hint path because Programs
     // are shared across Contexts with independently ordered environments.
     cached_by_pc: Vec<Cell<Option<usize>>>,
@@ -706,6 +739,10 @@ impl ProgramExecutionPlan {
         // functions carry the environment captured where they were created,
         // and native functions receive values only. Keep spread calls out of
         // this first extension while their argument carrier is investigated.
+        let shared_environment = chunk
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::MakeFunction(_)));
         let isolated_frame = !chunk.code.iter().any(|instruction| {
             matches!(
                 instruction,
@@ -723,6 +760,7 @@ impl ProgramExecutionPlan {
                 local_names,
                 local_by_pc,
                 isolated_frame,
+                shared_environment,
                 cached_by_pc: (0..chunk.code.len()).map(|_| Cell::new(None)).collect(),
             }),
         );
@@ -1426,11 +1464,11 @@ struct Frame {
 enum FrameBindings {
     Raw,
     Guarded(Rc<ChunkBindingSlots>),
-    Shared(Rc<ChunkBindingSlots>),
     Fast {
         slots: Rc<ChunkBindingSlots>,
         locals: Vec<Option<Value>>,
     },
+    Shared(Rc<ChunkBindingSlots>),
 }
 fn lookup_environment(
     environment: &Env,
@@ -2366,12 +2404,20 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 let environment_elidable = fast_locals
                     .as_ref()
                     .is_some_and(|locals| locals.iter().all(Option::is_some));
+                let shared_environment = fast_locals.is_none()
+                    && binding_slots
+                        .as_ref()
+                        .is_some_and(|slots| slots.shared_environment);
                 let local = if environment_elidable {
                     captured.clone()
-                } else if let (Some(binding_slots), None) =
-                    (binding_slots.as_ref(), fast_locals.as_ref())
-                {
-                    env_with_unset_slots(captured.clone(), &binding_slots.local_names)
+                } else if shared_environment {
+                    env_with_unset_slots(
+                        captured.clone(),
+                        &binding_slots
+                            .as_ref()
+                            .expect("shared environments require binding slots")
+                            .local_names,
+                    )
                 } else {
                     env(Some(captured.clone()))
                 };
@@ -2409,7 +2455,8 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 }
                 let bindings = match (binding_slots, fast_locals) {
                     (Some(slots), Some(locals)) => FrameBindings::Fast { slots, locals },
-                    (Some(slots), None) => FrameBindings::Shared(slots),
+                    (Some(slots), None) if slots.shared_environment => FrameBindings::Shared(slots),
+                    (Some(slots), None) => FrameBindings::Guarded(slots),
                     (None, None) => FrameBindings::Raw,
                     (None, Some(_)) => unreachable!("fast locals require a binding plan"),
                 };
@@ -3085,6 +3132,7 @@ mod tests {
             .and_then(|plan| plan.slots(chunk))
             .unwrap();
         assert!(!slots.isolated_frame);
+        assert!(slots.shared_environment);
         assert!(
             slots
                 .local_names
