@@ -99,6 +99,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "1274",
     },
     Workload {
+        name: "call-containing-local-loop",
+        source: "increment = (value) -> value + 1\nrun = (limit) ->\n  sum = 0\n  i = 0\n  while i < limit\n    sum = increment(sum)\n    i++\n  sum\nrun(50)",
+        expected: "50",
+    },
+    Workload {
         name: "map-spread",
         source: "base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c",
         expected: "8",
