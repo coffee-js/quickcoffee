@@ -7,7 +7,7 @@
 
 模块语法仅由 `Engine::compile_module(name, source)` 接受，单文件 `compile`/`qcoffee` 仍拒绝模块指令。本切片支持顶层 `import { public as local } from 'specifier'`、`export name = expression` 与 `export { local as public }`。`specifier` 必须是无插值字符串；导入和导出均为命名绑定。
 
-`Context::run_module` 只通过宿主 `ModuleLoader` 取得源码。引擎不读取文件、目录、环境变量或网络；`ModuleSource::name` 必须由宿主规范化。`MemoryModuleLoader` 只按精确名称用于测试和小型嵌入。CLI 相对路径、搜索根、模块包和序列化另立 RFC。
+`Context::run_module` 只通过宿主 `ModuleLoader` 取得源码。核心引擎不自行选择或读取文件、目录、环境变量或网络；`ModuleSource::name` 必须由宿主规范化。`MemoryModuleLoader` 只按精确名称用于测试和小型嵌入。后续 [RFC 0133](0133-restricted-file-module-loader.md) 增加由宿主显式构造的受限文件加载器，但不改变此权限边界；CLI 相对路径、搜索根、模块包和序列化仍另立 RFC。
 
 每个模块在私有顶层环境执行，父环境仅包含宿主显式注入的全局和内建函数；执行结束后只有 `ModuleExports` 中声明的值离开模块。已求值的同名依赖在一次 `run_module` 内复用；循环依赖返回确定性运行时错误，不执行部分初始化。
 

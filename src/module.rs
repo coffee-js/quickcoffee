@@ -1,5 +1,11 @@
 use crate::{Context, Engine, Error, ExecutionStats, Program, Value, lowering, parser};
-use std::collections::{BTreeMap, BTreeSet};
+use cap_std::{ambient_authority, fs::Dir};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{self, Read},
+    path::{Component, Path},
+    sync::Arc,
+};
 
 /// Source returned by an embedding host for one named QuickCoffee module.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,10 +33,10 @@ impl ModuleSource {
 
 /// Host-controlled module source resolver.
 ///
-/// The engine never reads the file system or network. The host receives the
-/// literal module specifier and importing module's canonical name, then returns
-/// a canonical source name. This first module-core slice accepts only exact
-/// named imports and rejects circular dependencies deterministically.
+/// The core engine never selects a file-system or network source on its own.
+/// The host supplies a loader, which receives the literal module specifier and
+/// importing module's canonical name, then returns a canonical source name.
+/// Loader implementations therefore define the source authority explicitly.
 pub trait ModuleLoader {
     /// Resolves a literal module `specifier` requested from `referrer`.
     fn load(&self, specifier: &str, referrer: &str) -> Result<ModuleSource, Error>;
@@ -58,6 +64,201 @@ impl ModuleLoader for MemoryModuleLoader {
         };
         Ok(ModuleSource::new(specifier, source))
     }
+}
+
+/// An opt-in filesystem loader confined to one open directory capability.
+///
+/// Imports must use explicit `./` or `../` specifiers. Module names are
+/// root-relative UTF-8 paths with `/` separators and a `.qc` extension. Both
+/// lexical traversal above the root and symlink targets outside it are
+/// rejected before source is returned to the engine.
+#[derive(Clone, Debug)]
+pub struct RestrictedFileModuleLoader {
+    root: Arc<Dir>,
+}
+impl RestrictedFileModuleLoader {
+    /// Creates a loader rooted at an existing directory.
+    pub fn new(root: impl AsRef<Path>) -> Result<Self, Error> {
+        let requested_root = root.as_ref();
+        let root = Dir::open_ambient_dir(requested_root, ambient_authority()).map_err(|_| {
+            Error::runtime(format!(
+                "module root is unavailable: {}",
+                requested_root.display()
+            ))
+        })?;
+        Ok(Self {
+            root: Arc::new(root),
+        })
+    }
+
+    /// Loads one root-relative entry module, inferring `.qc` when omitted.
+    pub fn load_entry(&self, name: &str) -> Result<ModuleSource, Error> {
+        let name = entry_name(name)?;
+        self.load_name(&name, name.as_str())
+    }
+
+    fn load_name(&self, name: &str, requested: &str) -> Result<ModuleSource, Error> {
+        let canonical = self.root.canonicalize(name).map_err(|error| {
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                Error::runtime(format!("module path escapes configured root: {requested}"))
+            } else {
+                Error::runtime(format!("module not found: {name}"))
+            }
+        })?;
+        let mut parts = Vec::new();
+        for component in canonical.components() {
+            let Component::Normal(component) = component else {
+                return Err(Error::runtime(format!(
+                    "invalid module target: {requested}"
+                )));
+            };
+            let Some(component) = component.to_str() else {
+                return Err(Error::runtime(format!(
+                    "module path is not UTF-8: {requested}"
+                )));
+            };
+            if component.contains(['\\', ':']) {
+                return Err(Error::runtime(format!(
+                    "invalid module target: {requested}"
+                )));
+            }
+            parts.push(component);
+        }
+        let canonical_name = parts.join("/");
+        if canonical.extension().and_then(|value| value.to_str()) != Some("qc") {
+            return Err(Error::runtime(format!(
+                "invalid module target: {requested}"
+            )));
+        }
+        let mut file = self.root.open(&canonical).map_err(|_| {
+            Error::runtime(format!("module source is not readable: {canonical_name}"))
+        })?;
+        if !file
+            .metadata()
+            .map_err(|_| {
+                Error::runtime(format!("module source is not readable: {canonical_name}"))
+            })?
+            .is_file()
+        {
+            return Err(Error::runtime(format!(
+                "invalid module target: {requested}"
+            )));
+        }
+        let mut source = String::new();
+        file.read_to_string(&mut source).map_err(|error| {
+            if error.kind() == io::ErrorKind::InvalidData {
+                Error::runtime(format!(
+                    "module source is not readable UTF-8: {canonical_name}"
+                ))
+            } else {
+                Error::runtime(format!("module source is not readable: {canonical_name}"))
+            }
+        })?;
+        Ok(ModuleSource::new(canonical_name, source))
+    }
+}
+impl ModuleLoader for RestrictedFileModuleLoader {
+    fn load(&self, specifier: &str, referrer: &str) -> Result<ModuleSource, Error> {
+        let name = import_name(specifier, referrer)?;
+        self.load_name(&name, specifier)
+    }
+}
+
+fn entry_name(name: &str) -> Result<String, Error> {
+    if name.is_empty() || name.starts_with('/') || name.contains('\\') || name.contains(':') {
+        return Err(Error::runtime(format!("invalid module entry: {name}")));
+    }
+    let mut parts = Vec::new();
+    for part in name.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return Err(Error::runtime(format!("invalid module entry: {name}")));
+        }
+        parts.push(part.to_owned());
+    }
+    add_module_extension(&mut parts, name, "entry")?;
+    Ok(parts.join("/"))
+}
+
+fn import_name(specifier: &str, referrer: &str) -> Result<String, Error> {
+    if !(specifier.starts_with("./") || specifier.starts_with("../"))
+        || specifier.contains('\\')
+        || specifier.contains(':')
+    {
+        return Err(Error::runtime(format!(
+            "invalid module specifier: {specifier}"
+        )));
+    }
+    let mut parts = canonical_referrer(referrer)?;
+    parts.pop();
+    let mut final_part_is_name = false;
+    for part in specifier.split('/') {
+        match part {
+            "" => {
+                return Err(Error::runtime(format!(
+                    "invalid module specifier: {specifier}"
+                )));
+            }
+            "." => final_part_is_name = false,
+            ".." => {
+                if parts.pop().is_none() {
+                    return Err(Error::runtime(format!(
+                        "module path escapes configured root: {specifier}"
+                    )));
+                }
+                final_part_is_name = false;
+            }
+            part => {
+                parts.push(part.to_owned());
+                final_part_is_name = true;
+            }
+        }
+    }
+    if !final_part_is_name {
+        return Err(Error::runtime(format!(
+            "invalid module specifier: {specifier}"
+        )));
+    }
+    add_module_extension(&mut parts, specifier, "specifier")?;
+    Ok(parts.join("/"))
+}
+
+fn canonical_referrer(referrer: &str) -> Result<Vec<String>, Error> {
+    if referrer.is_empty()
+        || referrer.starts_with('/')
+        || referrer.contains('\\')
+        || referrer.contains(':')
+    {
+        return Err(Error::runtime(format!(
+            "invalid module referrer: {referrer}"
+        )));
+    }
+    let parts = referrer.split('/').map(str::to_owned).collect::<Vec<_>>();
+    if parts
+        .iter()
+        .any(|part| part.is_empty() || part == "." || part == "..")
+        || parts.last().is_none_or(|part| !part.ends_with(".qc"))
+    {
+        return Err(Error::runtime(format!(
+            "invalid module referrer: {referrer}"
+        )));
+    }
+    Ok(parts)
+}
+
+fn add_module_extension(parts: &mut [String], requested: &str, subject: &str) -> Result<(), Error> {
+    let name = parts
+        .last_mut()
+        .expect("validated module paths have a final component");
+    if let Some((_, extension)) = name.rsplit_once('.') {
+        if extension != "qc" {
+            return Err(Error::runtime(format!(
+                "invalid module {subject}: {requested}"
+            )));
+        }
+    } else {
+        name.push_str(".qc");
+    }
+    Ok(())
 }
 
 /// Compiled static imports and named exports for one QuickCoffee module.

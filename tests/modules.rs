@@ -1,6 +1,21 @@
 use quickcoffee::{
-    Context, Engine, ErrorKind, MemoryModuleLoader, ModuleLoader, ResourceLimit, Value,
+    Context, Engine, ErrorKind, MemoryModuleLoader, ModuleLoader, ResourceLimit,
+    RestrictedFileModuleLoader, Value,
 };
+use std::{
+    fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+fn module_temp(name: &str) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    std::env::temp_dir().join(format!(
+        "quickcoffee-module-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ))
+}
 
 #[test]
 fn named_static_imports_and_exports_keep_module_globals_private() {
@@ -174,4 +189,115 @@ fn memory_loader_only_resolves_exact_names() {
     let error = loader.load("./missing", "main").unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Runtime);
     assert_eq!(error.message(), "module not found: ./missing");
+}
+
+#[test]
+fn restricted_file_loader_resolves_nested_relative_modules() {
+    let root = module_temp("relative");
+    fs::create_dir_all(root.join("app/lib")).unwrap();
+    fs::create_dir_all(root.join("shared")).unwrap();
+    fs::write(
+        root.join("app/main.qc"),
+        "import { double } from './lib/math'\nimport { base } from '../shared/value.qc'\nexport result = double(base)",
+    )
+    .unwrap();
+    fs::write(
+        root.join("app/lib/math.qc"),
+        "export double = (value) -> value * 2",
+    )
+    .unwrap();
+    fs::write(root.join("shared/value.qc"), "export base = 21").unwrap();
+
+    let loader = RestrictedFileModuleLoader::new(&root).unwrap();
+    let source = loader.load_entry("app/main").unwrap();
+    assert_eq!(source.name(), "app/main.qc");
+    let main = Engine::new()
+        .compile_module(source.name(), source.source())
+        .unwrap();
+    let exports = Context::new().run_module(&main, &loader).unwrap();
+    assert_eq!(exports.get("result").and_then(Value::as_number), Some(42.));
+
+    let normalized = loader.load("./lib/../lib/math", "app/main.qc").unwrap();
+    assert_eq!(normalized.name(), "app/lib/math.qc");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn restricted_file_loader_rejects_ambiguous_and_escaping_paths() {
+    let root = module_temp("invalid");
+    fs::create_dir_all(root.join("app")).unwrap();
+    fs::write(root.join("app/main.qc"), "export value = 1").unwrap();
+    let loader = RestrictedFileModuleLoader::new(&root).unwrap();
+
+    for specifier in ["package", "/absolute", "./windows\\module", "./wrong.txt"] {
+        let error = loader.load(specifier, "app/main.qc").unwrap_err();
+        assert_eq!(
+            error.message(),
+            format!("invalid module specifier: {specifier}")
+        );
+    }
+    let error = loader.load("../../outside", "app/main.qc").unwrap_err();
+    assert_eq!(
+        error.message(),
+        "module path escapes configured root: ../../outside"
+    );
+    let error = loader.load("./missing", "app/main.qc").unwrap_err();
+    assert_eq!(error.message(), "module not found: app/missing.qc");
+    let error = loader.load("./main", "../app/main.qc").unwrap_err();
+    assert_eq!(error.message(), "invalid module referrer: ../app/main.qc");
+    let error = loader.load_entry("../outside").unwrap_err();
+    assert_eq!(error.message(), "invalid module entry: ../outside");
+    let error = loader.load_entry("app/main.txt").unwrap_err();
+    assert_eq!(error.message(), "invalid module entry: app/main.txt");
+    fs::write(root.join("app/binary.qc"), [0xff]).unwrap();
+    let error = loader.load_entry("app/binary").unwrap_err();
+    assert_eq!(
+        error.message(),
+        "module source is not readable UTF-8: app/binary.qc"
+    );
+    fs::create_dir(root.join("app/directory.qc")).unwrap();
+    let error = loader.load_entry("app/directory").unwrap_err();
+    assert_eq!(error.message(), "invalid module target: app/directory.qc");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn restricted_file_loader_canonicalizes_aliases_and_rejects_symlink_escape() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let base = module_temp("symlink");
+    let root = base.join("root");
+    fs::create_dir_all(root.join("real")).unwrap();
+    fs::write(root.join("real/module.qc"), "export value = 42").unwrap();
+    fs::write(base.join("outside.qc"), "export value = 0").unwrap();
+    fs::write(root.join("real:module.qc"), "export value = 1").unwrap();
+    fs::write(root.join("real\\module.qc"), "export value = 2").unwrap();
+    symlink("real/module.qc", root.join("alias.qc")).unwrap();
+    symlink(base.join("outside.qc"), root.join("escape.qc")).unwrap();
+    symlink("real:module.qc", root.join("colon-alias.qc")).unwrap();
+    symlink("real\\module.qc", root.join("backslash-alias.qc")).unwrap();
+
+    let loader = RestrictedFileModuleLoader::new(&root).unwrap();
+    let alias = loader.load_entry("alias").unwrap();
+    assert_eq!(alias.name(), "real/module.qc");
+    let error = loader.load_entry("escape").unwrap_err();
+    assert_eq!(
+        error.message(),
+        "module path escapes configured root: escape.qc"
+    );
+    for alias in ["colon-alias", "backslash-alias"] {
+        let error = loader.load_entry(alias).unwrap_err();
+        assert_eq!(
+            error.message(),
+            format!("invalid module target: {alias}.qc")
+        );
+    }
+    let locked = root.join("locked.qc");
+    fs::write(&locked, "export value = 3").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let error = loader.load_entry("locked").unwrap_err();
+    assert_eq!(error.message(), "module source is not readable: locked.qc");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+    let _ = fs::remove_dir_all(base);
 }
