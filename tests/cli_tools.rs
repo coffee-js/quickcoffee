@@ -722,6 +722,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "stdlib-min-max",
         "stdlib-range-sum",
         "closures-and-ranges",
+        "call-containing-local-loop",
         "map-spread",
         "negative-indexing",
         "stepped-string-iteration",
