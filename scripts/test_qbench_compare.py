@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import math
 import tempfile
 import unittest
 from argparse import Namespace
@@ -18,6 +19,7 @@ from qbench_compare import (
 def record(name: str, execute: int = 1_000, execute_mad: int = 10) -> dict:
     return {
         "schema": "quickcoffee.qbench.v1",
+        "version": "0.1.0",
         "name": name,
         "iterations": 100,
         "repeat": 11,
@@ -53,6 +55,23 @@ class QbenchCompareTests(unittest.TestCase):
             invalid_path = self.write_records(directory, "invalid.jsonl", [invalid])
             with self.assertRaisesRegex(ComparisonError, "unsigned integer"):
                 read_records(invalid_path)
+
+    def test_reader_requires_version_and_positive_run_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            missing_version = record("missing-version")
+            del missing_version["version"]
+            missing_path = self.write_records(
+                directory, "missing-version.jsonl", [missing_version]
+            )
+            with self.assertRaisesRegex(ComparisonError, "field 'version'"):
+                read_records(missing_path)
+
+            zero_repeat = record("zero-repeat")
+            zero_repeat["repeat"] = 0
+            zero_path = self.write_records(directory, "zero.jsonl", [zero_repeat])
+            with self.assertRaisesRegex(ComparisonError, "positive integer"):
+                read_records(zero_path)
 
     def test_workload_and_run_contracts_must_match(self) -> None:
         baseline = {"one": record("one")}
@@ -106,6 +125,26 @@ class QbenchCompareTests(unittest.TestCase):
         )
         self.assertEqual(execute.allowance_ns, 100_000)
         self.assertFalse(execute.alert)
+
+    def test_non_finite_thresholds_are_rejected(self) -> None:
+        baseline = {"hot": record("hot")}
+        for relative_floor, mad_multiplier in (
+            (math.nan, 3.0),
+            (math.inf, 3.0),
+            (0.05, math.nan),
+            (0.05, math.inf),
+        ):
+            with self.subTest(
+                relative_floor=relative_floor, mad_multiplier=mad_multiplier
+            ):
+                with self.assertRaisesRegex(ComparisonError, "non-negative"):
+                    compare_records(
+                        baseline,
+                        baseline,
+                        relative_floor,
+                        mad_multiplier,
+                        100_000,
+                    )
 
     def test_metadata_is_versioned_and_records_refs(self) -> None:
         metadata = build_metadata(

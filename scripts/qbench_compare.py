@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import subprocess
@@ -71,6 +72,15 @@ def _unsigned(record: dict[str, Any], field: str, source: Path, line: int) -> in
     return value
 
 
+def _positive(record: dict[str, Any], field: str, source: Path, line: int) -> int:
+    value = _unsigned(record, field, source, line)
+    if value == 0:
+        raise ComparisonError(
+            f"{source}:{line}: field {field!r} must be a positive integer"
+        )
+    return value
+
+
 def read_records(source: Path) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     try:
@@ -90,6 +100,11 @@ def read_records(source: Path) -> dict[str, dict[str, Any]]:
             raise ComparisonError(
                 f"{source}:{line_number}: expected schema {QBENCH_SCHEMA!r}"
             )
+        version = record.get("version")
+        if not isinstance(version, str) or not version:
+            raise ComparisonError(
+                f"{source}:{line_number}: field 'version' must be a non-empty string"
+            )
         name = record.get("name")
         if not isinstance(name, str) or not name:
             raise ComparisonError(
@@ -97,8 +112,8 @@ def read_records(source: Path) -> dict[str, dict[str, Any]]:
             )
         if name in records:
             raise ComparisonError(f"{source}:{line_number}: duplicate workload {name!r}")
-        _unsigned(record, "iterations", source, line_number)
-        _unsigned(record, "repeat", source, line_number)
+        _positive(record, "iterations", source, line_number)
+        _positive(record, "repeat", source, line_number)
         if not isinstance(record.get("expected"), str):
             raise ComparisonError(
                 f"{source}:{line_number}: field 'expected' must be a string"
@@ -119,7 +134,13 @@ def compare_records(
     mad_multiplier: float,
     absolute_floor_ns: int,
 ) -> list[Comparison]:
-    if relative_floor < 0 or mad_multiplier < 0 or absolute_floor_ns < 0:
+    if (
+        not math.isfinite(relative_floor)
+        or not math.isfinite(mad_multiplier)
+        or relative_floor < 0
+        or mad_multiplier < 0
+        or absolute_floor_ns < 0
+    ):
         raise ComparisonError("comparison thresholds must be non-negative")
     baseline_names = set(baseline)
     candidate_names = set(candidate)
@@ -337,7 +358,10 @@ def main(argv: list[str] | None = None) -> int:
             "comparisons": [comparison.as_json() for comparison in comparisons],
         }
         _write(args.summary, summary)
-        _write(args.report, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        _write(
+            args.report,
+            json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        )
         _write(args.metadata, json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
         if args.github_annotations:
             for comparison in comparisons:
