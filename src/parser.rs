@@ -160,12 +160,16 @@ type ForHeader = (
 
 pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
     let (tokens, spans) = lex_spanned(source)?;
-    Parser {
-        tokens,
-        spans,
-        at: 0,
-    }
-    .program()
+    Parser::new(tokens, spans).program()
+}
+/// Parses source while collecting independently recoverable statement errors.
+///
+/// This deliberately recovers only at top-level statement boundaries. The
+/// regular [`parse`] entry point retains its first-error behavior for existing
+/// compiler and embedding callers.
+pub(crate) fn parse_recover(source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
+    let (tokens, spans) = lex_spanned(source).map_err(|error| vec![error])?;
+    Parser::new(tokens, spans).program_recover()
 }
 pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
     let statements = parse(source)?;
@@ -196,9 +200,29 @@ pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
 struct Parser {
     tokens: Vec<Token>,
     spans: Vec<TokenSpan>,
+    layout_depths: Vec<usize>,
     at: usize,
 }
 impl Parser {
+    fn new(tokens: Vec<Token>, spans: Vec<TokenSpan>) -> Self {
+        let mut layout_depths = Vec::with_capacity(tokens.len() + 1);
+        let mut layout_depth = 0usize;
+        layout_depths.push(layout_depth);
+        for token in &tokens {
+            match token {
+                Token::Indent => layout_depth += 1,
+                Token::Dedent => layout_depth = layout_depth.saturating_sub(1),
+                _ => {}
+            }
+            layout_depths.push(layout_depth);
+        }
+        Self {
+            tokens,
+            spans,
+            layout_depths,
+            at: 0,
+        }
+    }
     fn parse_error(&self, message: impl Into<String>) -> Error {
         self.parse_error_at(self.at, message)
     }
@@ -257,6 +281,73 @@ impl Parser {
             }
         }
         Ok(out)
+    }
+    fn program_recover(mut self) -> Result<Vec<Stmt>, Vec<Error>> {
+        let mut statements = vec![];
+        let mut errors = vec![];
+        while !matches!(self.peek(), Token::Eof) {
+            while self.eat(&Token::Semi) {}
+            if matches!(self.peek(), Token::Eof) {
+                break;
+            }
+            match self.statement() {
+                Ok(statement) => {
+                    statements.push(statement);
+                    if !matches!(self.peek(), Token::Semi | Token::Eof) {
+                        errors.push(self.parse_error("expected statement separator"));
+                        self.recover_statement_boundary();
+                    }
+                }
+                Err(error) => {
+                    errors.push(error);
+                    self.recover_statement_boundary();
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(statements)
+        } else {
+            Err(errors)
+        }
+    }
+    /// Discards the remainder of one failed top-level statement.
+    ///
+    /// Nested layout is discarded before a top-level separator can end
+    /// recovery. `else`, `catch`, and `finally` after that separator remain
+    /// part of the failed statement, so they are skipped rather than reported
+    /// as synthetic top-level errors.
+    fn recover_statement_boundary(&mut self) {
+        let mut layout_depth = self.layout_depths[self.at];
+        let mut continuation_header = false;
+        loop {
+            match self.peek() {
+                Token::Eof => break,
+                Token::Indent => {
+                    layout_depth += 1;
+                    continuation_header = false;
+                    self.next();
+                }
+                Token::Dedent => {
+                    layout_depth = layout_depth.saturating_sub(1);
+                    self.next();
+                }
+                Token::Semi if layout_depth == 0 => {
+                    while self.eat(&Token::Semi) {}
+                    if continuation_header && matches!(self.peek(), Token::Indent) {
+                        continue;
+                    }
+                    if matches!(self.peek(), Token::Else | Token::Catch | Token::Finally) {
+                        self.next();
+                        continuation_header = true;
+                    } else {
+                        break;
+                    }
+                }
+                _ => {
+                    self.next();
+                }
+            }
+        }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
         let span = self.spans[self.at];
@@ -1444,11 +1535,7 @@ impl Parser {
                 .or_else(|| self.spans.last())
                 .map_or(1, |span| span.line);
             spans.fill(TokenSpan::line_only(source_line));
-            let mut expression_parser = Parser {
-                tokens,
-                spans,
-                at: 0,
-            };
+            let mut expression_parser = Parser::new(tokens, spans);
             let expression = expression_parser.expr(0)?;
             if !matches!(expression_parser.peek(), Token::Semi | Token::Eof) {
                 return Err(self.parse_error("interpolation must contain one expression"));

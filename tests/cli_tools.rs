@@ -539,6 +539,22 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
         .unwrap();
     assert!(!invalid_check.status.success());
     assert!(String::from_utf8_lossy(&invalid_check.stderr).contains("line 2"));
+
+    fs::write(&temp, "first = [1 2]\nsecond = [3 4]\n").unwrap();
+    let multi_error_check = Command::new(bin("qcoffee"))
+        .args(["--check", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(multi_error_check.status.code(), Some(1));
+    assert!(multi_error_check.stdout.is_empty());
+    let multi_error_stderr = String::from_utf8_lossy(&multi_error_check.stderr);
+    let first = multi_error_stderr
+        .find("parse error (line 1):")
+        .expect("first malformed statement is reported");
+    let second = multi_error_stderr
+        .find("parse error (line 2):")
+        .expect("second malformed statement is reported");
+    assert!(first < second, "parse errors stay in source order");
     let _ = fs::remove_file(temp);
 }
 

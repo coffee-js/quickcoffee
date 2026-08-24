@@ -34,6 +34,97 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
 }
 
 #[test]
+fn checked_compilation_collects_ordered_named_parse_errors() {
+    let engine = Engine::new();
+    let errors = engine
+        .check_program_named("virtual://rules.qc", "first = [1 2]\nsecond = [3 4]\n")
+        .expect_err("two independent malformed statements should be reported");
+    assert_eq!(errors.len(), 2);
+    assert_eq!(
+        errors
+            .iter()
+            .map(|error| error.position().map(|position| position.line))
+            .collect::<Vec<_>>(),
+        vec![Some(1), Some(2)]
+    );
+    assert!(errors.iter().all(|error| {
+        error.kind() == ErrorKind::Parse
+            && error.labels()[0].span.source_name.as_deref() == Some("virtual://rules.qc")
+    }));
+
+    let first_error = engine
+        .compile_program_named("virtual://rules.qc", "first = [1 2]\nsecond = [3 4]\n")
+        .expect_err("the existing compile API remains first-error only");
+    assert_eq!(
+        first_error.position().map(|position| position.line),
+        Some(1)
+    );
+}
+
+#[test]
+fn checked_compilation_recovers_past_a_failed_indentation_block() {
+    let errors = Engine::new()
+        .check_program("if true\n  first = [1 2]\nsecond = [3 4]\n")
+        .expect_err("dedent recovery should reach the following top-level statement");
+    assert_eq!(
+        errors
+            .iter()
+            .map(|error| error.position().map(|position| position.line))
+            .collect::<Vec<_>>(),
+        vec![Some(2), Some(3)]
+    );
+}
+
+#[test]
+fn checked_compilation_does_not_split_failed_control_flow_continuations() {
+    let errors = Engine::new()
+        .check_program("if true\n  first = [1 2]\nelse\n  fallback = 1\nsecond = [3 4]\n")
+        .expect_err("the else clause belongs to the failed if statement");
+    assert_eq!(
+        errors
+            .iter()
+            .map(|error| error.position().map(|position| position.line))
+            .collect::<Vec<_>>(),
+        vec![Some(2), Some(5)]
+    );
+
+    let errors = Engine::new()
+        .check_program(
+            "try\n  first = [1 2]\ncatch problem\n  fallback = 1\nfinally\n  cleanup = 1\nsecond = [3 4]\n",
+        )
+        .expect_err("catch and finally clauses belong to the failed try statement");
+    assert_eq!(
+        errors
+            .iter()
+            .map(|error| error.position().map(|position| position.line))
+            .collect::<Vec<_>>(),
+        vec![Some(2), Some(7)]
+    );
+}
+
+#[test]
+fn checked_compilation_handles_many_independent_errors_in_one_pass() {
+    use std::fmt::Write as _;
+
+    let mut source = String::with_capacity(24 * 1_024);
+    for index in 0..1_024 {
+        writeln!(&mut source, "broken{index} = [1 2]").unwrap();
+    }
+    let errors = Engine::new()
+        .check_program(&source)
+        .expect_err("every malformed top-level statement should be reported");
+    assert_eq!(errors.len(), 1_024);
+    assert_eq!(errors[0].position().map(|position| position.line), Some(1));
+    assert_eq!(
+        errors
+            .last()
+            .and_then(|error| error.position())
+            .map(|position| position.line),
+        Some(1_024)
+    );
+}
+
+#[test]
 fn builder_embedding_surface_chains_host_configuration() {
     let program = Engine::new()
         .compile_program("host(20, 22) * factor")
