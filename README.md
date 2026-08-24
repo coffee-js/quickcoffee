@@ -55,6 +55,8 @@ cargo run --bin qbench -- --version
 
 `qbench --compare-qjs` 的 `quickcoffee_startup_*` / `quickjs_startup_*`、`*_compile_*` 与 `*_hot_*` 分别报告启动、编译和预编译热执行；既有 `*_cli_*` 继续表示端到端子进程总耗时。各阶段均输出中位数与 MAD，正式报告宜使用 `--repeat 11`。
 
+Pull request 的 `Performance report` workflow 会在同一 runner 上顺序运行 base/head 的完整 11 样本 qbench，保存原始 JSONL 与机器/工具链元数据，并用 5% 相对下限和 3 倍组合 MAD 生成非阻塞 warning。该报告是 review 信号，不是跨机器或发布阻塞阈值；比较策略及本地命令见 [PERFORMANCE.md](PERFORMANCE.md#issue-107-同-runner-非阻塞回归报告)。
+
 `qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个成功执行或运行时失败的非空输入行输出统计，解析错误不生成新记录。
 
 嵌入宿主可用 `compile_named`、`compile_program_named` 或 `Context::eval_named` 把虚拟文档名原样附到结构化错误 label；匿名 API 保持不变。`Engine::check_program*` 只作静态检查，并在安全的顶层边界收集多个 parser error；`qcoffee --check FILE` 将它们按源序写到标准错误而不执行。经 `Program` 编译的顶层、嵌套函数、默认参数和模块运行期/verification 错误保留 source map，运行期调用链追加有序 secondary label；宿主手工构造的裸 `Chunk` 不虚构来源。`qcoffee --json FILE` 的错误在位置已有来源时额外输出可选 `source` 字段。

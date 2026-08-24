@@ -1,0 +1,115 @@
+name: Performance report
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Git ref to use as the same-runner baseline
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qbench:
+    name: qbench base/head report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
+      CANDIDATE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+      BENCHMARK_COMMAND: alternating base/head qbench --only NAME --json --iterations 2000 --repeat 11
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v5
+        with:
+          path: candidate
+
+      - name: Check out baseline
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: baseline
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test comparison policy
+        working-directory: candidate
+        run: python3 scripts/test_qbench_compare.py
+
+      - name: Build baseline qbench
+        working-directory: baseline
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/quickcoffee-qbench-base
+        run: cargo build --locked --release --bin qbench
+
+      - name: Build candidate qbench
+        working-directory: candidate
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/quickcoffee-qbench-candidate
+        run: cargo build --locked --release --bin qbench
+
+      - name: Measure baseline and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/quickcoffee-performance"
+          mkdir -p "${artifact_dir}"
+          baseline_qbench="${RUNNER_TEMP}/quickcoffee-qbench-base/release/qbench"
+          candidate_qbench="${RUNNER_TEMP}/quickcoffee-qbench-candidate/release/qbench"
+          "${baseline_qbench}" --list >"${artifact_dir}/baseline-workloads.txt"
+          "${candidate_qbench}" --list >"${artifact_dir}/candidate-workloads.txt"
+          diff -u \
+            "${artifact_dir}/baseline-workloads.txt" \
+            "${artifact_dir}/candidate-workloads.txt"
+          : >"${artifact_dir}/baseline.jsonl"
+          : >"${artifact_dir}/candidate.jsonl"
+          index=0
+          while IFS= read -r workload; do
+            if (( index % 2 == 0 )); then
+              "${baseline_qbench}" --only "${workload}" \
+                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/baseline.jsonl"
+              "${candidate_qbench}" --only "${workload}" \
+                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/candidate.jsonl"
+            else
+              "${candidate_qbench}" --only "${workload}" \
+                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/candidate.jsonl"
+              "${baseline_qbench}" --only "${workload}" \
+                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/baseline.jsonl"
+            fi
+            index=$((index + 1))
+          done <"${artifact_dir}/candidate-workloads.txt"
+
+      - name: Compare with MAD-aware non-blocking policy
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/quickcoffee-performance"
+          python3 scripts/qbench_compare.py \
+            --baseline "${artifact_dir}/baseline.jsonl" \
+            --candidate "${artifact_dir}/candidate.jsonl" \
+            --summary "${GITHUB_STEP_SUMMARY}" \
+            --report "${artifact_dir}/comparison.json" \
+            --metadata "${artifact_dir}/metadata.json" \
+            --baseline-ref "${BASE_REF}" \
+            --candidate-ref "${CANDIDATE_REF}" \
+            --benchmark-command "${BENCHMARK_COMMAND}" \
+            --github-annotations
+
+      - name: Upload raw runs and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbench-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quickcoffee-performance
+          if-no-files-found: warn
+          retention-days: 30
