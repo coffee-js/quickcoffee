@@ -986,8 +986,6 @@ pub struct Context {
     max_call_depth: usize,
     cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
-    // Keep call-only storage out of `Vm` so no-call dispatch keeps its layout.
-    reusable_call_arguments: Vec<Value>,
 }
 
 thread_local! {
@@ -1002,11 +1000,13 @@ thread_local! {
             max_call_depth: 1_024,
             cancellation: None,
             last_execution: ExecutionStats::default(),
-            reusable_call_arguments: Vec::new(),
         };
         context.install_builtins();
         global.borrow().snapshot()
     };
+    // Keeping the pool outside `Context`, `Vm`, and `Vm::run` preserves the
+    // layout of unrelated dispatch paths. Borrows never cross a script call.
+    static REUSABLE_CALL_ARGUMENTS: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
 }
 
 fn one_value_allocation(_: &Value) -> u64 {
@@ -1039,7 +1039,6 @@ impl Context {
             max_call_depth: 1_024,
             cancellation: None,
             last_execution: ExecutionStats::default(),
-            reusable_call_arguments: Vec::new(),
         }
     }
     /// Returns a builder-style context with the supplied fuel budget.
@@ -1188,11 +1187,7 @@ impl Context {
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
         };
-        let result = vm.run(
-            Rc::clone(&program.0.chunk),
-            self.global.clone(),
-            &mut self.reusable_call_arguments,
-        );
+        let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
         result
     }
@@ -1204,7 +1199,6 @@ impl Context {
             max_call_depth: self.max_call_depth,
             cancellation: self.cancellation.clone(),
             last_execution: ExecutionStats::default(),
-            reusable_call_arguments: Vec::new(),
         }
     }
     pub(crate) fn get_local(&self, name: &str) -> Option<Value> {
@@ -1564,37 +1558,37 @@ impl Vm {
     // This boundary keeps argument-buffer plumbing out of the monolithic
     // instruction dispatch loop, where code layout affects unrelated workloads.
     #[inline(never)]
-    fn direct_call(
-        frame: &mut Frame,
-        argument_count: usize,
-        reusable_call_arguments: &mut Vec<Value>,
-    ) -> Result<Step, Error> {
+    fn direct_call(frame: &mut Frame, argument_count: usize) -> Result<Step, Error> {
         if frame.stack.len() < argument_count {
             return Err(Error::runtime("stack underflow"));
         }
-        let mut args = std::mem::take(reusable_call_arguments);
+        let mut args =
+            REUSABLE_CALL_ARGUMENTS.with(|reusable| std::mem::take(&mut *reusable.borrow_mut()));
         args.clear();
         let argument_start = frame.stack.len() - argument_count;
         args.extend(frame.stack.drain(argument_start..));
         let callee = match pop(frame) {
             Ok(callee) => callee,
             Err(error) => {
-                Self::recycle_call_arguments(reusable_call_arguments, args);
+                Self::recycle_call_arguments(args);
                 return Err(error);
             }
         };
         Ok(Step::Call { callee, args })
     }
 
-    fn recycle_call_arguments(reusable_call_arguments: &mut Vec<Value>, mut args: Vec<Value>) {
+    fn recycle_call_arguments(mut args: Vec<Value>) {
         args.clear();
-        if args.capacity() > MAX_REUSABLE_CALL_ARGUMENTS {
-            if reusable_call_arguments.capacity() == 0 {
-                *reusable_call_arguments = Vec::with_capacity(MAX_REUSABLE_CALL_ARGUMENTS);
+        REUSABLE_CALL_ARGUMENTS.with(|reusable| {
+            let mut reusable = reusable.borrow_mut();
+            if args.capacity() > MAX_REUSABLE_CALL_ARGUMENTS {
+                if reusable.capacity() == 0 {
+                    *reusable = Vec::with_capacity(MAX_REUSABLE_CALL_ARGUMENTS);
+                }
+            } else if args.capacity() > reusable.capacity() {
+                *reusable = args;
             }
-        } else if args.capacity() > reusable_call_arguments.capacity() {
-            *reusable_call_arguments = args;
-        }
+        });
     }
 
     fn record_profile(&mut self, instruction: &Instruction) {
@@ -1648,7 +1642,7 @@ impl Vm {
             initial_debug_info: debug_info,
             execution_plan,
         };
-        let result = nested.run(chunk, env, &mut Vec::new());
+        let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
         self.instructions = nested.instructions;
         self.call_depth = nested.call_depth;
@@ -1678,12 +1672,7 @@ impl Vm {
             environment_allocations: self.environment_allocations,
         }
     }
-    fn run(
-        &mut self,
-        chunk: Rc<Chunk>,
-        global: Env,
-        reusable_call_arguments: &mut Vec<Value>,
-    ) -> Result<Value, Error> {
+    fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
         let execution_plan = self.execution_plan.clone();
         let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(&chunk));
         let mut frames = vec![Frame {
@@ -2195,7 +2184,7 @@ impl Vm {
                         _ => return Err(Error::runtime("value used as function template")),
                     },
                     Instruction::Call(n) => {
-                        return Self::direct_call(frame, *n, reusable_call_arguments);
+                        return Self::direct_call(frame, *n);
                     }
                     Instruction::CallSpread => {
                         let args = pop(frame)?;
@@ -2233,7 +2222,7 @@ impl Vm {
                 }
                 Ok(Step::Call { callee, args }) => {
                     let result = call(self, &mut frames, callee, &args);
-                    Self::recycle_call_arguments(reusable_call_arguments, args);
+                    Self::recycle_call_arguments(args);
                     match result {
                         Ok(()) => {}
                         Err(error) => {
@@ -2875,6 +2864,14 @@ mod tests {
 
     #[test]
     fn reusable_call_arguments_preserve_mixed_calls_and_failure_recovery() {
+        fn reusable_capacity() -> usize {
+            REUSABLE_CALL_ARGUMENTS.with(|reusable| reusable.borrow().capacity())
+        }
+        fn reusable_is_empty() -> bool {
+            REUSABLE_CALL_ARGUMENTS.with(|reusable| reusable.borrow().is_empty())
+        }
+
+        REUSABLE_CALL_ARGUMENTS.with(|reusable| *reusable.borrow_mut() = Vec::new());
         let engine = Engine::new();
         let mixed_calls = engine
             .compile_program(
@@ -2897,34 +2894,34 @@ mod tests {
             "[1, 2, 6, 6, 3]"
         );
         let successful_stats = context.last_execution();
-        assert!(context.reusable_call_arguments.is_empty());
-        assert!(context.reusable_call_arguments.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
-        context.reusable_call_arguments = Vec::with_capacity(4);
-        let reusable_capacity = context.reusable_call_arguments.capacity();
-        assert!(reusable_capacity > 0);
+        assert!(reusable_is_empty());
+        assert!(reusable_capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
+        REUSABLE_CALL_ARGUMENTS.with(|reusable| {
+            *reusable.borrow_mut() = Vec::with_capacity(4);
+        });
+        let initial_capacity = reusable_capacity();
+        assert!(initial_capacity > 0);
 
         assert_eq!(
             context.run_program(&large_native_call).unwrap().to_string(),
             "17"
         );
-        let post_large_capacity = context.reusable_call_arguments.capacity();
-        assert!(post_large_capacity >= reusable_capacity);
+        let post_large_capacity = reusable_capacity();
+        assert!(post_large_capacity >= initial_capacity);
         assert!(post_large_capacity <= MAX_REUSABLE_CALL_ARGUMENTS);
 
         let error = context.run_program(&bad_call).unwrap_err();
         assert_eq!(error.message(), "expected 1 arguments, got 0");
-        assert!(context.reusable_call_arguments.is_empty());
-        assert!(context.reusable_call_arguments.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
+        assert!(reusable_is_empty());
+        assert!(reusable_capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
 
         assert_eq!(
             context.run_program(&mixed_calls).unwrap().to_string(),
             "[1, 2, 6, 6, 3]"
         );
         assert_eq!(context.last_execution(), successful_stats);
-        assert_eq!(
-            context.reusable_call_arguments.capacity(),
-            post_large_capacity
-        );
+        assert_eq!(reusable_capacity(), post_large_capacity);
+        REUSABLE_CALL_ARGUMENTS.with(|reusable| *reusable.borrow_mut() = Vec::new());
     }
 
     #[test]
