@@ -35,6 +35,36 @@ const COMPARISON_WORKLOADS: &[ComparisonWorkload] = &[
         quickjs: "(function () { const increment = value => value + 1; let sum = 0; for (let i = 0; i < 250000; i++) sum = increment(sum); return sum; })",
         expected: "250000",
     },
+    ComparisonWorkload {
+        name: "array-build-index-iterate",
+        quickcoffee: "values = [0...1000]\nsum = 0\nindex = 0\nwhile index < 1000\n  sum += values[index] * 3\n  index++\nsum",
+        quickjs: "(function () { /* array-build-index-iterate */ const values = Array.from({length: 1000}, (_, n) => n); let sum = 0; let index = 0; while (index < 1000) { sum += values[index] * 3; index++; } return sum; })",
+        expected: "1498500",
+    },
+    ComparisonWorkload {
+        name: "map-own-lookup",
+        quickcoffee: "record = {alpha: 1, beta: 2, gamma: 3, delta: 4}\nsum = 0\ni = 0\nwhile i < 10000\n  sum += record.alpha + record.beta + record.gamma + record.delta\n  i++\nsum",
+        quickjs: "(function () { /* map-own-lookup */ const record = {alpha: 1, beta: 2, gamma: 3, delta: 4}; let sum = 0; for (let i = 0; i < 10000; i++) sum += record.alpha + record.beta + record.gamma + record.delta; return sum; })",
+        expected: "100000",
+    },
+    ComparisonWorkload {
+        name: "map-functional-update",
+        quickcoffee: "record = {alpha: 1, beta: 2, gamma: 3}\nsum = 0\ni = 0\nwhile i < 1000\n  record = {...record, beta: record.beta + 1}\n  sum += record.alpha + record.beta + record.gamma\n  i++\nsum + record.beta",
+        quickjs: "(function () { /* map-functional-update */ let record = {alpha: 1, beta: 2, gamma: 3}; let sum = 0; for (let i = 0; i < 1000; i++) { record = {...record, beta: record.beta + 1}; sum += record.alpha + record.beta + record.gamma; } return sum + record.beta; })",
+        expected: "507502",
+    },
+    ComparisonWorkload {
+        name: "unicode-scalar-iterate",
+        quickcoffee: "text = 'a☕中🙂z'\nsum = 0\nround = 0\nwhile round < 1000\n  for character, index in text\n    sum += index + len(character)\n  round++\nsum",
+        quickjs: "(function () { /* unicode-scalar-iterate */ const text = 'a☕中🙂z'; let sum = 0; for (let round = 0; round < 1000; round++) { let index = 0; for (const character of text) { sum += index + Array.from(character).length; index++; } } return sum; })",
+        expected: "15000",
+    },
+    ComparisonWorkload {
+        name: "unicode-scalar-index",
+        quickcoffee: "text = 'a☕中🙂z'\nsum = 0\ni = 0\nwhile i < 10000\n  character = text[i % 5]\n  sum += if character == '🙂' then 7 else len(character)\n  i++\nsum",
+        quickjs: "(function () { /* unicode-scalar-index */ const scalars = Array.from('a☕中🙂z'); let sum = 0; for (let i = 0; i < 10000; i++) { const character = scalars[i % 5]; sum += character === '🙂' ? 7 : Array.from(character).length; } return sum; })",
+        expected: "22000",
+    },
 ];
 
 const WORKLOADS: &[Workload] = &[
