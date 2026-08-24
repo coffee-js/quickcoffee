@@ -639,7 +639,10 @@ impl ProgramExecutionPlan {
         }
         for instruction in &chunk.code {
             match instruction {
-                Instruction::Store(name) | Instruction::Try { name, .. } => {
+                Instruction::Store(name) => {
+                    local_names.insert(name.clone());
+                }
+                Instruction::Try { name, .. } => {
                     if name != "_" {
                         local_names.insert(name.clone());
                     }
@@ -2265,7 +2268,16 @@ fn call(
                         values
                     },
                 );
-                let local = env(Some(captured.clone()));
+                let environment_elidable = fast_locals
+                    .as_ref()
+                    .is_some_and(|locals| locals.iter().all(Option::is_some));
+                let local = if environment_elidable {
+                    captured.clone()
+                } else {
+                    env(Some(captured.clone()))
+                };
+                // ExecutionStats models one logical lexical frame per bytecode
+                // call even when an isolated fast frame needs no physical Env.
                 vm.record_environment_allocation();
                 if fast_locals.is_none() {
                     for (index, pattern) in params.iter().enumerate() {
@@ -2924,6 +2936,33 @@ mod tests {
         run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
         run_pair(&optimized, &reference, &mut optimized_b, &mut reference_b);
         run_pair(&optimized, &reference, &mut optimized_a, &mut reference_a);
+
+        let captured = Engine::new()
+            .compile_program("read = (value) -> value + host\nread(1)")
+            .unwrap();
+        let captured_reference = captured.without_binding_slots();
+        optimized_a.set_global("host", Value::Number(40.));
+        optimized_b.set_global("host", Value::Number(41.));
+        reference_a.set_global("host", Value::Number(40.));
+        reference_b.set_global("host", Value::Number(41.));
+        run_pair(
+            &captured,
+            &captured_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
+        run_pair(
+            &captured,
+            &captured_reference,
+            &mut optimized_b,
+            &mut reference_b,
+        );
+        run_pair(
+            &captured,
+            &captured_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
     }
 
     #[test]
