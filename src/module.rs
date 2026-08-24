@@ -1,8 +1,10 @@
 use crate::{Context, Engine, Error, ExecutionStats, Program, Value, lowering, parser};
+use cap_std::{ambient_authority, fs::Dir};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Component, Path, PathBuf},
+    io::{self, Read},
+    path::{Component, Path},
+    sync::Arc,
 };
 
 /// Source returned by an embedding host for one named QuickCoffee module.
@@ -64,7 +66,7 @@ impl ModuleLoader for MemoryModuleLoader {
     }
 }
 
-/// An opt-in filesystem loader confined to one canonical directory tree.
+/// An opt-in filesystem loader confined to one open directory capability.
 ///
 /// Imports must use explicit `./` or `../` specifiers. Module names are
 /// root-relative UTF-8 paths with `/` separators and a `.qc` extension. Both
@@ -72,30 +74,21 @@ impl ModuleLoader for MemoryModuleLoader {
 /// rejected before source is returned to the engine.
 #[derive(Clone, Debug)]
 pub struct RestrictedFileModuleLoader {
-    root: PathBuf,
+    root: Arc<Dir>,
 }
 impl RestrictedFileModuleLoader {
     /// Creates a loader rooted at an existing directory.
     pub fn new(root: impl AsRef<Path>) -> Result<Self, Error> {
         let requested_root = root.as_ref();
-        let root = fs::canonicalize(requested_root).map_err(|_| {
+        let root = Dir::open_ambient_dir(requested_root, ambient_authority()).map_err(|_| {
             Error::runtime(format!(
                 "module root is unavailable: {}",
                 requested_root.display()
             ))
         })?;
-        if !root.is_dir() {
-            return Err(Error::runtime(format!(
-                "module root is not a directory: {}",
-                root.display()
-            )));
-        }
-        Ok(Self { root })
-    }
-
-    /// Returns the canonical directory that bounds all module reads.
-    pub fn root(&self) -> &Path {
-        &self.root
+        Ok(Self {
+            root: Arc::new(root),
+        })
     }
 
     /// Loads one root-relative entry module, inferring `.qc` when omitted.
@@ -105,29 +98,15 @@ impl RestrictedFileModuleLoader {
     }
 
     fn load_name(&self, name: &str, requested: &str) -> Result<ModuleSource, Error> {
-        let mut candidate = self.root.clone();
-        for component in name.split('/') {
-            candidate.push(component);
-        }
-        let canonical = fs::canonicalize(candidate)
-            .map_err(|_| Error::runtime(format!("module not found: {name}")))?;
-        if !canonical.starts_with(&self.root) {
-            return Err(Error::runtime(format!(
-                "module path escapes configured root: {requested}"
-            )));
-        }
-        if !canonical.is_file()
-            || canonical.extension().and_then(|value| value.to_str()) != Some("qc")
-        {
-            return Err(Error::runtime(format!(
-                "invalid module target: {requested}"
-            )));
-        }
-        let relative = canonical
-            .strip_prefix(&self.root)
-            .expect("canonical module is below the canonical root");
+        let canonical = self.root.canonicalize(name).map_err(|error| {
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                Error::runtime(format!("module path escapes configured root: {requested}"))
+            } else {
+                Error::runtime(format!("module not found: {name}"))
+            }
+        })?;
         let mut parts = Vec::new();
-        for component in relative.components() {
+        for component in canonical.components() {
             let Component::Normal(component) = component else {
                 return Err(Error::runtime(format!(
                     "invalid module target: {requested}"
@@ -138,13 +117,42 @@ impl RestrictedFileModuleLoader {
                     "module path is not UTF-8: {requested}"
                 )));
             };
+            if component.contains(['\\', ':']) {
+                return Err(Error::runtime(format!(
+                    "invalid module target: {requested}"
+                )));
+            }
             parts.push(component);
         }
         let canonical_name = parts.join("/");
-        let source = fs::read_to_string(&canonical).map_err(|_| {
-            Error::runtime(format!(
-                "module source is not readable UTF-8: {canonical_name}"
-            ))
+        if canonical.extension().and_then(|value| value.to_str()) != Some("qc") {
+            return Err(Error::runtime(format!(
+                "invalid module target: {requested}"
+            )));
+        }
+        let mut file = self.root.open(&canonical).map_err(|_| {
+            Error::runtime(format!("module source is not readable: {canonical_name}"))
+        })?;
+        if !file
+            .metadata()
+            .map_err(|_| {
+                Error::runtime(format!("module source is not readable: {canonical_name}"))
+            })?
+            .is_file()
+        {
+            return Err(Error::runtime(format!(
+                "invalid module target: {requested}"
+            )));
+        }
+        let mut source = String::new();
+        file.read_to_string(&mut source).map_err(|error| {
+            if error.kind() == io::ErrorKind::InvalidData {
+                Error::runtime(format!(
+                    "module source is not readable UTF-8: {canonical_name}"
+                ))
+            } else {
+                Error::runtime(format!("module source is not readable: {canonical_name}"))
+            }
         })?;
         Ok(ModuleSource::new(canonical_name, source))
     }

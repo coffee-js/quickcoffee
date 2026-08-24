@@ -21,6 +21,7 @@ name = "quickcoffee"
 path = "src/lib.rs"
 
 [dependencies]
+cap-std = "4.0.3"
 unicode-ident = "1.0"
 
 [[bin]]

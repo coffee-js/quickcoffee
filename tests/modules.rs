@@ -209,7 +209,6 @@ fn restricted_file_loader_resolves_nested_relative_modules() {
     fs::write(root.join("shared/value.qc"), "export base = 21").unwrap();
 
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
-    assert_eq!(loader.root(), fs::canonicalize(&root).unwrap());
     let source = loader.load_entry("app/main").unwrap();
     assert_eq!(source.name(), "app/main.qc");
     let main = Engine::new()
@@ -265,15 +264,19 @@ fn restricted_file_loader_rejects_ambiguous_and_escaping_paths() {
 #[cfg(unix)]
 #[test]
 fn restricted_file_loader_canonicalizes_aliases_and_rejects_symlink_escape() {
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     let base = module_temp("symlink");
     let root = base.join("root");
     fs::create_dir_all(root.join("real")).unwrap();
     fs::write(root.join("real/module.qc"), "export value = 42").unwrap();
     fs::write(base.join("outside.qc"), "export value = 0").unwrap();
+    fs::write(root.join("real:module.qc"), "export value = 1").unwrap();
+    fs::write(root.join("real\\module.qc"), "export value = 2").unwrap();
     symlink("real/module.qc", root.join("alias.qc")).unwrap();
     symlink(base.join("outside.qc"), root.join("escape.qc")).unwrap();
+    symlink("real:module.qc", root.join("colon-alias.qc")).unwrap();
+    symlink("real\\module.qc", root.join("backslash-alias.qc")).unwrap();
 
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
     let alias = loader.load_entry("alias").unwrap();
@@ -283,5 +286,18 @@ fn restricted_file_loader_canonicalizes_aliases_and_rejects_symlink_escape() {
         error.message(),
         "module path escapes configured root: escape.qc"
     );
+    for alias in ["colon-alias", "backslash-alias"] {
+        let error = loader.load_entry(alias).unwrap_err();
+        assert_eq!(
+            error.message(),
+            format!("invalid module target: {alias}.qc")
+        );
+    }
+    let locked = root.join("locked.qc");
+    fs::write(&locked, "export value = 3").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let error = loader.load_entry("locked").unwrap_err();
+    assert_eq!(error.message(), "module source is not readable: locked.qc");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
     let _ = fs::remove_dir_all(base);
 }
