@@ -8,6 +8,8 @@ QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本
 当前业务适用范围、语言缺口与 QuickJS 性能对照见 [docs/readiness.zh-CN.md](docs/readiness.zh-CN.md)。
 与 CoffeeScript 1.12.7 官方语言参考的逐项差异见 [特性矩阵](docs/coffeescript-2016-matrix.md)。
 
+内部前端边界保持显式：`lexer` 生成带范围的 token，`parser` 只负责语法与恢复并产出 `ast`，`lowering` 把 AST 降为字节码及不参与编码的 source-map sidecar，`bytecode` 只负责指令表示、验证、指纹与反汇编，最后由 `vm` 执行。该拆分不改变公开 API、字节码编码/指纹、fuel 或诊断输出。
+
 ```coffee
 square = (x) -> x * x
 if square(7) == 49 then print('ok') else print('failed')

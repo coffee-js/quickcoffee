@@ -1,4 +1,4 @@
-use crate::{Context, Engine, Error, ExecutionStats, Program, Value, bytecode, parser};
+use crate::{Context, Engine, Error, ExecutionStats, Program, Value, lowering, parser};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Source returned by an embedding host for one named QuickCoffee module.
@@ -115,9 +115,9 @@ impl Engine {
                     .with_source_name(name.as_str()));
             }
         }
-        let (chunk, source_map) = bytecode::compile_mapped(&syntax.body)
+        let (chunk, source_map) = lowering::compile_mapped(&syntax.body)
             .map_err(|error| error.with_source_name(name.as_str()))?;
-        bytecode::verify_mapped(&chunk, &source_map)
+        lowering::verify_mapped(&chunk, &source_map)
             .map_err(|error| error.with_source_name(name.as_str()))?;
         let program = Program::from_compiled(chunk, source_map, Some(name.as_str()));
         Ok(Module {

@@ -1,6 +1,8 @@
 use crate::{
-    bytecode::{self, Chunk, ChunkSourceMap, CompiledSourceMap, Constant, Instruction, Pattern},
-    compile, parser,
+    bytecode::{Chunk, Constant, Instruction, Pattern},
+    compile,
+    lowering::{self, ChunkSourceMap, CompiledSourceMap},
+    parser,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -791,8 +793,8 @@ impl Engine {
             None => error,
         };
         let ast = parser::parse(source).map_err(attach_name)?;
-        let (chunk, source_map) = bytecode::compile_mapped(&ast).map_err(attach_name)?;
-        bytecode::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
+        let (chunk, source_map) = lowering::compile_mapped(&ast).map_err(attach_name)?;
+        lowering::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
         Ok(Program::from_compiled(chunk, source_map, source_name))
     }
     fn check_program_source(
@@ -807,8 +809,8 @@ impl Engine {
         let ast = parser::parse_recover(source)
             .map_err(|errors| errors.into_iter().map(attach_name).collect::<Vec<Error>>())?;
         let (chunk, source_map) =
-            bytecode::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
-        bytecode::verify_mapped(&chunk, &source_map).map_err(|error| vec![attach_name(error)])?;
+            lowering::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
+        lowering::verify_mapped(&chunk, &source_map).map_err(|error| vec![attach_name(error)])?;
         Ok(())
     }
 }

@@ -65,6 +65,24 @@ fn package_manifest_declares_the_documented_msrv() {
 }
 
 #[test]
+fn frontend_stage_ownership_is_explicit() {
+    let ast = fs::read_to_string("src/ast.rs").expect("AST module exists");
+    let parser = fs::read_to_string("src/parser.rs").expect("parser module exists");
+    let lowering = fs::read_to_string("src/lowering.rs").expect("lowering module exists");
+    let bytecode = fs::read_to_string("src/bytecode.rs").expect("bytecode module exists");
+
+    assert!(ast.contains("pub(crate) enum Expr"));
+    assert!(parser.contains("ast::{Binary, Expr"));
+    assert!(!parser.contains("enum Expr"));
+
+    assert!(lowering.contains("struct Compiler"));
+    assert!(lowering.contains("pub(crate) fn compile_mapped"));
+    assert!(!bytecode.contains("struct Compiler"));
+    assert!(!bytecode.contains("pub(crate) fn compile_mapped"));
+    assert!(bytecode.contains("impl Chunk"));
+}
+
+#[test]
 fn coffeescript_feature_matrix_covers_the_official_language_reference() {
     let matrix = fs::read_to_string("docs/coffeescript-2016-matrix.md")
         .expect("CoffeeScript feature matrix exists");
