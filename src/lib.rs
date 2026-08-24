@@ -12,7 +12,10 @@ mod parser;
 mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
-pub use module::{MemoryModuleLoader, Module, ModuleExports, ModuleLoader, ModuleSource};
+pub use module::{
+    MemoryModuleLoader, Module, ModuleExports, ModuleLoader, ModuleSource,
+    RestrictedFileModuleLoader,
+};
 pub use vm::{
     CancellationToken, Context, DiagnosticLabel, DiagnosticLabelKind, Engine, Error, ErrorKind,
     ExecutionStats, Function, NativeFunction, Program, ResourceLimit, SourcePosition, SourceSpan,
