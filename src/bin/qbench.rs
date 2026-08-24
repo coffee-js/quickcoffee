@@ -104,6 +104,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "50",
     },
     Workload {
+        name: "captured-local-loop",
+        source: "make_counter = (limit) ->\n  value = 0\n  read = -> value\n  i = 0\n  while i < limit\n    value++\n    i++\n  read\ncounter = make_counter(50)\ncounter()",
+        expected: "50",
+    },
+    Workload {
         name: "map-spread",
         source: "base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c",
         expected: "8",
