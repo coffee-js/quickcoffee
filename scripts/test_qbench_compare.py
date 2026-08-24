@@ -57,23 +57,23 @@ class QbenchCompareTests(unittest.TestCase):
     def test_workload_and_run_contracts_must_match(self) -> None:
         baseline = {"one": record("one")}
         with self.assertRaisesRegex(ComparisonError, "workload sets differ"):
-            compare_records(baseline, {"two": record("two")}, 0.05, 3.0)
+            compare_records(baseline, {"two": record("two")}, 0.05, 3.0, 0)
 
         candidate = record("one")
         candidate["repeat"] = 3
         with self.assertRaisesRegex(ComparisonError, "changes repeat"):
-            compare_records(baseline, {"one": candidate}, 0.05, 3.0)
+            compare_records(baseline, {"one": candidate}, 0.05, 3.0, 0)
 
     def test_relative_floor_alerts_and_improvements_do_not(self) -> None:
         baseline = {"hot": record("hot", execute=1_000, execute_mad=10)}
         regression = {"hot": record("hot", execute=1_060, execute_mad=5)}
-        comparisons = compare_records(baseline, regression, 0.05, 3.0)
+        comparisons = compare_records(baseline, regression, 0.05, 3.0, 0)
         execute = next(item for item in comparisons if item.phase == "execute")
         self.assertTrue(execute.alert)
         self.assertEqual(execute.allowance_ns, 50)
 
         improvement = {"hot": record("hot", execute=800, execute_mad=5)}
-        comparisons = compare_records(baseline, improvement, 0.05, 3.0)
+        comparisons = compare_records(baseline, improvement, 0.05, 3.0, 0)
         self.assertFalse(any(item.alert for item in comparisons))
 
     def test_combined_mad_suppresses_noisy_relative_change(self) -> None:
@@ -81,7 +81,7 @@ class QbenchCompareTests(unittest.TestCase):
         candidate = {"hot": record("hot", execute=1_100, execute_mad=20)}
         execute = next(
             item
-            for item in compare_records(baseline, candidate, 0.05, 3.0)
+            for item in compare_records(baseline, candidate, 0.05, 3.0, 0)
             if item.phase == "execute"
         )
         self.assertEqual(execute.allowance_ns, 120)
@@ -90,11 +90,22 @@ class QbenchCompareTests(unittest.TestCase):
     def test_markdown_contains_alert_and_complete_details(self) -> None:
         baseline = {"hot": record("hot", execute=1_000, execute_mad=0)}
         candidate = {"hot": record("hot", execute=1_100, execute_mad=0)}
-        comparisons = compare_records(baseline, candidate, 0.05, 3.0)
-        report = markdown_report(comparisons, "base", "head", 0.05, 3.0)
+        comparisons = compare_records(baseline, candidate, 0.05, 3.0, 0)
+        report = markdown_report(comparisons, "base", "head", 0.05, 3.0, 0)
         self.assertIn("**1 alert(s)**", report)
         self.assertIn("`hot` | execute", report)
         self.assertIn("<summary>All phase comparisons</summary>", report)
+
+    def test_absolute_floor_suppresses_tiny_phase_drift(self) -> None:
+        baseline = {"tiny": record("tiny", execute=200_000, execute_mad=500)}
+        candidate = {"tiny": record("tiny", execute=280_000, execute_mad=500)}
+        execute = next(
+            item
+            for item in compare_records(baseline, candidate, 0.05, 3.0, 100_000)
+            if item.phase == "execute"
+        )
+        self.assertEqual(execute.allowance_ns, 100_000)
+        self.assertFalse(execute.alert)
 
     def test_metadata_is_versioned_and_records_refs(self) -> None:
         metadata = build_metadata(

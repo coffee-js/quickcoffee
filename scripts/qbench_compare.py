@@ -117,8 +117,9 @@ def compare_records(
     candidate: dict[str, dict[str, Any]],
     relative_floor: float,
     mad_multiplier: float,
+    absolute_floor_ns: int,
 ) -> list[Comparison]:
-    if relative_floor < 0 or mad_multiplier < 0:
+    if relative_floor < 0 or mad_multiplier < 0 or absolute_floor_ns < 0:
         raise ComparisonError("comparison thresholds must be non-negative")
     baseline_names = set(baseline)
     candidate_names = set(candidate)
@@ -147,6 +148,7 @@ def compare_records(
             allowance_ns = max(
                 baseline_ns * relative_floor,
                 mad_multiplier * (baseline_mad_ns + candidate_mad_ns),
+                absolute_floor_ns,
             )
             limit_ns = baseline_ns + allowance_ns
             comparisons.append(
@@ -179,6 +181,7 @@ def markdown_report(
     candidate_ref: str,
     relative_floor: float,
     mad_multiplier: float,
+    absolute_floor_ns: int,
 ) -> str:
     comparisons = list(comparisons)
     alerts = [comparison for comparison in comparisons if comparison.alert]
@@ -187,8 +190,9 @@ def markdown_report(
         "## Non-blocking qbench comparison",
         "",
         f"Base `{baseline_ref}` vs candidate `{candidate_ref}` on the same runner.",
-        f"Policy: alert above both `{relative_floor * 100:.1f}%` and "
-        f"`{mad_multiplier:g} × (base MAD + candidate MAD)`; alerts do not fail the PR.",
+        f"Policy: alert above `{relative_floor * 100:.1f}%`, "
+        f"`{mad_multiplier:g} × (base MAD + candidate MAD)`, and "
+        f"`{_milliseconds(absolute_floor_ns)} ms`; alerts do not fail the PR.",
         "",
         f"Compared {len(comparisons)} phase medians across {workload_count} workloads; "
         f"**{len(alerts)} alert(s)**.",
@@ -293,6 +297,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--candidate-ref", default="unknown")
     parser.add_argument("--relative-floor", type=float, default=0.05)
     parser.add_argument("--mad-multiplier", type=float, default=3.0)
+    parser.add_argument("--absolute-floor-ns", type=int, default=100_000)
     parser.add_argument("--benchmark-command", default="unspecified")
     parser.add_argument("--github-annotations", action="store_true")
     return parser.parse_args(argv)
@@ -308,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate,
             args.relative_floor,
             args.mad_multiplier,
+            args.absolute_floor_ns,
         )
         metadata = build_metadata(args)
         summary = markdown_report(
@@ -316,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             args.candidate_ref,
             args.relative_floor,
             args.mad_multiplier,
+            args.absolute_floor_ns,
         )
         report = {
             "schema": REPORT_SCHEMA,
@@ -323,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             "policy": {
                 "relative_floor": args.relative_floor,
                 "mad_multiplier": args.mad_multiplier,
+                "absolute_floor_ns": args.absolute_floor_ns,
                 "blocking": False,
             },
             "alerts": sum(comparison.alert for comparison in comparisons),
