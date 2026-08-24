@@ -57,6 +57,16 @@ fn builder_embedding_surface_chains_host_configuration() {
 }
 
 #[test]
+fn contexts_keep_builtin_binding_replacements_isolated() {
+    let mut replaced = Context::new();
+    replaced.set_global("len", Value::from(42_i64));
+
+    let mut fresh = Context::new();
+    assert_eq!(replaced.eval("len").unwrap().as_number(), Some(42.));
+    assert_eq!(fresh.eval("len([20, 22])").unwrap().as_number(), Some(2.));
+}
+
+#[test]
 fn public_values_and_native_errors_are_structured() {
     let mut context = Context::new();
     context.set_global(

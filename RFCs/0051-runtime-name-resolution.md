@@ -8,3 +8,7 @@
 若所有环境都没有该名称，VM 返回 `ErrorKind::Runtime`，详情包含未知名称；这不是 JavaScript 的 `undefined`，也不会静默产生 `nil`。`value?` 仍会先严格读取名称并报告该错误；只有 `name ?= value` 使用 `LoadOrNil`，把未绑定名称视为 `nil` 并按 RFC 0039 的短路规则处理。
 
 该策略保持共享 `Program` 可在多个 Context 中复用，同时允许每个 Context 拥有不同的宿主全局。验收沿用未知名称错误、宿主注入读取、闭包词法捕获和共享程序重复执行测试；字节码验证不接受额外的动态指令或隐藏对象模型。
+
+issue #95 在不改变上述动态规则的前提下，为环境增加私有的稳定插入槽位，并让编译得到的 `Program` 持有按 chunk 与指令位置组织的执行计划。`Load`、`LoadOrNil` 与 `Store` 只缓存当前环境的正命中槽位；每次命中都先验证槽位中的完整名称仍与字节码操作数一致。跨 Context、条件绑定、失败解构回滚或其他布局变化造成不匹配时，VM 回退到正常的当前环境查找并刷新提示；父环境命中和未命中不缓存。因此缓存是可丢弃的执行提示，不是静态作用域判定，也不改变词法遮蔽。
+
+由裸 `Chunk` 构造的 `Program` 不附带该执行计划，继续作为无缓存路径运行。公开 `Instruction`、disassembly、fingerprint、verifier、fuel、源码位置和 `ExecutionStats` 计数保持不变；闭包、参数默认块和跨 eval 保留函数携带其原始私有执行计划。
