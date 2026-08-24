@@ -120,6 +120,24 @@ issue #100 的快帧已经把当前局部值放入私有槽位，但仍为每次
 
 `qbench` 为每个内建负载输出一行 JSON，分别记录普通编译、prepared Program、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
 
+### issue #107 同 runner 非阻塞回归报告
+
+`.github/workflows/performance.yml` 在 pull request 与手工触发时，把 base 与 candidate 分别检出并在同一个 Ubuntu runner、同一个 stable Rust 工具链上顺序构建。它先要求两边 `qbench --list` 完全一致，再逐负载以 `--only NAME --json --iterations 2000 --repeat 11` 交错采集 base/head，并按奇偶负载反转先后顺序，减少整套先后运行造成的温度、频率与共享 runner 漂移。两边最终各生成一份完整原始 JSONL；`scripts/qbench_compare.py` 再要求 schema、负载集合、迭代数、样本数和期望值完全一致，逐负载比较 compile / prepare / verify / execute 中位数与 MAD。
+
+初始审阅策略只在 candidate 超过 `baseline + max(5% × baseline, 3 × (baseline MAD + candidate MAD), 0.1 ms)` 时产生 GitHub warning。绝对下限避免把亚毫秒 verify 等阶段的几十微秒 runner 抖动放大成告警；它不替代相对与 MAD 门槛。warning **不阻塞** PR；workflow job 本身也设置 `continue-on-error`，因为共享 runner 的首批数据只用于建立噪声模型，不能当成稳定发布阈值。解析错误或负载契约失配仍让该实验 job 显式报错，避免把缺失数据当成“无回归”。两份原始 JSONL、版本化 comparison JSON，以及包含 base/head revision、UTC 时间、runner、平台、Python、`rustc -Vv` 和实际命令的 metadata JSON 保留 30 天；Markdown step summary 展示告警及全部 phase 明细。跨 runner、跨平台或历史 artifact 不直接套用这个阈值。
+
+比较器只依赖 Python 标准库；本地复核可运行：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_qbench_compare.py
+python3 scripts/qbench_compare.py \
+  --baseline /path/to/baseline.jsonl \
+  --candidate /path/to/candidate.jsonl \
+  --summary /tmp/qbench-summary.md \
+  --report /tmp/qbench-comparison.json \
+  --metadata /tmp/qbench-metadata.json
+```
+
 测量环境：Apple arm64（Darwin 25.5.0，T6000）、`rustc 1.94.0 (4a4ef493e 2026-03-02)`、`cargo bench --bench core`。基准以 release profile 运行；报告日期为 2026-08-22。
 
 基准工作负载：

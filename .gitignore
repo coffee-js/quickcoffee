@@ -3,6 +3,8 @@
 
 # Local/editor files
 .DS_Store
+__pycache__/
+*.py[cod]
 .idea/
 .vscode/
 *.swp
