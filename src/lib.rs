@@ -3,8 +3,10 @@
 //! CoffeeScript-inspired parser, compiler, bytecode VM, and embedding API.
 //! The public API intentionally exposes values and native functions, never JS-like objects.
 
+mod ast;
 mod bytecode;
 mod lexer;
+mod lowering;
 mod module;
 mod parser;
 mod vm;
@@ -20,7 +22,7 @@ pub use vm::{
 /// Compiles `source` to verified bytecode without executing it.
 pub fn compile(source: &str) -> Result<Chunk, Error> {
     let ast = parser::parse(source)?;
-    let chunk = bytecode::compile(&ast)?;
+    let chunk = lowering::compile(&ast)?;
     chunk.verify()?;
     Ok(chunk)
 }

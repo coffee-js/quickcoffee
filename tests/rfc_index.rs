@@ -65,6 +65,35 @@ fn package_manifest_declares_the_documented_msrv() {
 }
 
 #[test]
+fn frontend_stage_ownership_is_explicit() {
+    fn defines(source: &str, definition: &str) -> bool {
+        source.lines().any(|line| line.trim() == definition)
+    }
+    fn declares(source: &str, declaration: &str) -> bool {
+        source
+            .lines()
+            .any(|line| line.trim_start().starts_with(declaration))
+    }
+
+    let modules = fs::read_to_string("src/lib.rs").expect("crate modules exist");
+    let ast = fs::read_to_string("src/ast.rs").expect("AST module exists");
+    let parser = fs::read_to_string("src/parser.rs").expect("parser module exists");
+    let lowering = fs::read_to_string("src/lowering.rs").expect("lowering module exists");
+    let bytecode = fs::read_to_string("src/bytecode.rs").expect("bytecode module exists");
+
+    assert!(defines(&modules, "mod ast;"));
+    assert!(defines(&modules, "mod lowering;"));
+    assert!(defines(&ast, "pub(crate) enum Expr {"));
+    assert!(!defines(&parser, "pub(crate) enum Expr {"));
+
+    assert!(defines(&lowering, "struct Compiler {"));
+    assert!(declares(&lowering, "pub(crate) fn compile_mapped("));
+    assert!(!defines(&bytecode, "struct Compiler {"));
+    assert!(!declares(&bytecode, "pub(crate) fn compile_mapped("));
+    assert!(defines(&bytecode, "impl Chunk {"));
+}
+
+#[test]
 fn coffeescript_feature_matrix_covers_the_official_language_reference() {
     let matrix = fs::read_to_string("docs/coffeescript-2016-matrix.md")
         .expect("CoffeeScript feature matrix exists");

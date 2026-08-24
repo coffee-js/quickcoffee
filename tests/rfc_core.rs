@@ -961,6 +961,27 @@ fn bytecode_fingerprints_are_stable_and_content_based() {
     assert_ne!(first.fingerprint(), 0);
 }
 #[test]
+fn frontend_pipeline_keeps_representative_bytecode_and_value_golden() {
+    const SOURCE: &str = "factor = 2\nscale = (value = 20) ->\n  [first, rest...] = [value, 1, 2]\n  first * factor + len(rest)\nscale()";
+    let chunk = compile(SOURCE).unwrap();
+    assert_eq!(
+        chunk.disassemble(),
+        concat!(
+            "0000 Constant(0)\n",
+            "0001 Store(\"factor\")\n",
+            "0002 Pop\n",
+            "0003 MakeFunction(1)\n",
+            "0004 Store(\"scale\")\n",
+            "0005 Pop\n",
+            "0006 Load(\"scale\")\n",
+            "0007 Call(0)\n",
+            "0008 Return\n",
+        )
+    );
+    assert_eq!(chunk.fingerprint(), 0xc998_76f3_db64_1959);
+    assert_eq!(Context::new().run(chunk).unwrap().as_number(), Some(42.));
+}
+#[test]
 fn while_and_fuel() {
     assert_eq!(
         eval("n = 0\nwhile n < 3 then n = n + 1\nn").as_number(),
