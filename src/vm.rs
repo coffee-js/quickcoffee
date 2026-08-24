@@ -16,6 +16,7 @@ use std::{
 };
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
+const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
 
 /// Stable type tag for values crossing the embedding boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -985,6 +986,8 @@ pub struct Context {
     max_call_depth: usize,
     cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
+    // Keep call-only storage out of `Vm` so no-call dispatch keeps its layout.
+    reusable_call_arguments: Vec<Value>,
 }
 
 thread_local! {
@@ -999,6 +1002,7 @@ thread_local! {
             max_call_depth: 1_024,
             cancellation: None,
             last_execution: ExecutionStats::default(),
+            reusable_call_arguments: Vec::new(),
         };
         context.install_builtins();
         global.borrow().snapshot()
@@ -1035,6 +1039,7 @@ impl Context {
             max_call_depth: 1_024,
             cancellation: None,
             last_execution: ExecutionStats::default(),
+            reusable_call_arguments: Vec::new(),
         }
     }
     /// Returns a builder-style context with the supplied fuel budget.
@@ -1183,7 +1188,11 @@ impl Context {
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
         };
-        let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
+        let result = vm.run(
+            Rc::clone(&program.0.chunk),
+            self.global.clone(),
+            &mut self.reusable_call_arguments,
+        );
         self.last_execution = vm.stats();
         result
     }
@@ -1195,6 +1204,7 @@ impl Context {
             max_call_depth: self.max_call_depth,
             cancellation: self.cancellation.clone(),
             last_execution: ExecutionStats::default(),
+            reusable_call_arguments: Vec::new(),
         }
     }
     pub(crate) fn get_local(&self, name: &str) -> Option<Value> {
@@ -1551,6 +1561,40 @@ impl Vm {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
     }
 
+    // This boundary keeps argument-buffer plumbing out of the monolithic
+    // instruction dispatch loop, where code layout affects unrelated workloads.
+    #[inline(never)]
+    fn direct_call(
+        frame: &mut Frame,
+        argument_count: usize,
+        reusable_call_arguments: &mut Vec<Value>,
+    ) -> Result<Step, Error> {
+        if frame.stack.len() < argument_count {
+            return Err(Error::runtime("stack underflow"));
+        }
+        let mut args = std::mem::take(reusable_call_arguments);
+        args.clear();
+        let argument_start = frame.stack.len() - argument_count;
+        args.extend(frame.stack.drain(argument_start..));
+        let callee = match pop(frame) {
+            Ok(callee) => callee,
+            Err(error) => {
+                Self::recycle_call_arguments(reusable_call_arguments, args);
+                return Err(error);
+            }
+        };
+        Ok(Step::Call { callee, args })
+    }
+
+    fn recycle_call_arguments(reusable_call_arguments: &mut Vec<Value>, mut args: Vec<Value>) {
+        args.clear();
+        if args.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS
+            && args.capacity() > reusable_call_arguments.capacity()
+        {
+            *reusable_call_arguments = args;
+        }
+    }
+
     fn record_profile(&mut self, instruction: &Instruction) {
         match instruction {
             Instruction::Load(_) | Instruction::LoadOrNil(_) => self.name_loads += 1,
@@ -1602,7 +1646,7 @@ impl Vm {
             initial_debug_info: debug_info,
             execution_plan,
         };
-        let result = nested.run(chunk, env);
+        let result = nested.run(chunk, env, &mut Vec::new());
         self.fuel = nested.fuel;
         self.instructions = nested.instructions;
         self.call_depth = nested.call_depth;
@@ -1632,7 +1676,12 @@ impl Vm {
             environment_allocations: self.environment_allocations,
         }
     }
-    fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
+    fn run(
+        &mut self,
+        chunk: Rc<Chunk>,
+        global: Env,
+        reusable_call_arguments: &mut Vec<Value>,
+    ) -> Result<Value, Error> {
         let execution_plan = self.execution_plan.clone();
         let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(&chunk));
         let mut frames = vec![Frame {
@@ -2144,9 +2193,7 @@ impl Vm {
                         _ => return Err(Error::runtime("value used as function template")),
                     },
                     Instruction::Call(n) => {
-                        let args = take(frame, *n)?;
-                        let callee = pop(frame)?;
-                        return Ok(Step::Call { callee, args });
+                        return Self::direct_call(frame, *n, reusable_call_arguments);
                     }
                     Instruction::CallSpread => {
                         let args = pop(frame)?;
@@ -2182,20 +2229,24 @@ impl Vm {
                         return Ok(value);
                     }
                 }
-                Ok(Step::Call { callee, args }) => match call(self, &mut frames, callee, args) {
-                    Ok(()) => {}
-                    Err(error) => {
-                        let include_current_call = !error.labels().is_empty();
-                        let span = frames
-                            .last()
-                            .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
-                        let error = error.with_span_if_missing(span);
-                        let error = Self::with_call_stack(error, &frames, include_current_call);
-                        if !handle_error(self, &mut frames, &error) {
-                            return Err(error);
+                Ok(Step::Call { callee, args }) => {
+                    let result = call(self, &mut frames, callee, &args);
+                    Self::recycle_call_arguments(reusable_call_arguments, args);
+                    match result {
+                        Ok(()) => {}
+                        Err(error) => {
+                            let include_current_call = !error.labels().is_empty();
+                            let span = frames.last().and_then(|frame| {
+                                Self::source_span(frame, frame.pc.saturating_sub(1))
+                            });
+                            let error = error.with_span_if_missing(span);
+                            let error = Self::with_call_stack(error, &frames, include_current_call);
+                            if !handle_error(self, &mut frames, &error) {
+                                return Err(error);
+                            }
                         }
                     }
-                },
+                }
                 Err(error) => {
                     let span = frames
                         .last()
@@ -2210,19 +2261,14 @@ impl Vm {
         }
     }
 }
-fn call(
-    vm: &mut Vm,
-    frames: &mut Vec<Frame>,
-    callee: Value,
-    args: Vec<Value>,
-) -> Result<(), Error> {
+fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
             FunctionKind::Native {
                 function,
                 allocation_profile,
             } => {
-                let value = function(&args)?;
+                let value = function(args)?;
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_value_allocations(allocation_profile(&value));
                 }
@@ -2263,7 +2309,7 @@ fn call(
                 let fast_locals = fast_parameters.as_ref().zip(binding_slots.as_ref()).map(
                     |(parameter_slots, binding_slots)| {
                         let mut values = vec![None; binding_slots.local_names.len()];
-                        for (slot, value) in parameter_slots.iter().zip(&args) {
+                        for (slot, value) in parameter_slots.iter().zip(args) {
                             if let Some(slot) = slot {
                                 values[*slot] = Some(value.clone());
                             }
@@ -2823,6 +2869,39 @@ mod tests {
             optimized_context.last_execution(),
             reference_context.last_execution()
         );
+    }
+
+    #[test]
+    fn reusable_call_arguments_preserve_mixed_calls_and_failure_recovery() {
+        let engine = Engine::new();
+        let mixed_calls = engine
+            .compile_program(
+                "zero = -> 1\none = (value) -> value + 1\nmany = (head, tail...) -> head + sum(tail)\n[zero(), one(1), many(1, 2, 3), many([1, 2, 3]...), len([1, 2, 3])]",
+            )
+            .unwrap();
+        let bad_call = engine
+            .compile_program("one = (value) -> value + 1\none()")
+            .unwrap();
+        let mut context = Context::new();
+
+        assert_eq!(
+            context.run_program(&mixed_calls).unwrap().to_string(),
+            "[1, 2, 6, 6, 3]"
+        );
+        let successful_stats = context.last_execution();
+        assert!(context.reusable_call_arguments.is_empty());
+        assert!(context.reusable_call_arguments.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
+
+        let error = context.run_program(&bad_call).unwrap_err();
+        assert_eq!(error.message(), "expected 1 arguments, got 0");
+        assert!(context.reusable_call_arguments.is_empty());
+        assert!(context.reusable_call_arguments.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
+
+        assert_eq!(
+            context.run_program(&mixed_calls).unwrap().to_string(),
+            "[1, 2, 6, 6, 3]"
+        );
+        assert_eq!(context.last_execution(), successful_stats);
     }
 
     #[test]
