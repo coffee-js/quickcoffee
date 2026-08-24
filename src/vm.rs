@@ -675,6 +675,10 @@ impl ProgramExecutionPlan {
                 _ => None,
             })
             .collect();
+        // A direct call cannot observe its caller's lexical frame: bytecode
+        // functions carry the environment captured where they were created,
+        // and native functions receive values only. Keep spread calls out of
+        // this first extension while their argument carrier is investigated.
         let isolated_frame = !chunk.code.iter().any(|instruction| {
             matches!(
                 instruction,
@@ -683,7 +687,6 @@ impl ProgramExecutionPlan {
                     | Instruction::Try { .. }
                     | Instruction::EndTry
                     | Instruction::MakeFunction(_)
-                    | Instruction::Call(_)
                     | Instruction::CallSpread
             )
         });
@@ -2863,6 +2866,14 @@ mod tests {
         assert_cached_and_reference("known = 1\nknown + missing", 100);
         assert_cached_and_reference("i = 0\nloop\n  i++", 50);
         assert_cached_and_reference("[left, right] = [1]", 100);
+        assert_cached_and_reference(
+            "increment = (value) -> value + 1\nrun = (limit) ->\n  value = 0\n  while value < limit then value = increment(value)\n  value\nrun(100)",
+            50,
+        );
+        assert_cached_and_reference(
+            "fail = -> missing\nrun = (value) -> fail() + value\nrun(1)",
+            100,
+        );
 
         let chunk = Engine::new().compile("value = 1\nvalue + 1").unwrap();
         let raw = Program::from(chunk);
@@ -2972,6 +2983,14 @@ mod tests {
             10_000,
         );
         assert_cached_and_reference(
+            "increment = (value) -> value + 1\nrun = (limit) ->\n  sum = 0\n  i = 0\n  while i < limit\n    sum = increment(sum)\n    i++\n  sum\nrun(100)",
+            10_000,
+        );
+        assert_cached_and_reference(
+            "factorial = (n) -> if n == 0 then 1 else n * factorial(n - 1)\nfactorial(8)",
+            10_000,
+        );
+        assert_cached_and_reference(
             "outer = 7\nread = (condition) ->\n  if condition then outer = 9\n  outer\n[read(false), read(true), outer]",
             1_000,
         );
@@ -2995,6 +3014,45 @@ mod tests {
             .unwrap();
         assert!(
             leaf_slots
+                .fast_parameter_slots(params, *required, rest.as_deref())
+                .is_some()
+        );
+
+        let caller = Engine::new()
+            .compile_program(
+                "increment = (value) -> value + 1\nrun = (limit) -> increment(limit)\nrun(41)",
+            )
+            .unwrap();
+        let Constant::Function {
+            params,
+            required,
+            rest,
+            chunk,
+        } = caller
+            .0
+            .chunk
+            .constants
+            .iter()
+            .find(|constant| {
+                matches!(
+                    constant,
+                    Constant::Function { chunk, .. }
+                        if chunk.code.iter().any(|instruction| matches!(instruction, Instruction::Call(_)))
+                )
+            })
+            .expect("caller function template")
+        else {
+            unreachable!("filtered to function constants")
+        };
+        let caller_slots = caller
+            .0
+            .execution_plan
+            .as_ref()
+            .and_then(|plan| plan.slots(chunk))
+            .unwrap();
+        assert!(caller_slots.isolated_frame);
+        assert!(
+            caller_slots
                 .fast_parameter_slots(params, *required, rest.as_deref())
                 .is_some()
         );
