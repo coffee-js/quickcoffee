@@ -561,10 +561,10 @@ impl Environment {
     }
 
     fn set_cached(&mut self, name: &str, slot: usize, value: Value) -> Result<(), Value> {
-        if !self
+        if self
             .slots
             .get(slot)
-            .is_some_and(|(stored, _)| stored.as_ref() == name)
+            .is_none_or(|(stored, _)| stored.as_ref() != name)
         {
             return Err(value);
         }
@@ -1562,12 +1562,8 @@ fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
         }
         FrameBindings::Shared(slots) => {
             if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
-                let result = frame.env.borrow_mut().set_resolved(slot, value);
-                match result {
-                    Ok(()) => return,
-                    Err(value) => {
-                        store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value)
-                    }
+                if let Err(value) = frame.env.borrow_mut().set_resolved(slot, value) {
+                    store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
                 }
                 return;
             }
