@@ -1588,9 +1588,11 @@ impl Vm {
 
     fn recycle_call_arguments(reusable_call_arguments: &mut Vec<Value>, mut args: Vec<Value>) {
         args.clear();
-        if args.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS
-            && args.capacity() > reusable_call_arguments.capacity()
-        {
+        if args.capacity() > MAX_REUSABLE_CALL_ARGUMENTS {
+            if reusable_call_arguments.capacity() == 0 {
+                *reusable_call_arguments = Vec::with_capacity(MAX_REUSABLE_CALL_ARGUMENTS);
+            }
+        } else if args.capacity() > reusable_call_arguments.capacity() {
             *reusable_call_arguments = args;
         }
     }
@@ -2882,7 +2884,13 @@ mod tests {
         let bad_call = engine
             .compile_program("one = (value) -> value + 1\none()")
             .unwrap();
+        let large_native_call = engine
+            .compile_program(
+                "count_args(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)",
+            )
+            .unwrap();
         let mut context = Context::new();
+        context.add_native("count_args", |args| Ok(Value::from(args.len() as i64)));
 
         assert_eq!(
             context.run_program(&mixed_calls).unwrap().to_string(),
@@ -2891,6 +2899,17 @@ mod tests {
         let successful_stats = context.last_execution();
         assert!(context.reusable_call_arguments.is_empty());
         assert!(context.reusable_call_arguments.capacity() <= MAX_REUSABLE_CALL_ARGUMENTS);
+        context.reusable_call_arguments = Vec::with_capacity(4);
+        let reusable_capacity = context.reusable_call_arguments.capacity();
+        assert!(reusable_capacity > 0);
+
+        assert_eq!(
+            context.run_program(&large_native_call).unwrap().to_string(),
+            "17"
+        );
+        let post_large_capacity = context.reusable_call_arguments.capacity();
+        assert!(post_large_capacity >= reusable_capacity);
+        assert!(post_large_capacity <= MAX_REUSABLE_CALL_ARGUMENTS);
 
         let error = context.run_program(&bad_call).unwrap_err();
         assert_eq!(error.message(), "expected 1 arguments, got 0");
@@ -2902,6 +2921,10 @@ mod tests {
             "[1, 2, 6, 6, 3]"
         );
         assert_eq!(context.last_execution(), successful_stats);
+        assert_eq!(
+            context.reusable_call_arguments.capacity(),
+            post_large_capacity
+        );
     }
 
     #[test]
