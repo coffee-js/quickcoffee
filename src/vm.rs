@@ -489,7 +489,7 @@ enum FunctionKind {
 type Env = Rc<RefCell<Environment>>;
 struct Environment {
     indices: BTreeMap<Rc<str>, usize>,
-    slots: Vec<(Rc<str>, Value)>,
+    slots: Vec<(Rc<str>, Option<Value>)>,
     parent: Option<Env>,
 }
 // Pattern binding is atomic, so both the name index and its stable slots must
@@ -497,42 +497,54 @@ struct Environment {
 #[derive(Clone)]
 struct EnvironmentSnapshot {
     indices: BTreeMap<Rc<str>, usize>,
-    slots: Vec<(Rc<str>, Value)>,
+    slots: Vec<(Rc<str>, Option<Value>)>,
 }
 impl Environment {
     fn get_local(&self, name: &str) -> Option<Value> {
         let slot = *self.indices.get(name)?;
-        self.slots.get(slot).map(|(_, value)| value.clone())
+        self.slots.get(slot)?.1.clone()
     }
 
     fn get_local_with_slot(&self, name: &str) -> Option<(usize, Value)> {
         let slot = *self.indices.get(name)?;
-        self.slots.get(slot).map(|(_, value)| (slot, value.clone()))
+        self.slots.get(slot)?.1.clone().map(|value| (slot, value))
     }
 
     fn get_cached(&self, name: &str, slot: usize) -> Option<Value> {
         self.slots
             .get(slot)
             .filter(|(stored, _)| stored.as_ref() == name)
-            .map(|(_, value)| value.clone())
+            .and_then(|(_, value)| value.clone())
+    }
+
+    fn get_resolved(&self, slot: usize) -> Option<Option<Value>> {
+        self.slots.get(slot).map(|(_, value)| value.clone())
+    }
+
+    fn set_resolved(&mut self, slot: usize, value: Value) -> Result<(), Value> {
+        let Some((_, current)) = self.slots.get_mut(slot) else {
+            return Err(value);
+        };
+        *current = Some(value);
+        Ok(())
     }
 
     fn set_local(&mut self, name: &str, value: Value) -> usize {
         if let Some(slot) = self.indices.get(name).copied() {
-            self.slots[slot].1 = value;
+            self.slots[slot].1 = Some(value);
             return slot;
         }
         let slot = self.slots.len();
         let name: Rc<str> = Rc::from(name);
         self.indices.insert(name.clone(), slot);
-        self.slots.push((name, value));
+        self.slots.push((name, Some(value)));
         slot
     }
 
     fn set_cached(&mut self, name: &str, slot: usize, value: Value) -> Result<(), Value> {
         match self.slots.get_mut(slot) {
             Some((stored, current)) if stored.as_ref() == name => {
-                *current = value;
+                *current = Some(value);
                 Ok(())
             }
             _ => Err(value),
@@ -556,6 +568,20 @@ fn env(parent: Option<Env>) -> Env {
         indices: BTreeMap::new(),
         slots: vec![],
         parent,
+    }))
+}
+fn env_with_unset_slots(parent: Env, names: &[Rc<str>]) -> Env {
+    let indices = names
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(slot, name)| (name, slot))
+        .collect();
+    let slots = names.iter().cloned().map(|name| (name, None)).collect();
+    Rc::new(RefCell::new(Environment {
+        indices,
+        slots,
+        parent: Some(parent),
     }))
 }
 fn lookup(e: &Env, n: &str) -> Option<Value> {
@@ -1400,6 +1426,7 @@ struct Frame {
 enum FrameBindings {
     Raw,
     Guarded(Rc<ChunkBindingSlots>),
+    Shared(Rc<ChunkBindingSlots>),
     Fast {
         slots: Rc<ChunkBindingSlots>,
         locals: Vec<Option<Value>>,
@@ -1465,6 +1492,21 @@ fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
         FrameBindings::Guarded(slots) => {
             lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
         }
+        FrameBindings::Shared(slots) => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                let environment = frame.env.borrow();
+                match environment.get_resolved(slot) {
+                    Some(Some(value)) => return Some(value),
+                    Some(None) => {
+                        let parent = environment.parent.clone();
+                        drop(environment);
+                        return parent.and_then(|parent| lookup(&parent, name));
+                    }
+                    None => drop(environment),
+                }
+            }
+            lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
+        }
         FrameBindings::Raw => lookup_environment(&frame.env, None, name),
     }
 }
@@ -1478,6 +1520,19 @@ fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
             store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
         }
         FrameBindings::Guarded(slots) => {
+            store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
+        }
+        FrameBindings::Shared(slots) => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                let result = frame.env.borrow_mut().set_resolved(slot, value);
+                match result {
+                    Ok(()) => return,
+                    Err(value) => {
+                        store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value)
+                    }
+                }
+                return;
+            }
             store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
         }
         FrameBindings::Raw => store_environment(&frame.env, None, name, value),
@@ -2313,6 +2368,10 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     .is_some_and(|locals| locals.iter().all(Option::is_some));
                 let local = if environment_elidable {
                     captured.clone()
+                } else if let (Some(binding_slots), None) =
+                    (binding_slots.as_ref(), fast_locals.as_ref())
+                {
+                    env_with_unset_slots(captured.clone(), &binding_slots.local_names)
                 } else {
                     env(Some(captured.clone()))
                 };
@@ -2350,7 +2409,7 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 }
                 let bindings = match (binding_slots, fast_locals) {
                     (Some(slots), Some(locals)) => FrameBindings::Fast { slots, locals },
-                    (Some(slots), None) => FrameBindings::Guarded(slots),
+                    (Some(slots), None) => FrameBindings::Shared(slots),
                     (None, None) => FrameBindings::Raw,
                     (None, Some(_)) => unreachable!("fast locals require a binding plan"),
                 };
@@ -2961,6 +3020,80 @@ mod tests {
     }
 
     #[test]
+    fn shared_environment_slots_preserve_closure_fallback_sharing_and_rollback() {
+        let cases = [
+            (
+                "make = ->\n  value = 1\n  read = -> value\n  value = 2\n  read\nmake()()",
+                "2",
+                1_000,
+            ),
+            (
+                "value = 40\nmake = ->\n  read = -> value\n  before = read()\n  value = 2\n  [before, read()]\nmake()",
+                "[40, 2]",
+                1_000,
+            ),
+            (
+                "make = ->\n  value = 1\n  left = -> value\n  right = -> value\n  value = 3\n  [left, right]\nreaders = make()\n[readers[0](), readers[1]()]",
+                "[3, 3]",
+                1_000,
+            ),
+            (
+                "local = 40\nmake = ->\n  read = -> local\n  try\n    [local, missing] = [1]\n  catch error\n    read()\nmake()",
+                "40",
+                1_000,
+            ),
+        ];
+        for (source, expected, fuel) in cases {
+            assert_cached_and_reference(source, fuel);
+            assert_eq!(Context::new().eval(source).unwrap().to_string(), expected);
+        }
+
+        assert_cached_and_reference(
+            "make = ->\n  value = 1\n  fail = -> missing + value\n  fail\nmake()()",
+            1_000,
+        );
+        assert_cached_and_reference(
+            "make = (limit) ->\n  value = 0\n  read = -> value\n  while value < limit then value++\n  read\nmake(1000)()",
+            50,
+        );
+
+        let program = Engine::new()
+            .compile_program(
+                "make = ->\n  value = 0\n  read = -> value\n  value++\n  read\nmake()()",
+            )
+            .unwrap();
+        let Constant::Function { chunk, .. } = program
+            .0
+            .chunk
+            .constants
+            .iter()
+            .find(|constant| {
+                matches!(
+                    constant,
+                    Constant::Function { chunk, .. }
+                        if chunk.code.iter().any(|instruction| matches!(instruction, Instruction::MakeFunction(_)))
+                )
+            })
+            .expect("capturing function template")
+        else {
+            unreachable!("filtered to function constants")
+        };
+        let slots = program
+            .0
+            .execution_plan
+            .as_ref()
+            .and_then(|plan| plan.slots(chunk))
+            .unwrap();
+        assert!(!slots.isolated_frame);
+        assert!(
+            slots
+                .local_names
+                .iter()
+                .any(|name| name.as_ref() == "value")
+        );
+    }
+
+    #[test]
     fn binding_slots_preserve_errors_labels_fuel_and_raw_chunks() {
         assert_cached_and_reference("known = 1\nknown + missing", 100);
         assert_cached_and_reference("i = 0\nloop\n  i++", 50);
@@ -3001,6 +3134,32 @@ mod tests {
         assert_eq!(optimized.last_execution(), reference.last_execution());
         assert_eq!(optimized.get_global("base").unwrap().to_string(), "41");
         assert_eq!(reference.get_global("base").unwrap().to_string(), "41");
+
+        let define = engine
+            .compile_program(
+                "make = ->\n  value = 1\n  read = -> value\n  value = 2\n  read\nreader = make()\nreader",
+            )
+            .unwrap();
+        let call = engine.compile_program("reader()").unwrap();
+        let define_reference = define.without_binding_slots();
+        let call_reference = call.without_binding_slots();
+        let mut optimized = Context::new();
+        let mut reference = Context::new();
+        optimized.run_program(&define).unwrap();
+        reference.run_program(&define_reference).unwrap();
+        assert_result_equal(
+            optimized.run_program(&call),
+            reference.run_program(&call_reference),
+        );
+        assert_eq!(optimized.last_execution(), reference.last_execution());
+        assert_eq!(
+            optimized.get_global("reader").unwrap().to_string(),
+            "<function>"
+        );
+        assert_eq!(
+            reference.get_global("reader").unwrap().to_string(),
+            "<function>"
+        );
     }
 
     #[test]
@@ -3058,6 +3217,43 @@ mod tests {
         run_pair(
             &captured,
             &captured_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
+
+        let shared = Engine::new()
+            .compile_program(
+                "make = (flag) ->\n  read = -> value\n  value = host if flag\n  [read(), host]\nmake(flag)",
+            )
+            .unwrap();
+        let shared_reference = shared.without_binding_slots();
+        optimized_a.set_global("value", Value::Number(40.));
+        optimized_a.set_global("host", Value::Number(2.));
+        optimized_a.set_global("flag", Value::Bool(false));
+        optimized_b.set_global("value", Value::Number(41.));
+        optimized_b.set_global("host", Value::Number(3.));
+        optimized_b.set_global("flag", Value::Bool(true));
+        reference_a.set_global("value", Value::Number(40.));
+        reference_a.set_global("host", Value::Number(2.));
+        reference_a.set_global("flag", Value::Bool(false));
+        reference_b.set_global("value", Value::Number(41.));
+        reference_b.set_global("host", Value::Number(3.));
+        reference_b.set_global("flag", Value::Bool(true));
+        run_pair(
+            &shared,
+            &shared_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
+        run_pair(
+            &shared,
+            &shared_reference,
+            &mut optimized_b,
+            &mut reference_b,
+        );
+        run_pair(
+            &shared,
+            &shared_reference,
             &mut optimized_a,
             &mut reference_a,
         );
