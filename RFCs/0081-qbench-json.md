@@ -9,9 +9,9 @@
 
 ## CLI 契约
 
-`qbench [--iterations N] [--json]` 对内建负载逐一测量：源码编译、已验证共享 `Program` 的验证调用、以及每轮新 `Context` 的执行。默认 `N=100`，必须为正整数；每个负载在计时循环内都验证最终值与预期值一致，语义错误直接使命令失败。
+`qbench [--iterations N] [--json]` 对内建负载逐一测量：源码编译、含源码映射和私有执行 sidecar 的共享 `Program` 准备、已验证 `Program` 的验证调用、以及每轮新 `Context` 的执行。默认 `N=100`，必须为正整数；每个负载在计时循环内都验证最终值与预期值一致，语义错误直接使命令失败。
 
-每个负载输出一条记录，字段为 `name`、`iterations`、`expected`、`compile_ns`、`verify_ns`、`execute_ns`。`--json` 输出一行一个 JSON 对象，适合 CI 逐行采集；默认文本输出为同一字段的空格分隔记录。计时值是本次进程的纳秒总耗时，不作为跨机器性能结论；正式报告仍须按 RFC 0002 记录硬件、工具链、样本和中位数。
+每个负载输出一条记录，核心字段为 `name`、`iterations`、`expected`、`compile_ns`、`prepare_ns`、`verify_ns`、`execute_ns`。`compile_ns` 测 `Engine::compile`，`prepare_ns` 测 `Engine::compile_program` 的端到端准备；后者包含重复的解析、lowering、验证、源码映射和 sidecar 构建，不用两字段相减来声称隔离的 sidecar 时间。`--json` 输出一行一个 JSON 对象，适合 CI 逐行采集；默认文本输出为同一字段的空格分隔记录。计时值是本次进程的纳秒总耗时，不作为跨机器性能结论；正式报告仍须按 RFC 0002 记录硬件、工具链、样本和中位数。
 
 ## 验收
 
