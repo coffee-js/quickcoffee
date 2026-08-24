@@ -597,8 +597,10 @@ fn main() -> ExitCode {
     let engine = Engine::new();
     for workload in workloads {
         let mut compile_samples = Vec::with_capacity(repeat);
+        let mut prepare_samples = Vec::with_capacity(repeat);
         let mut verify_samples = Vec::with_capacity(repeat);
         let mut execute_samples = Vec::with_capacity(repeat);
+        let mut prepared_program = None;
         for _ in 0..repeat {
             let start = Instant::now();
             for _ in 0..iterations {
@@ -607,9 +609,19 @@ fn main() -> ExitCode {
                     .expect("qbench workload must compile");
             }
             compile_samples.push(start.elapsed().as_nanos());
-            let program = engine
-                .compile_program(workload.source)
-                .expect("qbench workload must compile");
+
+            let start = Instant::now();
+            for _ in 0..iterations {
+                prepared_program = Some(
+                    engine
+                        .compile_program(workload.source)
+                        .expect("qbench workload must prepare"),
+                );
+            }
+            prepare_samples.push(start.elapsed().as_nanos());
+            let program = prepared_program
+                .as_ref()
+                .expect("positive iterations prepare a program");
 
             let start = Instant::now();
             for _ in 0..iterations {
@@ -621,18 +633,17 @@ fn main() -> ExitCode {
             for _ in 0..iterations {
                 let mut context = Context::new().with_fuel(100_000);
                 let value = context
-                    .run_program(&program)
+                    .run_program(program)
                     .expect("qbench workload must execute");
                 assert_eq!(value.to_string(), workload.expected, "{}", workload.name);
             }
             execute_samples.push(start.elapsed().as_nanos());
         }
         let (compile_ns, compile_mad_ns) = median_and_mad(&mut compile_samples);
+        let (prepare_ns, prepare_mad_ns) = median_and_mad(&mut prepare_samples);
         let (verify_ns, verify_mad_ns) = median_and_mad(&mut verify_samples);
         let (execute_ns, execute_mad_ns) = median_and_mad(&mut execute_samples);
-        let profile_program = engine
-            .compile_program(workload.source)
-            .expect("qbench workload must compile");
+        let profile_program = prepared_program.expect("positive repeat prepares a program");
         let mut profile_context = Context::new().with_fuel(100_000);
         let profile_value = profile_context
             .run_program(&profile_program)
@@ -647,7 +658,7 @@ fn main() -> ExitCode {
 
         if json {
             println!(
-                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{},\"profile_instructions\":{},\"profile_call_depth_peak\":{},\"profile_name_loads\":{},\"profile_name_stores\":{},\"profile_calls\":{},\"profile_container_ops\":{},\"profile_iterator_ops\":{},\"profile_exception_ops\":{},\"profile_value_allocations\":{},\"profile_environment_allocations\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"prepare_ns\":{},\"prepare_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{},\"profile_instructions\":{},\"profile_call_depth_peak\":{},\"profile_name_loads\":{},\"profile_name_stores\":{},\"profile_calls\":{},\"profile_container_ops\":{},\"profile_iterator_ops\":{},\"profile_exception_ops\":{},\"profile_value_allocations\":{},\"profile_environment_allocations\":{}}}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
@@ -656,6 +667,8 @@ fn main() -> ExitCode {
                 json_escape(workload.expected),
                 compile_ns,
                 compile_mad_ns,
+                prepare_ns,
+                prepare_mad_ns,
                 verify_ns,
                 verify_mad_ns,
                 execute_ns,
@@ -673,7 +686,7 @@ fn main() -> ExitCode {
             );
         } else {
             println!(
-                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} profile_instructions={} profile_call_depth_peak={} profile_name_loads={} profile_name_stores={} profile_calls={} profile_container_ops={} profile_iterator_ops={} profile_exception_ops={} profile_value_allocations={} profile_environment_allocations={} expected={}",
+                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} prepare_ns={} prepare_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} profile_instructions={} profile_call_depth_peak={} profile_name_loads={} profile_name_stores={} profile_calls={} profile_container_ops={} profile_iterator_ops={} profile_exception_ops={} profile_value_allocations={} profile_environment_allocations={} expected={}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 workload.name,
@@ -681,6 +694,8 @@ fn main() -> ExitCode {
                 repeat,
                 compile_ns,
                 compile_mad_ns,
+                prepare_ns,
+                prepare_mad_ns,
                 verify_ns,
                 verify_mad_ns,
                 execute_ns,

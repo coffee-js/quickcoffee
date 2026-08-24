@@ -2,7 +2,7 @@
 
 ## 口径
 
-此报告测量的是当前 RFC 0001 核心实现，不代表 CoffeeScript、QuickJS 或 JavaScript 引擎之间的比较。所有测量都避开标准输出、文件 I/O 和调试构建；结果只能用来跟踪本仓库的回归。基准分别记录编译、字节码验证和执行；编译路径同时维护词法 token 的一基源码行，以支持 RFC 0047 诊断。
+此报告测量的是当前 RFC 0001 核心实现，不代表 CoffeeScript、QuickJS 或 JavaScript 引擎之间的比较。所有测量都避开标准输出、文件 I/O 和调试构建；结果只能用来跟踪本仓库的回归。基准分别记录普通编译、含源码映射与私有执行 sidecar 的 `Program` 准备、字节码验证和执行；编译路径同时维护词法 token 的一基源码行，以支持 RFC 0047 诊断。
 
 命令：
 
@@ -17,7 +17,7 @@ make qbench
 # 或 cargo run --release --bin qbench -- --json --iterations 100
 ```
 
-要自动取得稳健统计，正式报告应取至少 11 次样本；输出中的 `repeat` 记录样本数，三个 `*_ns` 字段仍是每轮迭代总耗时的中位数，配套的 `*_mad_ns` 是相对该中位数的 median absolute deviation（MAD）。MAD 为零只表示该组样本没有可观测离散度，不代表跨机器可比：
+要自动取得稳健统计，正式报告应取至少 11 次样本；输出中的 `repeat` 记录样本数，`compile_ns`、`prepare_ns`、`verify_ns` 与 `execute_ns` 都是每轮迭代总耗时的中位数，配套的 `*_mad_ns` 是相对该中位数的 median absolute deviation（MAD）。`compile_*` 测 `Engine::compile`；`prepare_*` 测 `Engine::compile_program` 的端到端准备，不用两者相减来声称精确隔离 sidecar。MAD 为零只表示该组样本没有可观测离散度，不代表跨机器可比：
 
 ```sh
 cargo run --locked --release --bin qbench -- --json --iterations 100 --repeat 11
@@ -76,7 +76,7 @@ RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_star
 
 五条集合/Unicode 目标负载现已全部进入 `20×` 内，固定自身键映射读取不再越过集合门槛；但首要的标量循环仍未进入 `10×`，函数循环仍为 `24.89×`，所以 #80 不能据此关闭。`qbench` 的同机修改前后 11 样本还显示 `loop-core` 执行中位数从 `32.376 ms` 降至 `14.962 ms`（改善 53.8%），`closures-and-ranges` 从 `43.963 ms` 降至 `27.183 ms`（改善 38.2%）。内建环境模板按线程复用后，短程序反复创建 Context 的 `constant-folding`（200,000 次）为 `120.666 ms`，低于未修改 `main` 的 `349.676 ms`（改善 65.5%），避免用长循环收益掩盖启动型回退。
 
-该优化仍保留父环境动态查找，尚未实现经 verifier 证明的静态 local/capture slot、Context relocation 或成员名 intern。`Program` 私有执行计划的构建发生在 `compile_program`，不包含在现有 `qbench` / `qcompare` 的 `compile_ns`（其测量 `Engine::compile`）中；因此本节只对已列出的热执行与 Context 构造数据作结论，后续需为 sidecar 构建成本增加独立门禁。
+该优化仍保留父环境动态查找，尚未实现经 verifier 证明的静态 local/capture slot、Context relocation 或成员名 intern。`Program` 私有执行计划的构建发生在 `compile_program`，不包含在 `compile_ns`（其测量 `Engine::compile`）中；issue #102 后续增加的 `prepare_ns` 才覆盖完整 `compile_program` 准备路径。因此本节只对当时已列出的热执行与 Context 构造数据作结论。
 
 ### issue #100 编译器解析的隔离叶函数槽位
 
@@ -86,9 +86,24 @@ RFC 0124 在同一 `qcompare.v1` 记录中追加独立阶段：`quickcoffee_star
 
 同轮 `qcompare --compare-iterations 1 --repeat 11` 中，`function-loop` 的 QuickCoffee hot 中位数从 `247.598 ms` 降至 `173.761 ms`（改善 **29.8%**），修改后为 QuickJS `10.381 ms` 的 **16.74×**。`scalar-loop` 的 QuickCoffee 中位数从 `325.427 ms` 到 `326.988 ms`（回退 0.48%），修改后同轮为 QuickJS 的 `9.31×`；五条集合/Unicode 负载的 QuickCoffee 中位数变化均不超过 2%。本轮标量比值进入 `10×`，但该变化不是 issue #100 带来的收益，不能用来替代后续跨轮稳定性验证，也不表示 #80 的 capture slot、成员名 intern 或 sidecar 成本工作已经完成。
 
+### issue #102 prepared Program 成本门禁
+
+`quickcoffee.qbench.v1` 追加可选的 `prepare_ns` / `prepare_mad_ns`，测量 `Engine::compile_program` 的端到端准备；既有 `compile_*` 继续只测 `Engine::compile`。准备阶段包含重复解析、mapped lowering、验证、源码映射与私有执行 sidecar，所以下表差值只表示嵌入方选择完整 `Program` 路径的总增量，不能全归因于 sidecar。
+
+2026-08-24 在 Apple arm64、macOS 14.8.7、`rustc 1.97.1` 的 release 构建上，以 `--iterations 1000 --repeat 11` 得到：
+
+| 负载 | compile ms（MAD） | prepare ms（MAD） | prepare / compile | 每个 Program 总增量 |
+|---|---:|---:|---:|---:|
+| `constant-folding` | 4.381（0.158） | 7.236（0.182） | 1.65× | 2.855 µs |
+| `execution-stats` | 8.856（0.213） | 14.086（0.363） | 1.59× | 5.230 µs |
+| `closures-and-ranges` | 12.506（1.267） | 23.263（2.692） | 1.86× | 10.757 µs |
+| `for-pattern-bindings` | 13.092（0.348） | 20.477（0.582） | 1.56× | 7.385 µs |
+
+这组数据建立报告门禁而不设置阻塞阈值；未来扩大 local/capture slot sidecar 时，必须同时检查 `prepare_*` 与 `execute_*`，性能告警的机器归一化与阈值仍由 #81 处理。
+
 调试单一回归时，先用 `qbench --list` 查看确定性的内建负载名，再用 `qbench --only NAME` 只运行该负载；不指定 `--only` 始终运行完整集合，持续门禁口径不变。
 
-`qbench` 为每个内建负载输出一行 JSON，分别记录编译、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
+`qbench` 为每个内建负载输出一行 JSON，分别记录普通编译、prepared Program、验证和执行的纳秒总耗时，并在计时循环中校验预期最终值。默认 `--repeat 1` 适合快速 CI 回归；需要正式三次 release 中位数时使用 `--repeat 3`，其结果可直接作为下文报告数据。
 
 测量环境：Apple arm64（Darwin 25.5.0，T6000）、`rustc 1.94.0 (4a4ef493e 2026-03-02)`、`cargo bench --bench core`。基准以 release profile 运行；报告日期为 2026-08-22。
 

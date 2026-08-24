@@ -51,7 +51,7 @@ cargo run --bin qdocco -- --version
 cargo run --bin qbench -- --version
 ```
 
-`qbench` 的每条记录还包含一次不计时执行的 `profile_*` 计数，用于比较指令热点、调用深度、托管值分配和词法环境分配；这些计数不乘以 `--iterations` 或 `--repeat`。
+`qbench` 把 `Engine::compile` 的普通编译记录为 `compile_*`，并用新增的 `prepare_*` 单独记录 `Engine::compile_program` 的端到端准备成本（含源码映射、验证与私有执行 sidecar）；二者都遵循 `--iterations` / `--repeat` 的中位数与 MAD 口径。每条记录还包含一次不计时执行的 `profile_*` 计数，用于比较指令热点、调用深度、托管值分配和词法环境分配；这些计数不乘以 `--iterations` 或 `--repeat`。
 
 `qbench --compare-qjs` 的 `quickcoffee_startup_*` / `quickjs_startup_*`、`*_compile_*` 与 `*_hot_*` 分别报告启动、编译和预编译热执行；既有 `*_cli_*` 继续表示端到端子进程总耗时。各阶段均输出中位数与 MAD，正式报告宜使用 `--repeat 11`。
 

@@ -769,6 +769,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
             "\"expected\":\"",
             "\"compile_ns\":",
             "\"compile_mad_ns\":",
+            "\"prepare_ns\":",
+            "\"prepare_mad_ns\":",
             "\"verify_ns\":",
             "\"verify_mad_ns\":",
             "\"execute_ns\":",
@@ -788,6 +790,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         }
         assert!(line.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"))));
         assert!(line.contains("\"compile_mad_ns\":0"));
+        assert!(line.contains("\"prepare_mad_ns\":0"));
         assert!(line.contains("\"verify_mad_ns\":0"));
         assert!(line.contains("\"execute_mad_ns\":0"));
     }
@@ -801,6 +804,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(text_stdout.contains("schema=quickcoffee.qbench.v1"));
     assert!(text_stdout.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
     assert!(text_stdout.contains("repeat=1"));
+    assert!(text_stdout.contains("prepare_ns="));
+    assert!(text_stdout.contains("prepare_mad_ns=0"));
     assert!(text_stdout.contains("profile_value_allocations="));
     assert!(text_stdout.contains("profile_environment_allocations="));
     let repeated = Command::new(bin("qbench"))
@@ -811,7 +816,11 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(
         String::from_utf8_lossy(&repeated.stdout)
             .lines()
-            .all(|line| line.contains("\"repeat\":3"))
+            .all(|line| {
+                line.contains("\"repeat\":3")
+                    && line.contains("\"prepare_ns\":")
+                    && line.contains("\"prepare_mad_ns\":")
+            })
     );
     let invalid = Command::new(bin("qbench"))
         .args(["--iterations", "0"])
