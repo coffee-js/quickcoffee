@@ -33,7 +33,7 @@
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
-## This is not JavaScript: prototypes, this, eval, and embedded JavaScript do not exist.
+## This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. RFC 0134 adopts class-confined receivers, construction, and inheritance; implementation is pending.
 ## # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 ## Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.

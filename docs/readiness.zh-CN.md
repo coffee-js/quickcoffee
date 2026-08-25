@@ -22,7 +22,7 @@ QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的�
 | 多文件业务领域脚本 | 不可用 | 嵌入宿主已有静态模块图核心；CLI 加载、模块包、图指纹和初始化契约尚未定义。 |
 | I/O、HTTP、任务调度、异步业务 | 不可用 | 不提供异步语法/事件循环；这些能力也不能作为隐式标准库加入。 |
 | 文本处理/协议解析 | 条件可用 | 字符串与集合可处理基础场景；没有正则、JSON、字节序列或流式 API。 |
-| 面向对象业务模型 | 条件可用 | `class` 是无原型工厂；可用 Map 与闭包表达数据和显式方法，但没有继承、`this` 或 `new`。 |
+| 面向对象业务模型 | 规划中 | 当前 `class` 仍是工厂；RFC 0134 已采纳 CoffeeScript 风格构造器、实例/静态方法、class 内 `this`、`new`、`extends` 与 `super`，由 issue #121 实现。全局/自由 `this`、任意函数构造和公开原型能力仍明确禁止。 |
 
 ## 语言规划入口
 
@@ -31,8 +31,9 @@ QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的�
 - [#76](https://github.com/coffee-js/quickcoffee/issues/76)：内存预算与运行时隔离。
 - [#77](https://github.com/coffee-js/quickcoffee/issues/77)：嵌入 API 0.2 与显式宿主能力。
 - [#78](https://github.com/coffee-js/quickcoffee/issues/78)：确定性的业务数据与文本基元。
+- [#121](https://github.com/coffee-js/quickcoffee/issues/121)：CoffeeScript 风格 class、受限接收者、构造与继承。
 
-明确非目标仍是：JavaScript 原型链、`this`、隐式转换、`eval`、反引号 JavaScript 和为了兼容而引入的隐式宿主能力。
+明确非目标仍是：JavaScript 公开原型链、全局/自由 `this`、任意函数构造、隐式转换、`eval`、反引号 JavaScript 和为了兼容而引入的隐式宿主能力。RFC 0134 的 class 内接收者与私有继承链不属于这些全局能力。
 
 ## QuickJS 对照判断
 

@@ -38,7 +38,7 @@ cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原
 Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
 Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统计，不暴露 VM 帧。
 -- 后的参数以普通字符串数组 argv 暴露给程序。
-它不是 JavaScript：没有原型链、this、eval 或内嵌 JavaScript。
+它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；RFC 0134 已采纳仅限 class 内部的接收者、构造与继承，尚待实现。
 # 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
 标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。
 yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。

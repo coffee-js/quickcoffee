@@ -5,7 +5,7 @@
 
 ## 源码形式
 
-UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`、`while`、`for`、函数和工厂类的多语句体；缩进只能使用空格，且同一块必须对齐。圆括号、方括号及花括号内的换行不参与块布局。标识符首字符是 Unicode XID start 或 `_`，其余字符为 XID continue 或 `_`，不做 Unicode 规范化（RFC 0033）。`#` 开始行注释；`### … ###` 是非嵌套块注释（RFC 0032）。禁止反引号 JavaScript 插值形式及所有内嵌 JavaScript。
+UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`、`while`、`for`、函数、当前工厂 class 以及 RFC 0134 的 class 成员体；缩进只能使用空格，且同一块必须对齐。圆括号、方括号及花括号内的换行不参与块布局。标识符首字符是 Unicode XID start 或 `_`，其余字符为 XID continue 或 `_`，不做 Unicode 规范化（RFC 0033）。`#` 开始行注释；`### … ###` 是非嵌套块注释（RFC 0032）。禁止反引号 JavaScript 插值形式及所有内嵌 JavaScript。
 
 ## 值
 
@@ -33,7 +33,7 @@ UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`�
 
 `name = expression` 绑定或更新当前词法环境；顶层执行时该环境即全局环境。名称也支持严格数值前置/后置 `++`、`--`（RFC 0055）。函数调用建立子环境，因此函数内新赋值不泄漏到全局。数组与映射支持严格解构赋值；`_` 是显式忽略位。`if condition then expression else expression` 是表达式，`else` 可省略并产生 `nil`；`unless` 是条件取反的同义结构。后置 `expression if condition` 与 `expression unless condition` 在条件不满足时产生 `nil`。后缀 `value?` 仅检查是否非 nil，保持 Bool 值且不检查未绑定名称（RFC 0038）。`while condition then expression` 重复求值，`until condition then expression` 则重复至条件为真，语句位置的 `expression while condition` / `until condition` 是其后置形式（RFC 0036），`loop body` 则无限重复，三者结果均为 `nil`。数组可用严格切片 `items[start..end]`（含末端）或 `items[start...end]`（不含末端），负端点自末尾计，且端点必须为界内整数（RFC 0037）。数组或字符串可用 `for pattern in iterable [by step] [when condition] then expression` 遍历；字符串按 Unicode 标量产生单字符字符串，第二绑定为标量下标（RFC 0070）。映射可用 `for own key_pattern, value_pattern of map [when condition] then expression` 遍历；表达式也可写成后置推导 `expression for pattern in iterable` 或 `expression for own key_pattern, value_pattern of map`（RFC 0054）。绑定模式严格递归且每轮原子写入（RFC 0044），`by` 只用于数组或字符串，步长一次求值且必须为非零有限整数（RFC 0029、0100），负步长从末项开始；`for` 收集每次体值为新数组，`when` 拒绝的项不收集，`break` 产生已收集前缀，`continue` 不收集当前项（RFC 0042）。`switch`/`when` 选择单一分支；`try`/`catch`/`finally` 与 `throw` 处理 QuickCoffee 运行时错误。`return expression` 仅在函数内结束当前调用并返回其值，裸 return 返回 `nil`；它清理循环并执行沿途 finally（RFC 0028）。
 
-函数为 `(a, b) -> expression` 或无括号普通名称形式 `a, b -> expression`，以创建时的词法环境捕获自由变量；无括号形式不接受默认、rest 或解构参数（RFC 0035）。形参可写为 `name = expression` 取默认值，且默认形参必须在必选形参之后。缺省或传入 `nil` 时，默认式在被调函数内求值；最后一个形参可写成 `rest...` 以接收剩余实参数组。`=>` 作为无 `this` 运行时中的可读同义箭头；两者均不提供 JavaScript 的绑定接收者语义。`do function` 以零实参立即调用函数。没有 rest 时实参不得多于全部形参，也不得少于必选形参。递归函数通过函数自身绑定可用。默认参数细则见 RFC 0021；`for` 见 RFC 0004；无原型工厂类见 RFC 0006；缩进块见 RFC 0009。
+函数为 `(a, b) -> expression` 或无括号普通名称形式 `a, b -> expression`，以创建时的词法环境捕获自由变量；无括号形式不接受默认、rest 或解构参数（RFC 0035）。形参可写为 `name = expression` 取默认值，且默认形参必须在必选形参之后。缺省或传入 `nil` 时，默认式在被调函数内求值；最后一个形参可写成 `rest...` 以接收剩余实参数组。当前实现仍把 `=>` 作为 `->` 的同义箭头。RFC 0134 已修订目标契约：`->` 始终无接收者，`=>` 只在合法 class 接收者上下文中绑定 `this`；顶层和普通函数不能取得全局/自由 `this`。`do function` 以零实参立即调用函数。没有 rest 时实参不得多于全部形参，也不得少于必选形参。递归函数通过函数自身绑定可用。默认参数细则见 RFC 0021；`for` 见 RFC 0004；历史工厂类 RFC 0006 已由 class 接收者与继承 RFC 0134 取代；缩进块见 RFC 0009。
 
 ## 标准库
 

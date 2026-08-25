@@ -19,8 +19,8 @@ QuickCoffee 长期以“受 CoffeeScript 2016 启发但不兼容 JavaScript”�
 
 矩阵必须明确以下兼容性陷阱：
 
-- `=>` 不绑定 `this`，只作为 `->` 的同义箭头；
-- `class` 只定义无原型命名工厂，不提供 `new`、继承或 `super`；
+- 当前实现仍把 `=>` 当作 `->` 同义箭头；RFC 0134 的目标契约只允许它在 class 接收者上下文中绑定 `this`；
+- 当前实现仍是无原型命名工厂；RFC 0134 已采纳 CoffeeScript 风格 class、class 内 `this`、`new`、私有继承与 `super`，并禁止向 class 外泄漏这些能力；
 - 切片是严格不可变操作，不提供省略边界、隐式截断或 splice 赋值；
 - 存在性只围绕 `nil`，未绑定名称仍报错；
 - 模块只由嵌入宿主的 `ModuleLoader` 解析，不隐式访问文件、包或网络；

@@ -40,7 +40,7 @@ Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil proband
 Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
 Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 Argumenta post -- ut series chordarum ordinaria argv praebentur.
-JavaScript non est: catena prototyporum, this, eval, atque JavaScript inclusum desunt.
+JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. RFC 0134 receptores intra classes conclusos, constructionem, et hereditatem recipit; exsecutio adhuc deest.
 # commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
 Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.
 yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
