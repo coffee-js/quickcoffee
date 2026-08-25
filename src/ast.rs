@@ -48,13 +48,15 @@ pub(crate) enum Expr {
     Continue(TokenSpan),
     Return(Option<Box<Expr>>, TokenSpan),
     Function(Vec<Param>, Option<String>, Box<Expr>),
-    BoundFunction(Box<Expr>, TokenSpan),
     Class(String, Option<Box<Expr>>, Vec<ClassMember>),
     Block(Vec<Stmt>),
     Switch(Box<Expr>, Vec<(Vec<Expr>, Expr)>, Option<Box<Expr>>),
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
     Throw(Box<Expr>),
     Do(Box<Expr>),
+    // Keep new variants at the end so existing discriminants and hot match
+    // layouts remain stable across language additions.
+    BoundFunction(Box<Expr>, TokenSpan),
 }
 impl Expr {
     pub(crate) fn unspanned(&self) -> &Self {
