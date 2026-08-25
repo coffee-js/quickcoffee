@@ -31,6 +31,12 @@ jobs:
       CANDIDATE_REF: ${{ github.event.pull_request.head.sha || inputs.candidate_ref || github.sha }}
       BENCHMARK_COMMAND: paired AB/BA qbench --only BASELINE_NAME --json --iterations 2000 --repeat 11; candidate-only workloads measured separately
     steps:
+      - name: Check out report tooling
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+
       - name: Check out candidate
         uses: actions/checkout@v5
         with:
@@ -48,7 +54,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Test comparison policy
-        working-directory: candidate
+        working-directory: tooling
         run: python3 scripts/test_qbench_compare.py
 
       - name: Build baseline qbench
@@ -146,7 +152,7 @@ jobs:
           done <"${artifact_dir}/candidate-only-workloads.txt"
 
       - name: Compare with MAD-aware non-blocking policy
-        working-directory: candidate
+        working-directory: tooling
         shell: bash
         run: |
           set -euo pipefail
