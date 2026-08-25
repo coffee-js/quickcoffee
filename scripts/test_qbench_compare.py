@@ -224,9 +224,9 @@ class QbenchCompareTests(unittest.TestCase):
             self.assertEqual(execute.paired_mad_ns, 100)
             self.assertFalse(execute.alert)
             common = common_mode_summaries(comparisons)["execute"]
-            self.assertEqual(common["ab_median_delta_ratio"], 0.1)
-            self.assertEqual(common["ba_median_delta_ratio"], -0.1)
-            self.assertEqual(common["paired_median_delta_ratio"], 0)
+            self.assertAlmostEqual(common["ab_median_delta_ratio"], 0.1)
+            self.assertAlmostEqual(common["ba_median_delta_ratio"], -0.1)
+            self.assertAlmostEqual(common["paired_median_delta_ratio"], 0)
 
     def test_swapping_aa_labels_preserves_paired_decision(self) -> None:
         def compare(swapped: bool):
@@ -266,8 +266,8 @@ class QbenchCompareTests(unittest.TestCase):
         self.assertFalse(swapped.alert)
         self.assertEqual(original.paired_delta_ns, 0)
         self.assertEqual(swapped.paired_delta_ns, 0)
-        self.assertEqual(original_common["paired_median_delta_ratio"], 0)
-        self.assertEqual(swapped_common["paired_median_delta_ratio"], 0)
+        self.assertAlmostEqual(original_common["paired_median_delta_ratio"], 0)
+        self.assertAlmostEqual(swapped_common["paired_median_delta_ratio"], 0)
 
     def test_paired_alert_requires_both_order_directions(self) -> None:
         def compare(second_candidate: int):
