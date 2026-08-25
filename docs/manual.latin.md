@@ -46,7 +46,7 @@ Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatio
 yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
 ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 Comparationes conectae medium semel servant atque priore falso breviant.
-Bibliotheca communis functiones ordinarias habet: print, len, type, range, str, integer, number, abs, sum, min, max, keys, values, join, split, assert; aggregationes series homogeneas Number vel Integer finitorum accipiunt. Integer 123n RFC 0135 arbitrariae praecisionis est, a Number stricte distinctum et tantum explicite convertitur.
+Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, integer, number, abs, sum, min, max, keys, values, join, split, assert; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest.
 Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.

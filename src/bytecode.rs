@@ -535,6 +535,19 @@ impl FingerprintEncoder {
                     self.value(value);
                 }
             }
+            Value::Error(error) => {
+                self.tag(0x28);
+                self.string(error.code());
+                self.string(error.message());
+                self.value(error.data());
+                match error.cause() {
+                    Some(cause) => {
+                        self.tag(1);
+                        self.value(&Value::Error(Rc::new(cause.clone())));
+                    }
+                    None => self.tag(0),
+                }
+            }
             // Native/opaque functions cannot occur in compiler constants. Keep
             // their fingerprint representation deterministic if a host builds a
             // custom Chunk containing one.

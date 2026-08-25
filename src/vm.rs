@@ -38,6 +38,8 @@ pub enum ValueKind {
     Array,
     /// An immutable string-keyed map.
     Map,
+    /// A sealed structured script error.
+    Error,
     /// An opaque bytecode or native function.
     Function,
 }
@@ -81,6 +83,44 @@ impl From<i64> for Integer {
     }
 }
 
+/// An immutable structured error visible to QuickCoffee scripts and embedding hosts.
+#[derive(Clone)]
+pub struct ScriptError {
+    code: Rc<str>,
+    message: Rc<str>,
+    data: Value,
+    cause: Option<Rc<ScriptError>>,
+    trusted_labels: Vec<DiagnosticLabel>,
+}
+impl ScriptError {
+    /// Returns the stable machine-readable domain code.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+    /// Returns the display-independent human-readable message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+    /// Returns immutable domain data.
+    pub fn data(&self) -> &Value {
+        &self.data
+    }
+    /// Returns the optional structured cause.
+    pub fn cause(&self) -> Option<&ScriptError> {
+        self.cause.as_deref()
+    }
+}
+impl fmt::Debug for ScriptError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScriptError")
+            .field("code", &self.code)
+            .field("message", &self.message)
+            .field("data", &self.data)
+            .field("cause", &self.cause)
+            .finish()
+    }
+}
+
 /// An immutable value crossing the QuickCoffee/host boundary.
 #[derive(Clone)]
 pub enum Value {
@@ -98,6 +138,8 @@ pub enum Value {
     Array(Rc<Vec<Value>>),
     /// An immutable map with string keys.
     Map(Rc<BTreeMap<String, Value>>),
+    /// A sealed structured error.
+    Error(Rc<ScriptError>),
     /// An opaque bytecode or native function.
     Function(Rc<Function>),
 }
@@ -111,6 +153,7 @@ impl fmt::Debug for Value {
             Self::String(x) => write!(f, "{x:?}"),
             Self::Array(x) => f.debug_list().entries(x.iter()).finish(),
             Self::Map(x) => f.debug_map().entries(x.iter()).finish(),
+            Self::Error(error) => write!(f, "error({}): {}", error.code, error.message),
             Self::Function(_) => write!(f, "<function>"),
         }
     }
@@ -143,6 +186,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Self::Error(error) => write!(f, "error({}): {}", error.code, error.message),
             Self::Function(_) => write!(f, "<function>"),
         }
     }
@@ -158,6 +202,7 @@ impl Value {
             Self::String(_) => ValueKind::String,
             Self::Array(_) => ValueKind::Array,
             Self::Map(_) => ValueKind::Map,
+            Self::Error(_) => ValueKind::Error,
             Self::Function(_) => ValueKind::Function,
         }
     }
@@ -234,6 +279,14 @@ impl Value {
     pub fn as_map(&self) -> Option<&BTreeMap<String, Value>> {
         if let Self::Map(values) = self {
             Some(values)
+        } else {
+            None
+        }
+    }
+    /// Returns the structured error, if this value is an Error.
+    pub fn as_error(&self) -> Option<&ScriptError> {
+        if let Self::Error(error) = self {
+            Some(error)
         } else {
             None
         }
@@ -339,6 +392,7 @@ pub struct Error {
     message: String,
     labels: Vec<DiagnosticLabel>,
     resource_limit: Option<ResourceLimit>,
+    script_error: Option<Rc<ScriptError>>,
     verification_site: Option<VerificationSite>,
 }
 #[derive(Debug, Clone, Copy)]
@@ -353,6 +407,7 @@ impl fmt::Debug for Error {
             .field("message", &self.message)
             .field("labels", &self.labels)
             .field("resource_limit", &self.resource_limit)
+            .field("script_error", &self.script_error)
             .finish()
     }
 }
@@ -363,6 +418,7 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            script_error: None,
             verification_site: None,
         }
     }
@@ -372,6 +428,7 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            script_error: None,
             verification_site: None,
         }
     }
@@ -382,6 +439,33 @@ impl Error {
             message: m.into(),
             labels: Vec::new(),
             resource_limit: None,
+            script_error: None,
+            verification_site: None,
+        }
+    }
+    /// Creates a catchable domain error with machine-readable script fields.
+    ///
+    /// Invalid codes or non-business data deterministically become a generic
+    /// runtime error rather than exposing an invalid script Error value.
+    pub fn domain(code: impl Into<String>, message: impl Into<String>, data: Value) -> Self {
+        let code = code.into();
+        let message = message.into();
+        if !valid_error_code(&code) || !valid_error_data(&data, 0) {
+            return Self::runtime("host supplied invalid domain error fields");
+        }
+        let script_error = Rc::new(ScriptError {
+            code: Rc::from(code.as_str()),
+            message: Rc::from(message.as_str()),
+            data,
+            cause: None,
+            trusted_labels: Vec::new(),
+        });
+        Self {
+            kind: ErrorKind::Runtime,
+            message,
+            labels: Vec::new(),
+            resource_limit: None,
+            script_error: Some(script_error),
             verification_site: None,
         }
     }
@@ -391,6 +475,7 @@ impl Error {
             message: message.into(),
             labels: Vec::new(),
             resource_limit: Some(limit),
+            script_error: None,
             verification_site: None,
         }
     }
@@ -419,6 +504,34 @@ impl Error {
     /// Returns the crossed resource boundary for a resource error.
     pub fn resource_limit(&self) -> Option<ResourceLimit> {
         self.resource_limit
+    }
+    /// Returns the structured script/domain error when this Runtime error carries one.
+    pub fn script_error(&self) -> Option<&ScriptError> {
+        self.script_error.as_deref()
+    }
+    fn from_script_error(script_error: Rc<ScriptError>) -> Self {
+        Self {
+            kind: ErrorKind::Runtime,
+            message: script_error.message.to_string(),
+            labels: script_error.trusted_labels.clone(),
+            resource_limit: None,
+            script_error: Some(script_error),
+            verification_site: None,
+        }
+    }
+    fn catch_value(&self) -> Value {
+        if let Some(script_error) = &self.script_error {
+            let mut caught = (**script_error).clone();
+            caught.trusted_labels = self.labels.clone();
+            return Value::Error(Rc::new(caught));
+        }
+        Value::Error(Rc::new(ScriptError {
+            code: Rc::from("runtime"),
+            message: Rc::from(self.message.as_str()),
+            data: Value::Nil,
+            cause: None,
+            trusted_labels: self.labels.clone(),
+        }))
     }
     pub(crate) fn at_line(mut self, line: usize) -> Self {
         self.labels = vec![DiagnosticLabel {
@@ -498,6 +611,16 @@ impl fmt::Display for Error {
                     self.kind, position.line, self.message
                 );
             }
+        }
+        if let Some(script_error) = &self.script_error {
+            if script_error.code.as_ref() == "throw" {
+                return write!(f, "{} error: {}", self.kind, self.message);
+            }
+            return write!(
+                f,
+                "{} error [{}]: {}",
+                self.kind, script_error.code, self.message
+            );
         }
         write!(f, "{} error: {}", self.kind, self.message)
     }
@@ -1176,6 +1299,38 @@ fn array_and_element_allocations(value: &Value) -> u64 {
     }
 }
 
+fn valid_error_code(code: &str) -> bool {
+    code.len() <= 64
+        && code
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+        && code.bytes().skip(1).all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn valid_error_data(value: &Value, depth: usize) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    match value {
+        Value::Nil | Value::Bool(_) | Value::Integer(_) | Value::String(_) => true,
+        Value::Number(value) => value.is_finite(),
+        Value::Array(values) => values
+            .iter()
+            .all(|value| valid_error_data(value, depth + 1)),
+        Value::Map(values) => values
+            .values()
+            .all(|value| valid_error_data(value, depth + 1)),
+        Value::Error(_) | Value::Function(_) => false,
+    }
+}
+
+fn error_cause_depth(error: &ScriptError) -> usize {
+    1 + error.cause.as_deref().map_or(0, error_cause_depth)
+}
+
 impl Default for Context {
     fn default() -> Self {
         Self::new()
@@ -1400,6 +1555,7 @@ impl Context {
                     Value::String(_) => "string",
                     Value::Array(_) => "array",
                     Value::Map(_) => "map",
+                    Value::Error(_) => "error",
                     Value::Function(_) => "function",
                 };
                 Ok(Value::String(Rc::from(n)))
@@ -1481,6 +1637,50 @@ impl Context {
         self.add_native("sum", |xs| aggregate_numeric(xs, "sum", Aggregate::Sum));
         self.add_native("min", |xs| aggregate_numeric(xs, "min", Aggregate::Min));
         self.add_native("max", |xs| aggregate_numeric(xs, "max", Aggregate::Max));
+        self.add_builtin(
+            "error",
+            |xs| {
+                if !(2..=4).contains(&xs.len()) {
+                    return Err(Error::runtime(
+                        "error expects code, message, optional data, and optional cause",
+                    ));
+                }
+                let Value::String(code) = &xs[0] else {
+                    return Err(Error::runtime("error code must be string"));
+                };
+                if !valid_error_code(code) {
+                    return Err(Error::runtime("invalid error code"));
+                }
+                let Value::String(message) = &xs[1] else {
+                    return Err(Error::runtime("error message must be string"));
+                };
+                let data = xs.get(2).cloned().unwrap_or(Value::Nil);
+                if !valid_error_data(&data, 0) {
+                    return Err(Error::runtime(
+                        "error data must be finite immutable business data",
+                    ));
+                }
+                let cause = match xs.get(3) {
+                    None | Some(Value::Nil) => None,
+                    Some(Value::Error(cause)) => Some(cause.clone()),
+                    Some(_) => return Err(Error::runtime("error cause must be error or nil")),
+                };
+                if cause
+                    .as_deref()
+                    .is_some_and(|cause| error_cause_depth(cause) >= 64)
+                {
+                    return Err(Error::runtime("error cause chain is too deep"));
+                }
+                Ok(Value::Error(Rc::new(ScriptError {
+                    code: code.clone(),
+                    message: message.clone(),
+                    data,
+                    cause,
+                    trusted_labels: Vec::new(),
+                })))
+            },
+            one_value_allocation,
+        );
         self.add_builtin(
             "keys",
             |xs| {
@@ -2119,7 +2319,19 @@ impl Vm {
                     }
                     Instruction::Throw => {
                         let value = pop(frame)?;
-                        return Err(Error::runtime(format!("thrown: {value}")));
+                        return Err(match value {
+                            Value::Error(error) => Error::from_script_error(error),
+                            value => {
+                                let message = format!("thrown: {value}");
+                                Error::from_script_error(Rc::new(ScriptError {
+                                    code: Rc::from("throw"),
+                                    message: Rc::from(message.as_str()),
+                                    data: value,
+                                    cause: None,
+                                    trusted_labels: Vec::new(),
+                                }))
+                            }
+                        });
                     }
                     Instruction::IterStartEnumerable => {
                         let step = array_iteration_step(pop(frame)?)?;
@@ -2374,6 +2586,20 @@ impl Vm {
                                     || Error::runtime(format!("map key '{name}' not found")),
                                 )?)
                             }
+                            Value::Error(error) => frame.stack.push(match name.as_str() {
+                                "code" => Value::String(error.code.clone()),
+                                "message" => Value::String(error.message.clone()),
+                                "data" => error.data.clone(),
+                                "cause" => error
+                                    .cause
+                                    .as_ref()
+                                    .map_or(Value::Nil, |cause| Value::Error(cause.clone())),
+                                _ => {
+                                    return Err(Error::runtime(format!(
+                                        "error field '{name}' not found"
+                                    )));
+                                }
+                            }),
                             _ => return Err(Error::runtime("member access expects a map")),
                         }
                     }
@@ -2630,7 +2856,7 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
             frame
                 .env
                 .borrow_mut()
-                .set_local(&handler.name, Value::String(Rc::from(error.to_string())));
+                .set_local(&handler.name, error.catch_value());
             vm.record_value_allocations(1);
             frame.pc = handler.catch_pc;
             return true;
@@ -3065,6 +3291,16 @@ fn equal(a: &Value, b: &Value) -> bool {
         }
         (Value::Map(x), Value::Map(y)) => {
             x.len() == y.len() && x.iter().all(|(k, a)| y.get(k).is_some_and(|b| equal(a, b)))
+        }
+        (Value::Error(x), Value::Error(y)) => {
+            x.code == y.code
+                && x.message == y.message
+                && equal(&x.data, &y.data)
+                && match (&x.cause, &y.cause) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => equal(&Value::Error(x.clone()), &Value::Error(y.clone())),
+                    _ => false,
+                }
         }
         _ => false,
     }

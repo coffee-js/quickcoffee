@@ -536,16 +536,17 @@ fn switch_when_evaluates_its_subject_once_and_has_no_fallthrough() {
 #[test]
 fn try_catch_finally_handles_vm_and_user_errors() {
     assert_eq!(
-        eval("try\n  throw 'bad'\ncatch error\n  error\nfinally\n  cleanup = true").as_str(),
-        Some("runtime error: thrown: bad")
+        eval("try\n  throw 'bad'\ncatch problem\n  [problem.code, problem.message, problem.data]\nfinally\n  cleanup = true")
+            .to_string(),
+        "[throw, thrown: bad, bad]"
     );
     assert_eq!(
         eval("try 1 / 'x' catch error then 'recovered'").as_str(),
         Some("recovered")
     );
     assert_eq!(
-        eval("bad = () -> throw 'nested'\ntry bad() catch error then error").as_str(),
-        Some("runtime error: thrown: nested")
+        eval("bad = () -> throw 'nested'\ntry bad() catch problem then problem.code").as_str(),
+        Some("throw")
     );
     let mut cx = Context::new();
     cx.eval("try 42 catch error then 0 finally cleanup = 7")
@@ -983,11 +984,49 @@ fn host_functions_can_return_structured_runtime_errors() {
     assert_eq!(error.kind(), ErrorKind::Runtime);
     assert_eq!(error.message(), "host failure");
     assert_eq!(
-        cx.eval("try fail() catch error then error")
+        cx.eval("try fail() catch problem then problem.code")
             .unwrap()
             .as_str(),
-        Some("runtime error: host failure")
+        Some("runtime")
     );
+}
+
+#[test]
+fn structured_error_values_expose_sealed_fields_causes_and_rethrow() {
+    let value = eval(
+        "root = error('invoice.missing', 'invoice missing', {id: 42})\nproblem = error('order.invalid', 'order invalid', {order: 7}, root)\n[type(problem), problem.code, problem.message, problem.data.order, problem.cause.code, problem == problem]",
+    );
+    assert_eq!(
+        value.to_string(),
+        "[error, order.invalid, order invalid, 7, invoice.missing, true]"
+    );
+
+    let mut context = Context::new();
+    let error = context
+        .eval_named(
+            "domain.qc",
+            "problem = error('invoice.missing', 'invoice missing', {id: 42})\ntry\n  throw problem\ncatch caught\n  throw caught",
+        )
+        .unwrap_err();
+    let script = error.script_error().unwrap();
+    assert_eq!(script.code(), "invoice.missing");
+    assert_eq!(script.message(), "invoice missing");
+    assert_eq!(script.data().as_map().unwrap()["id"].as_number(), Some(42.));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("domain.qc")
+    );
+    assert_eq!(error.position().unwrap().line, 3);
+
+    for source in [
+        "error('Bad', 'message')",
+        "error('bad', 1)",
+        "error('bad', 'message', -> 1)",
+        "error('bad', 'message', nil, 1)",
+        "error('bad', 'message').missing",
+    ] {
+        assert!(Context::new().eval(source).is_err(), "{source}");
+    }
 }
 #[test]
 fn shared_programs_repeat_without_copying_bytecode() {
@@ -1010,6 +1049,19 @@ fn bytecode_fingerprints_are_stable_and_content_based() {
     assert_eq!(first.fingerprint(), clone.fingerprint());
     assert_ne!(first.fingerprint(), other.fingerprint());
     assert_ne!(first.fingerprint(), 0);
+
+    let error_value = eval("error('invoice.missing', 'missing', {id: 42})");
+    let error_chunk = Chunk {
+        constants: vec![quickcoffee::Constant::Value(error_value)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    };
+    let other_error_value = eval("error('invoice.invalid', 'missing', {id: 42})");
+    let other_error_chunk = Chunk {
+        constants: vec![quickcoffee::Constant::Value(other_error_value)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    };
+    assert_ne!(error_chunk.fingerprint(), other_error_chunk.fingerprint());
+    assert_eq!(error_chunk.fingerprint(), error_chunk.clone().fingerprint());
 }
 #[test]
 fn frontend_pipeline_keeps_representative_bytecode_and_value_golden() {

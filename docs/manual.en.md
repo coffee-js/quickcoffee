@@ -42,9 +42,9 @@ Identifiers use Unicode XID rules; combining marks may continue a name and no no
 yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
 ! is a strict Bool alias for not; != remains strict inequality.
 Chained strict or numeric comparisons keep the middle value once and short-circuit.
-The standard library is ordinary functions: print, len, type, range, str, integer, number, abs, sum, min, max, keys, values, join, split, and assert. Aggregators accept homogeneous finite Number or Integer arrays. RFC 0135's 123n is arbitrary-precision Integer, strictly distinct from Number and convertible only explicitly.
+The standard library is ordinary functions: print, len, type, error, range, str, integer, number, abs, sum, min, max, keys, values, join, split, and assert. error(code, message, data, cause) creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number or Integer arrays.
 switch/when selects one strict-equality branch without fallthrough.
-try/catch/finally handles QuickCoffee runtime errors without JavaScript Error objects.
+try/catch/finally handles sealed QuickCoffee Error values without JavaScript prototypes, stacks, or forgeable source locations.
 Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.
 Ranges may descend too: [3..1] yields [3, 2, 1], while [3...1] yields [3, 2].
 Triple-quoted heredocs preserve newlines: """...""" interpolates and '''...''' remains literal.
@@ -89,7 +89,7 @@ shorthand = 'yes'
 [first, {point: [x, y]}] = [0, {point: [20, 22]}]
 scale = ([left, right], {factor}) -> (left + right) * factor
 add(22) == 42 and "answer=#{add(22)}" == 'answer=42' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((head, y = 2) -> head + y)(40) == 42 and ((head, tail...) -> head + len(tail))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
-try throw 'manual' catch error then error == 'runtime error: thrown: manual'
+try throw 'manual' catch problem then problem.code == 'throw' and problem.data == 'manual'
 by_sum = 0
 for n in [1..9] by 3 then by_sum = by_sum + n
 by_sum == 12

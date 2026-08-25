@@ -1,5 +1,7 @@
 # RFC 0049：宿主回调运行时错误
 
+> RFC 0136 取代 catch 字符串，并增加 `Error::domain`；`Error::runtime` 与未捕获通用 Display 继续兼容。
+
 - 状态：已采纳
 - 依赖：RFC 0002、RFC 0011、RFC 0043
 
