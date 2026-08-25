@@ -977,7 +977,8 @@ impl Parser {
                 | Expr::Call(_, _)
                 | Expr::SoakCall(_, _)
                 | Expr::SoakMember(_, _)
-                | Expr::Function(_, _, _, _, _)
+                | Expr::Function(_, _, _)
+                | Expr::BoundFunction(_)
                 | Expr::Class(_, _, _)
                 | Expr::Do(_)
         )
@@ -1032,8 +1033,8 @@ impl Parser {
                 Ok(Expr::Member(Box::new(Expr::This), name))
             }
             Token::Ident(n) => {
-                if let Some((receiver_bound, arrow_span)) = self.function_arrow() {
-                    return Ok(Expr::Function(
+                if let Some(receiver_bound) = self.function_arrow() {
+                    return Ok(Self::function_expr(
                         vec![Param {
                             pattern: Pattern::Bind(n),
                             default: None,
@@ -1042,7 +1043,6 @@ impl Parser {
                         None,
                         Box::new(self.body_after_arrow()?),
                         receiver_bound,
-                        arrow_span,
                     ));
                 }
                 let after_name = self.at;
@@ -1056,8 +1056,8 @@ impl Parser {
                         }
                     }
                 }
-                if let Some((receiver_bound, arrow_span)) = self.function_arrow() {
-                    return Ok(Expr::Function(
+                if let Some(receiver_bound) = self.function_arrow() {
+                    return Ok(Self::function_expr(
                         names
                             .into_iter()
                             .map(|name| Param {
@@ -1069,7 +1069,6 @@ impl Parser {
                         None,
                         Box::new(self.body_after_arrow()?),
                         receiver_bound,
-                        arrow_span,
                     ));
                 }
                 self.at = after_name;
@@ -1233,7 +1232,11 @@ impl Parser {
             Token::Throw => Ok(Expr::Throw(Box::new(self.expr(0)?))),
             Token::Do => {
                 let function = self.expr(0)?;
-                if let Expr::Function(params, rest, _, _, _) = function.unspanned() {
+                let function_shape = match function.unspanned() {
+                    Expr::BoundFunction(function) => function.unspanned(),
+                    function => function,
+                };
+                if let Expr::Function(params, rest, _) = function_shape {
                     let valid = rest.is_none()
                         && params.iter().all(|param| {
                             param.default.is_none() && matches!(param.pattern, Pattern::Bind(_))
@@ -1248,13 +1251,12 @@ impl Parser {
             }
             Token::LParen => {
                 if let Some(params) = self.lambda_params()? {
-                    let (receiver_bound, arrow_span) = self.expect_arrow()?;
-                    return Ok(Expr::Function(
+                    let receiver_bound = self.expect_arrow()?;
+                    return Ok(Self::function_expr(
                         params.0,
                         params.1,
                         Box::new(self.body_after_arrow()?),
                         receiver_bound,
-                        arrow_span,
                     ));
                 }
                 let x = self.expr(0)?;
@@ -1265,16 +1267,12 @@ impl Parser {
                 vec![],
                 None,
                 Box::new(self.body_after_arrow()?),
-                false,
-                span,
             )),
-            Token::FatArrow => Ok(Expr::Function(
+            Token::FatArrow => Ok(Expr::BoundFunction(Box::new(Expr::Function(
                 vec![],
                 None,
                 Box::new(self.body_after_arrow()?),
-                true,
-                span,
-            )),
+            )))),
             Token::LBracket => {
                 self.eat_collection_separator();
                 if self.eat(&Token::RBracket) {
@@ -1518,17 +1516,29 @@ impl Parser {
             Ok(None)
         }
     }
-    fn function_arrow(&mut self) -> Option<(bool, TokenSpan)> {
+    fn function_expr(
+        params: Vec<Param>,
+        rest: Option<String>,
+        body: Box<Expr>,
+        receiver_bound: bool,
+    ) -> Expr {
+        let function = Expr::Function(params, rest, body);
+        if receiver_bound {
+            Expr::BoundFunction(Box::new(function))
+        } else {
+            function
+        }
+    }
+    fn function_arrow(&mut self) -> Option<bool> {
         let receiver_bound = match self.peek() {
             Token::Arrow => false,
             Token::FatArrow => true,
             _ => return None,
         };
-        let span = self.spans[self.at];
         self.at += 1;
-        Some((receiver_bound, span))
+        Some(receiver_bound)
     }
-    fn expect_arrow(&mut self) -> Result<(bool, TokenSpan), Error> {
+    fn expect_arrow(&mut self) -> Result<bool, Error> {
         self.function_arrow().ok_or_else(|| {
             self.parse_error(format!("expected function arrow, found {:?}", self.peek()))
         })

@@ -1024,28 +1024,29 @@ impl Compiler {
                 }
                 self.emit(Instruction::Return);
             }
-            Expr::Function(params, rest, body, receiver_bound, arrow_span) => {
-                if *receiver_bound {
-                    if !self.receiver_context {
-                        return Err(Error::parse(
-                            "receiver-binding => is valid only in a class receiver context",
-                        )
-                        .at_span(arrow_span.into_source_span()));
-                    }
-                    self.function_inner(
-                        params,
-                        rest.as_ref(),
-                        body,
-                        FunctionContext {
-                            receiver: true,
-                            receiver_bound: true,
-                            capture_receiver: true,
-                            ..Default::default()
-                        },
-                    )?;
-                } else {
-                    self.function(params, rest.as_ref(), body)?;
+            Expr::Function(params, rest, body) => {
+                self.function(params, rest.as_ref(), body)?;
+            }
+            Expr::BoundFunction(function) => {
+                if !self.receiver_context {
+                    return Err(self.parse_error(
+                        "receiver-binding => is valid only in a class receiver context",
+                    ));
                 }
+                let Expr::Function(params, rest, body) = function.unspanned() else {
+                    return Err(Error::verify("bound function wrapper has no function"));
+                };
+                self.function_inner(
+                    params,
+                    rest.as_ref(),
+                    body,
+                    FunctionContext {
+                        receiver: true,
+                        receiver_bound: true,
+                        capture_receiver: true,
+                        ..Default::default()
+                    },
+                )?;
             }
             Expr::Class(name, parent, members) => {
                 self.class(name, parent.as_deref(), members)?;
@@ -1150,13 +1151,25 @@ impl Compiler {
             Expr::Do(function) => {
                 self.expr(function)?;
                 let forwarded = match function.unspanned() {
-                    Expr::Function(params, rest, _, _, _) if rest.is_none() => params
+                    Expr::Function(params, rest, _) if rest.is_none() => params
                         .iter()
                         .map(|param| match &param.pattern {
                             AstPattern::Bind(name) if param.default.is_none() => Some(name.clone()),
                             _ => None,
                         })
                         .collect::<Option<Vec<_>>>(),
+                    Expr::BoundFunction(function) => match function.unspanned() {
+                        Expr::Function(params, rest, _) if rest.is_none() => params
+                            .iter()
+                            .map(|param| match &param.pattern {
+                                AstPattern::Bind(name) if param.default.is_none() => {
+                                    Some(name.clone())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Option<Vec<_>>>(),
+                        _ => Some(vec![]),
+                    },
                     _ => Some(vec![]),
                 };
                 let names = forwarded.ok_or_else(|| {
