@@ -124,6 +124,8 @@ issue #100 的快帧已经把当前局部值放入私有槽位，但仍为每次
 
 `.github/workflows/performance.yml` 在 pull request 与手工触发时，把 base 与 candidate 分别检出并在同一个 Ubuntu runner、同一个 stable Rust 工具链上顺序构建。candidate 不得删除 base 已有的 qbench 负载；新增负载会单独验证并保存，但不伪造 base 对照。
 
+报告控制脚本单独从触发 workflow 的 revision 检出，不从被测 candidate revision 读取；因此手工指定尚未包含新版比较器的历史 base/candidate commit 时，仍使用当前配对 schema 和策略完成校准，而两个被测 qbench 二进制保持来自显式 refs。
+
 issue #116 把每个共有负载的采集从单一方向升级为 ABBA 或 BAAB：同一对 release 二进制各运行两次 `--only NAME --json --iterations 2000 --repeat 11`，形成一组 base→candidate 与一组 candidate→base。`quickcoffee.qbench-ordered.v1` JSONL wrapper 为每次原始 qbench 记录保留全局 `sequence`、`pair_id` 与 `side`；分 side 的原始 runs、candidate-only runs、负载列表和 metadata 也一并保存。
 
 `scripts/qbench_compare.py` 要求每个负载恰好包含一组 AB 与一组 BA、序号连续、pair 完整且迭代数/样本数/期望值一致。每个 phase 先分别计算两组 candidate-base 效应，再以配对中位数作为审阅效应。只有聚合效应以及 AB、BA 两个方向各自都超过 `max(5% × baseline, 3 × (base MAD + candidate MAD), 0.1 ms)` 才产生 warning；配对差值 MAD、AB/BA 全局中位数、未配对 side 中位数及正向负载数用于诊断，不从单项结果中扣除，因此不会隐藏真实的全局回退。
