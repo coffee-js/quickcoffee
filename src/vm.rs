@@ -1556,8 +1556,6 @@ enum FunctionKind {
         required: usize,
         rest: Option<String>,
         receiver: bool,
-        receiver_bound: bool,
-        captured_receiver: Option<Value>,
         chunk: Rc<Chunk>,
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
@@ -1580,6 +1578,12 @@ enum FunctionKind {
     UnboundMethod {
         owner: Rc<str>,
         name: Rc<str>,
+    },
+    // Keep uncommon receiver binding out of the ordinary bytecode function
+    // layout and call path.
+    ReceiverBound {
+        function: Rc<Function>,
+        captured_receiver: Option<Value>,
     },
 }
 #[derive(Clone)]
@@ -4237,21 +4241,31 @@ impl Vm {
                                 .and_then(|slots| {
                                     slots.fast_parameter_slots(params, *required, rest.as_deref())
                                 });
-                            frame.stack.push(Value::Function(Rc::new(Function {
+                            let function = Rc::new(Function {
                                 inner: FunctionKind::Bytecode {
                                     params: params.clone(),
                                     required: *required,
                                     rest: rest.clone(),
                                     receiver: *receiver,
-                                    receiver_bound: *receiver_bound,
-                                    captured_receiver,
                                     chunk: chunk.clone(),
                                     debug_info,
                                     execution_plan: frame.execution_plan.clone(),
                                     fast_parameters,
                                     env: frame.env.clone(),
                                 },
-                            })));
+                            });
+                            let function = if *receiver_bound {
+                                Rc::new(Function {
+                                    inner: FunctionKind::ReceiverBound {
+                                        function,
+                                        captured_receiver,
+                                    },
+                                })
+                            } else {
+                                debug_assert!(captured_receiver.is_none());
+                                function
+                            };
+                            frame.stack.push(Value::Function(function));
                             self.record_value_allocations(1);
                         }
                         _ => return Err(Error::runtime("value used as function template")),
@@ -4424,13 +4438,7 @@ fn bound_method(function: Rc<Function>, receiver: Value, context: MethodContext)
 }
 
 fn receiver_bound(function: &Function) -> bool {
-    matches!(
-        function.inner,
-        FunctionKind::Bytecode {
-            receiver_bound: true,
-            ..
-        }
-    )
+    matches!(function.inner, FunctionKind::ReceiverBound { .. })
 }
 
 fn find_constructor(class: &Rc<Class>) -> Option<(Rc<Class>, Rc<Function>)> {
@@ -4452,6 +4460,7 @@ fn function_uses_super(function: &Function) -> bool {
                 Instruction::SuperCall(_) | Instruction::SuperCallSpread
             )
         }),
+        FunctionKind::ReceiverBound { function, .. } => function_uses_super(function),
         _ => false,
     }
 }
@@ -4661,7 +4670,6 @@ fn call_with_context(
                 required,
                 rest,
                 receiver,
-                captured_receiver,
                 chunk,
                 debug_info,
                 execution_plan,
@@ -4669,13 +4677,6 @@ fn call_with_context(
                 env: captured,
                 ..
             } => {
-                let bound_args = captured_receiver.as_ref().map(|receiver| {
-                    let mut bound_args = Vec::with_capacity(args.len() + 1);
-                    bound_args.push(receiver.clone());
-                    bound_args.extend_from_slice(args);
-                    bound_args
-                });
-                let args = bound_args.as_deref().unwrap_or(args);
                 if vm.call_depth >= vm.max_call_depth {
                     return Err(Error::resource(
                         ResourceLimit::CallDepth,
@@ -4788,6 +4789,31 @@ fn call_with_context(
                 });
                 vm.call_depth += 1;
                 vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
+            }
+            FunctionKind::ReceiverBound {
+                function,
+                captured_receiver,
+            } => {
+                if let Some(receiver) = captured_receiver {
+                    let mut bound_args = Vec::with_capacity(args.len() + 1);
+                    bound_args.push(receiver.clone());
+                    bound_args.extend_from_slice(args);
+                    call_with_context(
+                        vm,
+                        frames,
+                        Value::Function(function.clone()),
+                        &bound_args,
+                        method_context,
+                    )?;
+                } else {
+                    call_with_context(
+                        vm,
+                        frames,
+                        Value::Function(function.clone()),
+                        args,
+                        method_context,
+                    )?;
+                }
             }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
