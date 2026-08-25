@@ -114,6 +114,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "8",
     },
     Workload {
+        name: "member-lookup-loop",
+        source: "record = {alpha: 1, beta: 2, gamma: 3, delta: 4}\nsum = 0\ni = 0\nwhile i < 100\n  sum += record.alpha + record.beta + record.gamma + record.delta\n  i++\nsum",
+        expected: "1000",
+    },
+    Workload {
         name: "negative-indexing",
         source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
         expected: "31",
