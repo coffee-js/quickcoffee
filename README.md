@@ -55,7 +55,7 @@ cargo run --bin qbench -- --version
 
 `qbench --compare-qjs` 的 `quickcoffee_startup_*` / `quickjs_startup_*`、`*_compile_*` 与 `*_hot_*` 分别报告启动、编译和预编译热执行；既有 `*_cli_*` 继续表示端到端子进程总耗时。各阶段均输出中位数与 MAD，正式报告宜使用 `--repeat 11`。
 
-Pull request 的 `Performance report` workflow 会在同一 runner 上交错运行 base/head 的完整 11 样本 qbench，保存原始 JSONL 与机器/工具链元数据，并用 5% 相对下限、3 倍组合 MAD 和 0.1 ms 绝对下限生成非阻塞 warning。该报告是 review 信号，不是跨机器或发布阻塞阈值；比较策略及本地命令见 [PERFORMANCE.md](PERFORMANCE.md#issue-107-同-runner-非阻塞回归报告)。
+Pull request 的 `Performance report` workflow 会在同一 runner 上按 ABBA/BAAB 为每个共有负载运行两组 base/head 完整 11 样本 qbench，保存带顺序与 pair 标识的原始 JSONL 和机器/工具链元数据。只有两个运行方向都越过 5% 相对下限、3 倍组合 MAD 与 0.1 ms 绝对下限时才生成非阻塞 warning；全局 common-mode 只报告而不从单项效应中扣除。该报告是 review 信号，不是跨机器或发布阻塞阈值；比较策略及本地命令见 [PERFORMANCE.md](PERFORMANCE.md#issue-107-同-runner-非阻塞回归报告)。
 
 `qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个成功执行或运行时失败的非空输入行输出统计，解析错误不生成新记录。
 
