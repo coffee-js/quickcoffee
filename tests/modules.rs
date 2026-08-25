@@ -104,6 +104,39 @@ fn runtime_errors_in_dependency_functions_keep_the_dependency_name() {
 }
 
 #[test]
+fn modules_preserve_structured_error_values_and_trusted_labels() {
+    let main = Engine::new()
+        .compile_module(
+            "main",
+            "import { fail } from 'dependency'\nexport code = try fail() catch problem then problem.code",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert(
+        "dependency",
+        "fail = -> throw error('dependency.failed', 'failed', {retry: false})\nexport { fail }",
+    );
+    let exports = Context::new().run_module(&main, &loader).unwrap();
+    assert_eq!(
+        exports.get("code").and_then(Value::as_str),
+        Some("dependency.failed")
+    );
+
+    let uncaught = Engine::new()
+        .compile_module(
+            "uncaught",
+            "import { fail } from 'dependency'\nexport result = fail()",
+        )
+        .unwrap();
+    let error = Context::new().run_module(&uncaught, &loader).unwrap_err();
+    assert_eq!(error.script_error().unwrap().code(), "dependency.failed");
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("dependency")
+    );
+}
+
+#[test]
 fn module_cycles_are_rejected_and_resources_cover_dependencies() {
     let engine = Engine::new();
     let main = engine

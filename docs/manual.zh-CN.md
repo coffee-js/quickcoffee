@@ -44,7 +44,7 @@ Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统
 yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
 ! 是严格 Bool 的 not 别名；!= 仍为严格不等。
 严格或数值比较可成链，保留中间值且前段失败会短路。
-标准库皆为普通函数：print、len、type、range、str、integer、number、abs、sum、min、max、keys、values、join、split 与 assert；聚合只收同质的有限 Number 或 Integer 数组。RFC 0135 的 123n 是任意精度 Integer，与 Number 严格分型且仅显式转换。
+标准库皆为普通函数：print、len、type、error、range、str、integer、number、abs、sum、min、max、keys、values、join、split 与 assert；error(code, message, data, cause) 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。
 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
 映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
 数组与 Unicode 字符串支持负索引，-1 取末项。

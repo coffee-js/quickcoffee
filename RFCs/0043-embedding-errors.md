@@ -1,5 +1,7 @@
 # RFC 0043：嵌入方结构化错误
 
+> RFC 0136 将可捕获 Runtime 错误升级为结构化 Error 值；本 RFC 的宿主 ErrorKind/message 与通用 Display 契约继续有效。
+
 - 状态：已采纳
 - 依赖：RFC 0002、RFC 0041
 

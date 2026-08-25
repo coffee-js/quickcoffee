@@ -75,6 +75,20 @@ fn json_value(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        quickcoffee::ValueKind::Error => {
+            let error = value.as_error().unwrap();
+            let cause = error.cause().map_or_else(
+                || "null".to_owned(),
+                |cause| json_value(&Value::Error(std::rc::Rc::new(cause.clone()))),
+            );
+            format!(
+                "{{\"$quickcoffee\":\"error\",\"code\":\"{}\",\"message\":\"{}\",\"data\":{},\"cause\":{}}}",
+                json_escape(error.code()),
+                json_escape(error.message()),
+                json_value(error.data()),
+                cause
+            )
+        }
         quickcoffee::ValueKind::Function => "{\"$quickcoffee\":\"function\"}".to_owned(),
     }
 }
@@ -90,8 +104,22 @@ fn json_error(error: &Error) -> String {
         .map_or_else(String::new, |source_name| {
             format!(",\"source\":\"{}\"", json_escape(source_name))
         });
+    let domain = error
+        .script_error()
+        .map_or_else(String::new, |script_error| {
+            let cause = script_error.cause().map_or_else(
+                || "null".to_owned(),
+                |cause| json_value(&Value::Error(std::rc::Rc::new(cause.clone()))),
+            );
+            format!(
+                ",\"code\":\"{}\",\"data\":{},\"cause\":{}",
+                json_escape(script_error.code()),
+                json_value(script_error.data()),
+                cause
+            )
+        });
     format!(
-        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\"{source},\"line\":{line}}}",
+        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\"{domain}{source},\"line\":{line}}}",
         error.kind(),
         json_escape(error.message())
     )

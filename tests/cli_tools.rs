@@ -620,6 +620,34 @@ fn qcoffee_json_reports_values_and_structured_errors() {
         "{\"ok\":true,\"value\":{\"$quickcoffee\":\"function\"}}\n"
     );
 
+    let structured_error = Command::new(bin("qcoffee"))
+        .args([
+            "--json",
+            "-e",
+            "error('invoice.missing', 'missing', {id: 42})",
+        ])
+        .output()
+        .unwrap();
+    assert!(structured_error.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&structured_error.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"error\",\"code\":\"invoice.missing\",\"message\":\"missing\",\"data\":{\"id\":42},\"cause\":null}}\n"
+    );
+
+    let uncaught_domain = Command::new(bin("qcoffee"))
+        .args([
+            "--json",
+            "-e",
+            "throw error('invoice.missing', 'missing', {id: 42})",
+        ])
+        .output()
+        .unwrap();
+    assert!(!uncaught_domain.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&uncaught_domain.stdout),
+        "{\"ok\":false,\"kind\":\"runtime\",\"message\":\"missing\",\"code\":\"invoice.missing\",\"data\":{\"id\":42},\"cause\":null,\"line\":1}\n"
+    );
+
     let nil = Command::new(bin("qcoffee"))
         .args(["--json", "-e", "nil"])
         .output()

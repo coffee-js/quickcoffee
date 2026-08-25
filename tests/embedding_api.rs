@@ -184,6 +184,36 @@ fn public_values_and_native_errors_are_structured() {
 }
 
 #[test]
+fn host_domain_errors_cross_catch_and_embedding_boundaries() {
+    let mut context = Context::new();
+    context.add_native("charge", |_| {
+        Err(Error::domain(
+            "payment.declined",
+            "card declined",
+            Value::map([("retryable", Value::from(false))]),
+        ))
+    });
+    let caught = context
+        .eval("try charge() catch problem then [problem.code, problem.data.retryable]")
+        .unwrap();
+    assert_eq!(caught.to_string(), "[payment.declined, false]");
+
+    let error = context.eval("charge()").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "card declined");
+    let script = error.script_error().unwrap();
+    assert_eq!(script.code(), "payment.declined");
+    assert_eq!(
+        script.data().as_map().unwrap()["retryable"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        error.to_string(),
+        "runtime error [payment.declined]: card declined"
+    );
+}
+
+#[test]
 fn source_diagnostics_expose_primary_labels_and_precise_columns() {
     let error = Engine::new().compile("value = 1\n@").unwrap_err();
     let position = error.position().expect("parse error has a position");
