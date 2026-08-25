@@ -494,7 +494,9 @@ impl JsonEncoder {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_JSON_DEPTH, MAX_JSON_INPUT_BYTES, encode_json, parse_json};
+    use super::{
+        MAX_JSON_DEPTH, MAX_JSON_INPUT_BYTES, MAX_JSON_OUTPUT_BYTES, encode_json, parse_json,
+    };
     use crate::Value;
 
     #[test]
@@ -581,7 +583,7 @@ mod tests {
                 .contains("input exceeds")
         );
         assert!(
-            encode_json(&Value::from("x".repeat(MAX_JSON_INPUT_BYTES)))
+            encode_json(&Value::from("x".repeat(MAX_JSON_OUTPUT_BYTES)))
                 .unwrap_err()
                 .to_string()
                 .contains("output exceeds")
