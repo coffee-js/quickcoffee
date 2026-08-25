@@ -10,6 +10,7 @@ mod lexer;
 mod lowering;
 mod module;
 mod parser;
+mod resource;
 mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
@@ -17,10 +18,11 @@ pub use module::{
     MemoryModuleLoader, Module, ModuleExports, ModuleLoader, ModuleSource,
     RestrictedFileModuleLoader,
 };
+pub use resource::{ResourceLimit, ResourceLimits};
 pub use vm::{
     CancellationToken, Context, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
-    ErrorKind, ExecutionStats, Function, Integer, NativeFunction, Program, ResourceLimit,
-    ResourceLimits, ScriptError, SourcePosition, SourceSpan, Value, ValueKind,
+    ErrorKind, ExecutionStats, Function, Integer, NativeFunction, Program, ScriptError,
+    SourcePosition, SourceSpan, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.
