@@ -490,6 +490,7 @@ type Env = Rc<RefCell<Environment>>;
 struct Environment {
     indices: BTreeMap<Rc<str>, usize>,
     slots: Vec<(Rc<str>, Value)>,
+    initialized: Vec<bool>,
     parent: Option<Env>,
 }
 // Pattern binding is atomic, so both the name index and its stable slots must
@@ -498,6 +499,7 @@ struct Environment {
 struct EnvironmentSnapshot {
     indices: BTreeMap<Rc<str>, usize>,
     slots: Vec<(Rc<str>, Value)>,
+    initialized: Vec<bool>,
 }
 impl Environment {
     fn get_local(&self, name: &str) -> Option<Value> {
@@ -517,15 +519,67 @@ impl Environment {
             .map(|(_, value)| value.clone())
     }
 
+    fn get_shared_cached(&self, name: &str, slot: usize) -> Option<Value> {
+        self.initialized
+            .get(slot)
+            .copied()
+            .unwrap_or(true)
+            .then_some(())?;
+        self.get_cached(name, slot)
+    }
+
+    fn get_resolved(&self, slot: usize) -> Option<Option<Value>> {
+        let (_, value) = self.slots.get(slot)?;
+        Some(
+            self.initialized
+                .get(slot)
+                .copied()
+                .unwrap_or(true)
+                .then(|| value.clone()),
+        )
+    }
+
+    fn set_resolved(&mut self, slot: usize, value: Value) -> Result<(), Value> {
+        if slot >= self.slots.len() {
+            return Err(value);
+        }
+        if let Some(initialized) = self.initialized.get_mut(slot) {
+            if !*initialized {
+                *initialized = true;
+                let name = self.slots[slot].0.clone();
+                self.indices.insert(name, slot);
+            }
+        }
+        self.slots[slot].1 = value;
+        Ok(())
+    }
+
     fn set_local(&mut self, name: &str, value: Value) -> usize {
         if let Some(slot) = self.indices.get(name).copied() {
             self.slots[slot].1 = value;
             return slot;
         }
+        if !self.initialized.is_empty() {
+            if let Some(slot) = self
+                .slots
+                .iter()
+                .enumerate()
+                .position(|(slot, (stored, _))| !self.initialized[slot] && stored.as_ref() == name)
+            {
+                self.initialized[slot] = true;
+                let name = self.slots[slot].0.clone();
+                self.indices.insert(name, slot);
+                self.slots[slot].1 = value;
+                return slot;
+            }
+        }
         let slot = self.slots.len();
         let name: Rc<str> = Rc::from(name);
         self.indices.insert(name.clone(), slot);
         self.slots.push((name, value));
+        if !self.initialized.is_empty() {
+            self.initialized.push(true);
+        }
         slot
     }
 
@@ -539,23 +593,58 @@ impl Environment {
         }
     }
 
+    fn set_shared_cached(&mut self, name: &str, slot: usize, value: Value) -> Result<(), Value> {
+        if self
+            .slots
+            .get(slot)
+            .is_none_or(|(stored, _)| stored.as_ref() != name)
+        {
+            return Err(value);
+        }
+        if let Some(initialized) = self.initialized.get_mut(slot) {
+            if !*initialized {
+                *initialized = true;
+                let name = self.slots[slot].0.clone();
+                self.indices.insert(name, slot);
+            }
+        }
+        self.slots[slot].1 = value;
+        Ok(())
+    }
+
     fn snapshot(&self) -> EnvironmentSnapshot {
         EnvironmentSnapshot {
             indices: self.indices.clone(),
             slots: self.slots.clone(),
+            initialized: self.initialized.clone(),
         }
     }
 
     fn restore(&mut self, snapshot: EnvironmentSnapshot) {
         self.indices = snapshot.indices;
         self.slots = snapshot.slots;
+        self.initialized = snapshot.initialized;
     }
 }
 fn env(parent: Option<Env>) -> Env {
     Rc::new(RefCell::new(Environment {
         indices: BTreeMap::new(),
         slots: vec![],
+        initialized: vec![],
         parent,
+    }))
+}
+fn env_with_unset_slots(parent: Env, names: &[Rc<str>]) -> Env {
+    let slots = names
+        .iter()
+        .cloned()
+        .map(|name| (name, Value::Nil))
+        .collect();
+    Rc::new(RefCell::new(Environment {
+        indices: BTreeMap::new(),
+        slots,
+        initialized: vec![false; names.len()],
+        parent: Some(parent),
     }))
 }
 fn lookup(e: &Env, n: &str) -> Option<Value> {
@@ -593,6 +682,7 @@ struct ChunkBindingSlots {
     local_names: Vec<Rc<str>>,
     local_by_pc: Vec<Option<usize>>,
     isolated_frame: bool,
+    shared_environment: bool,
     // Unresolved/global names retain the guarded hint path because Programs
     // are shared across Contexts with independently ordered environments.
     cached_by_pc: Vec<Cell<Option<usize>>>,
@@ -680,6 +770,10 @@ impl ProgramExecutionPlan {
         // functions carry the environment captured where they were created,
         // and native functions receive values only. Keep spread calls out of
         // this first extension while their argument carrier is investigated.
+        let shared_environment = chunk
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::MakeFunction(_)));
         let isolated_frame = !chunk.code.iter().any(|instruction| {
             matches!(
                 instruction,
@@ -697,6 +791,7 @@ impl ProgramExecutionPlan {
                 local_names,
                 local_by_pc,
                 isolated_frame,
+                shared_environment,
                 cached_by_pc: (0..chunk.code.len()).map(|_| Cell::new(None)).collect(),
             }),
         );
@@ -1404,15 +1499,21 @@ enum FrameBindings {
         slots: Rc<ChunkBindingSlots>,
         locals: Vec<Option<Value>>,
     },
+    Shared(Rc<ChunkBindingSlots>),
 }
-fn lookup_environment(
+fn lookup_environment<const SHARED: bool>(
     environment: &Env,
     cached: Option<&Cell<Option<usize>>>,
     name: &str,
 ) -> Option<Value> {
     let environment = environment.borrow();
     if let Some(slot) = cached.and_then(Cell::get) {
-        if let Some(value) = environment.get_cached(name, slot) {
+        let value = if SHARED {
+            environment.get_shared_cached(name, slot)
+        } else {
+            environment.get_cached(name, slot)
+        };
+        if let Some(value) = value {
             return Some(value);
         }
     }
@@ -1426,7 +1527,7 @@ fn lookup_environment(
     drop(environment);
     parent.and_then(|parent| lookup(&parent, name))
 }
-fn store_environment(
+fn store_environment<const SHARED: bool>(
     environment: &Env,
     cached: Option<&Cell<Option<usize>>>,
     name: &str,
@@ -1434,7 +1535,12 @@ fn store_environment(
 ) {
     let mut environment = environment.borrow_mut();
     if let Some(slot) = cached.and_then(Cell::get) {
-        match environment.set_cached(name, slot, value) {
+        let result = if SHARED {
+            environment.set_shared_cached(name, slot, value)
+        } else {
+            environment.set_cached(name, slot, value)
+        };
+        match result {
             Ok(()) => return,
             Err(value) => {
                 let slot = environment.set_local(name, value);
@@ -1460,12 +1566,29 @@ fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
                 let parent = frame.env.borrow().parent.clone();
                 return parent.and_then(|parent| lookup(&parent, name));
             }
-            lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
+            // An elided fast frame may point directly at a shared captured
+            // environment whose preallocated slot is still unset.
+            lookup_environment::<true>(&frame.env, slots.cached_by_pc.get(pc), name)
         }
         FrameBindings::Guarded(slots) => {
-            lookup_environment(&frame.env, slots.cached_by_pc.get(pc), name)
+            lookup_environment::<false>(&frame.env, slots.cached_by_pc.get(pc), name)
         }
-        FrameBindings::Raw => lookup_environment(&frame.env, None, name),
+        FrameBindings::Shared(slots) => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                let environment = frame.env.borrow();
+                match environment.get_resolved(slot) {
+                    Some(Some(value)) => return Some(value),
+                    Some(None) => {
+                        let parent = environment.parent.clone();
+                        drop(environment);
+                        return parent.and_then(|parent| lookup(&parent, name));
+                    }
+                    None => drop(environment),
+                }
+            }
+            lookup_environment::<true>(&frame.env, slots.cached_by_pc.get(pc), name)
+        }
+        FrameBindings::Raw => lookup_environment::<false>(&frame.env, None, name),
     }
 }
 fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
@@ -1475,12 +1598,21 @@ fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
                 locals[slot] = Some(value);
                 return;
             }
-            store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
+            store_environment::<true>(&frame.env, slots.cached_by_pc.get(pc), name, value);
         }
         FrameBindings::Guarded(slots) => {
-            store_environment(&frame.env, slots.cached_by_pc.get(pc), name, value);
+            store_environment::<false>(&frame.env, slots.cached_by_pc.get(pc), name, value);
         }
-        FrameBindings::Raw => store_environment(&frame.env, None, name, value),
+        FrameBindings::Shared(slots) => {
+            if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                if let Err(value) = frame.env.borrow_mut().set_resolved(slot, value) {
+                    store_environment::<true>(&frame.env, slots.cached_by_pc.get(pc), name, value);
+                }
+                return;
+            }
+            store_environment::<true>(&frame.env, slots.cached_by_pc.get(pc), name, value);
+        }
+        FrameBindings::Raw => store_environment::<false>(&frame.env, None, name, value),
     }
 }
 struct Handler {
@@ -2311,8 +2443,20 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 let environment_elidable = fast_locals
                     .as_ref()
                     .is_some_and(|locals| locals.iter().all(Option::is_some));
+                let shared_environment = fast_locals.is_none()
+                    && binding_slots
+                        .as_ref()
+                        .is_some_and(|slots| slots.shared_environment);
                 let local = if environment_elidable {
                     captured.clone()
+                } else if shared_environment {
+                    env_with_unset_slots(
+                        captured.clone(),
+                        &binding_slots
+                            .as_ref()
+                            .expect("shared environments require binding slots")
+                            .local_names,
+                    )
                 } else {
                     env(Some(captured.clone()))
                 };
@@ -2350,6 +2494,7 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 }
                 let bindings = match (binding_slots, fast_locals) {
                     (Some(slots), Some(locals)) => FrameBindings::Fast { slots, locals },
+                    (Some(slots), None) if slots.shared_environment => FrameBindings::Shared(slots),
                     (Some(slots), None) => FrameBindings::Guarded(slots),
                     (None, None) => FrameBindings::Raw,
                     (None, Some(_)) => unreachable!("fast locals require a binding plan"),
@@ -2961,6 +3106,86 @@ mod tests {
     }
 
     #[test]
+    fn shared_environment_slots_preserve_closure_fallback_sharing_and_rollback() {
+        let cases = [
+            (
+                "make = ->\n  value = 1\n  read = -> value\n  value = 2\n  read\nmake()()",
+                "2",
+                1_000,
+            ),
+            (
+                "value = 40\nmake = ->\n  read = -> value\n  before = read()\n  value = 2\n  [before, read()]\nmake()",
+                "[40, 2]",
+                1_000,
+            ),
+            (
+                "value = 40\nmake = (assign) ->\n  read = -> value\n  if assign\n    value = 2\n    return read()\n  read()\n[make(true), make(false)]",
+                "[2, 40]",
+                1_000,
+            ),
+            (
+                "make = ->\n  value = 1\n  left = -> value\n  right = -> value\n  value = 3\n  [left, right]\nreaders = make()\n[readers[0](), readers[1]()]",
+                "[3, 3]",
+                1_000,
+            ),
+            (
+                "local = 40\nmake = ->\n  read = -> local\n  try\n    [local, missing] = [1]\n  catch error\n    read()\nmake()",
+                "40",
+                1_000,
+            ),
+        ];
+        for (source, expected, fuel) in cases {
+            assert_cached_and_reference(source, fuel);
+            assert_eq!(Context::new().eval(source).unwrap().to_string(), expected);
+        }
+
+        assert_cached_and_reference(
+            "make = ->\n  value = 1\n  fail = -> missing + value\n  fail\nmake()()",
+            1_000,
+        );
+        assert_cached_and_reference(
+            "make = (limit) ->\n  value = 0\n  read = -> value\n  while value < limit then value++\n  read\nmake(1000)()",
+            50,
+        );
+
+        let program = Engine::new()
+            .compile_program(
+                "make = ->\n  value = 0\n  read = -> value\n  value++\n  read\nmake()()",
+            )
+            .unwrap();
+        let Constant::Function { chunk, .. } = program
+            .0
+            .chunk
+            .constants
+            .iter()
+            .find(|constant| {
+                matches!(
+                    constant,
+                    Constant::Function { chunk, .. }
+                        if chunk.code.iter().any(|instruction| matches!(instruction, Instruction::MakeFunction(_)))
+                )
+            })
+            .expect("capturing function template")
+        else {
+            unreachable!("filtered to function constants")
+        };
+        let slots = program
+            .0
+            .execution_plan
+            .as_ref()
+            .and_then(|plan| plan.slots(chunk))
+            .unwrap();
+        assert!(!slots.isolated_frame);
+        assert!(slots.shared_environment);
+        assert!(
+            slots
+                .local_names
+                .iter()
+                .any(|name| name.as_ref() == "value")
+        );
+    }
+
+    #[test]
     fn binding_slots_preserve_errors_labels_fuel_and_raw_chunks() {
         assert_cached_and_reference("known = 1\nknown + missing", 100);
         assert_cached_and_reference("i = 0\nloop\n  i++", 50);
@@ -3001,6 +3226,32 @@ mod tests {
         assert_eq!(optimized.last_execution(), reference.last_execution());
         assert_eq!(optimized.get_global("base").unwrap().to_string(), "41");
         assert_eq!(reference.get_global("base").unwrap().to_string(), "41");
+
+        let define = engine
+            .compile_program(
+                "make = ->\n  value = 1\n  read = -> value\n  value = 2\n  read\nreader = make()\nreader",
+            )
+            .unwrap();
+        let call = engine.compile_program("reader()").unwrap();
+        let define_reference = define.without_binding_slots();
+        let call_reference = call.without_binding_slots();
+        let mut optimized = Context::new();
+        let mut reference = Context::new();
+        optimized.run_program(&define).unwrap();
+        reference.run_program(&define_reference).unwrap();
+        assert_result_equal(
+            optimized.run_program(&call),
+            reference.run_program(&call_reference),
+        );
+        assert_eq!(optimized.last_execution(), reference.last_execution());
+        assert_eq!(
+            optimized.get_global("reader").unwrap().to_string(),
+            "<function>"
+        );
+        assert_eq!(
+            reference.get_global("reader").unwrap().to_string(),
+            "<function>"
+        );
     }
 
     #[test]
@@ -3058,6 +3309,43 @@ mod tests {
         run_pair(
             &captured,
             &captured_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
+
+        let shared = Engine::new()
+            .compile_program(
+                "make = (flag) ->\n  read = -> value\n  value = host if flag\n  [read(), host]\nmake(flag)",
+            )
+            .unwrap();
+        let shared_reference = shared.without_binding_slots();
+        optimized_a.set_global("value", Value::Number(40.));
+        optimized_a.set_global("host", Value::Number(2.));
+        optimized_a.set_global("flag", Value::Bool(false));
+        optimized_b.set_global("value", Value::Number(41.));
+        optimized_b.set_global("host", Value::Number(3.));
+        optimized_b.set_global("flag", Value::Bool(true));
+        reference_a.set_global("value", Value::Number(40.));
+        reference_a.set_global("host", Value::Number(2.));
+        reference_a.set_global("flag", Value::Bool(false));
+        reference_b.set_global("value", Value::Number(41.));
+        reference_b.set_global("host", Value::Number(3.));
+        reference_b.set_global("flag", Value::Bool(true));
+        run_pair(
+            &shared,
+            &shared_reference,
+            &mut optimized_a,
+            &mut reference_a,
+        );
+        run_pair(
+            &shared,
+            &shared_reference,
+            &mut optimized_b,
+            &mut reference_b,
+        );
+        run_pair(
+            &shared,
+            &shared_reference,
             &mut optimized_a,
             &mut reference_a,
         );
