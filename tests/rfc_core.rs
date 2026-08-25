@@ -125,6 +125,47 @@ fn exact_decimal_values_require_explicit_rounding_and_strict_conversions() {
     }
 }
 #[test]
+fn deterministic_json_preserves_exact_numbers_and_canonical_order() {
+    assert_eq!(
+        eval(
+            r#"payload = parse_json('{"small":1,"large":9007199254740993,"money":12.30,"whole":1e2,"emoji":"😀"}')
+[type(payload.small), type(payload.large), type(payload.money), type(payload.whole), payload.large, payload.money, payload.emoji]"#
+        )
+        .to_string(),
+        "[integer, integer, decimal, decimal, 9007199254740993n, 12.3m, 😀]"
+    );
+    assert_eq!(
+        eval(r#"encode_json({z: [nil, true, 9007199254740993n], a: 100m, text: "a\n中"})"#)
+            .to_string(),
+        r#"{"a":100.0,"text":"a\n中","z":[null,true,9007199254740993]}"#
+    );
+    assert_eq!(
+        eval("encode_json(parse_json('{\"b\":2,\"a\":1}'))").to_string(),
+        r#"{"a":1,"b":2}"#
+    );
+    assert_eq!(
+        eval("try parse_json('{\"same\":1,\"same\":2}') catch problem then problem.code")
+            .to_string(),
+        "json.parse"
+    );
+    assert_eq!(
+        eval("try encode_json(-> 1) catch problem then problem.code").to_string(),
+        "json.encode"
+    );
+
+    for source in [
+        "parse_json()",
+        "parse_json(1)",
+        "parse_json('{\"same\":1,\"same\":2}')",
+        "parse_json('[1,]')",
+        "parse_json('01')",
+        "encode_json(-> 1)",
+        "encode_json(error('json.test', 'unsupported'))",
+    ] {
+        assert!(Context::new().eval(source).is_err(), "{source}");
+    }
+}
+#[test]
 fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
     assert_eq!(
         eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),

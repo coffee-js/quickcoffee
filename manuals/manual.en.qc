@@ -39,7 +39,7 @@
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
 ## ! is a strict Bool alias for not; != remains strict inequality.
 ## Chained strict or numeric comparisons keep the middle value once and short-circuit.
-## The standard library is ordinary functions: print, len, type, error, range, str, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. error(code, message, data, cause) creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
+## The standard library is ordinary functions: print, len, type, error, range, str, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. error(code, message, data, cause) creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
 ## RFC 0137 Decimal literals use an m suffix; exact division rejects repeating results, while decimal_div and round_decimal require an explicit scale and rounding mode.
 ## switch/when selects one strict-equality branch without fallthrough.
 ## try/catch/finally handles sealed QuickCoffee Error values without JavaScript prototypes, stacks, or forgeable source locations.
@@ -145,4 +145,6 @@ heredoc == 'answer 42\nnext'
 ### invalid ` source is safely ignored here
 ###
 0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
 42 == 42

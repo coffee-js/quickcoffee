@@ -78,6 +78,12 @@ fn main() {
             expected: "9007199254741693n",
         },
         Workload {
+            name: "json-exact-roundtrip",
+            source: "payload = parse_json('{\"id\":9007199254740993,\"amount\":12.30,\"items\":[1,2,3],\"ok\":true}')\nencode_json(payload)",
+            iterations: 1_000,
+            expected: "{\"amount\":12.3,\"id\":9007199254740993,\"items\":[1,2,3],\"ok\":true}",
+        },
+        Workload {
             name: "floor-modulo",
             source: "sum = 0\ni = -100\nwhile i < 100\n  sum += i // 3\n  sum += i %% 7\n  i += 1\nsum",
             iterations: 10_000,

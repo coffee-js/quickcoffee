@@ -784,6 +784,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "name-updates",
         "exact-integer-updates",
         "exact-decimal-money",
+        "json-exact-roundtrip",
         "floor-modulo",
         "bitwise",
         "multiline-strings",
