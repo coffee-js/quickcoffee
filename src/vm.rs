@@ -563,6 +563,10 @@ struct EnvironmentSnapshot {
     initialized: Vec<bool>,
 }
 impl Environment {
+    fn slot_for(&self, name: &str) -> Option<usize> {
+        self.indices.get(name).copied()
+    }
+
     fn get_local(&self, name: &str) -> Option<Value> {
         let slot = *self.indices.get(name)?;
         self.slots.get(slot).map(|(_, value)| value.clone())
@@ -1583,6 +1587,10 @@ struct Frame {
 enum FrameBindings {
     Raw,
     Guarded(Rc<ChunkBindingSlots>),
+    TopLevel {
+        slots: Rc<ChunkBindingSlots>,
+        resolved: Vec<Option<usize>>,
+    },
     Fast {
         slots: Rc<ChunkBindingSlots>,
         locals: Vec<Option<Value>>,
@@ -1646,6 +1654,14 @@ fn store_environment<const SHARED: bool>(
 }
 fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
     match &frame.bindings {
+        FrameBindings::TopLevel { slots, resolved } => {
+            if let Some(local_slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                if let Some(environment_slot) = resolved.get(local_slot).copied().flatten() {
+                    return frame.env.borrow().get_resolved(environment_slot).flatten();
+                }
+            }
+            lookup_environment::<false>(&frame.env, slots.cached_by_pc.get(pc), name)
+        }
         FrameBindings::Fast { slots, locals } => {
             if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
                 if let Some(value) = locals.get(slot)?.clone() {
@@ -1681,6 +1697,22 @@ fn lookup_frame(frame: &Frame, pc: usize, name: &str) -> Option<Value> {
 }
 fn store_frame(frame: &mut Frame, pc: usize, name: &str, value: Value) {
     match &mut frame.bindings {
+        FrameBindings::TopLevel { slots, resolved } => {
+            if let Some(local_slot) = slots.local_by_pc.get(pc).copied().flatten() {
+                if let Some(environment_slot) = resolved[local_slot] {
+                    let result = frame.env.borrow_mut().set_resolved(environment_slot, value);
+                    if let Err(value) = result {
+                        let environment_slot = frame.env.borrow_mut().set_local(name, value);
+                        resolved[local_slot] = Some(environment_slot);
+                    }
+                } else {
+                    let environment_slot = frame.env.borrow_mut().set_local(name, value);
+                    resolved[local_slot] = Some(environment_slot);
+                }
+                return;
+            }
+            store_environment::<false>(&frame.env, slots.cached_by_pc.get(pc), name, value);
+        }
         FrameBindings::Fast { slots, locals } => {
             if let Some(slot) = slots.local_by_pc.get(pc).copied().flatten() {
                 locals[slot] = Some(value);
@@ -1895,6 +1927,19 @@ impl Vm {
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
         let execution_plan = self.execution_plan.clone();
         let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(&chunk));
+        let bindings = binding_slots
+            .map(|slots| {
+                let resolved = {
+                    let environment = global.borrow();
+                    slots
+                        .local_names
+                        .iter()
+                        .map(|name| environment.slot_for(name))
+                        .collect()
+                };
+                FrameBindings::TopLevel { slots, resolved }
+            })
+            .unwrap_or(FrameBindings::Raw);
         let mut frames = vec![Frame {
             chunk,
             pc: 0,
@@ -1904,9 +1949,7 @@ impl Vm {
             debug_info: self.initial_debug_info.clone(),
             execution_plan,
             env: global,
-            bindings: binding_slots
-                .map(FrameBindings::Guarded)
-                .unwrap_or(FrameBindings::Raw),
+            bindings,
         }];
         loop {
             if self
@@ -3748,6 +3791,54 @@ mod tests {
             &mut optimized_a,
             &mut reference_a,
         );
+    }
+
+    #[test]
+    fn top_level_slots_preserve_host_replacement_and_partial_fuel_stores() {
+        let engine = Engine::new();
+        let repeated = engine
+            .compile_program_named(
+                "top-level.qc",
+                "value ?= 0\nvalue += 1\ni = 0\nwhile i < 2 then i++\nvalue + i",
+            )
+            .unwrap();
+        let repeated_reference = repeated.without_binding_slots();
+        let mut optimized = Context::new();
+        let mut reference = Context::new();
+        for initial in [40., 10., -3.] {
+            optimized.set_global("value", Value::Number(initial));
+            reference.set_global("value", Value::Number(initial));
+            assert_result_equal(
+                optimized.run_program(&repeated),
+                reference.run_program(&repeated_reference),
+            );
+            assert_eq!(optimized.last_execution(), reference.last_execution());
+            assert_eq!(
+                optimized.get_global("value").map(|value| value.to_string()),
+                reference.get_global("value").map(|value| value.to_string())
+            );
+        }
+
+        for fuel in 0..40 {
+            let mut optimized = Context::new().with_fuel(fuel);
+            let mut reference = Context::new().with_fuel(fuel);
+            assert_result_equal(
+                optimized.run_program(&repeated),
+                reference.run_program(&repeated_reference),
+            );
+            assert_eq!(
+                optimized.last_execution(),
+                reference.last_execution(),
+                "execution stats differ at fuel {fuel}"
+            );
+            for name in ["value", "i"] {
+                assert_eq!(
+                    optimized.get_global(name).map(|value| value.to_string()),
+                    reference.get_global(name).map(|value| value.to_string()),
+                    "partial global {name} differs at fuel {fuel}"
+                );
+            }
+        }
     }
 
     #[test]
