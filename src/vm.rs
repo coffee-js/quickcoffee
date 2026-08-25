@@ -3213,6 +3213,7 @@ impl Vm {
         Ok(Step::Continue)
     }
 
+    #[inline(never)]
     fn super_call(&mut self, frame: &mut Frame, args: Vec<Value>) -> Result<Step, Error> {
         let context = frame
             .method_context
@@ -3312,6 +3313,95 @@ impl Vm {
                 })
             }
         }
+    }
+
+    #[inline(never)]
+    fn make_class(
+        &mut self,
+        frame: &mut Frame,
+        name: &str,
+        extends: bool,
+        has_constructor: bool,
+        instance_methods: &[String],
+        static_methods: &[String],
+    ) -> Result<(), Error> {
+        let count = usize::from(has_constructor) + instance_methods.len() + static_methods.len();
+        let mut functions = take(frame, count)?.into_iter();
+        let superclass = if extends {
+            let parent = pop(frame)?;
+            let Value::Class(parent) = parent else {
+                return Err(Error::runtime(format!(
+                    "class {name} extends value must be a QuickCoffee class"
+                )));
+            };
+            let mut seen = BTreeSet::new();
+            let mut current = Some(parent.clone());
+            while let Some(class) = current {
+                if !seen.insert(Rc::as_ptr(&class) as usize) {
+                    return Err(Error::runtime(
+                        "parent class chain contains an inheritance cycle",
+                    ));
+                }
+                current = class.superclass.clone();
+            }
+            Some(parent)
+        } else {
+            None
+        };
+        let constructor = if has_constructor {
+            Some(value_function(
+                functions.next().expect("verified constructor count"),
+                "constructor",
+            )?)
+        } else {
+            None
+        };
+        let mut instance_table = BTreeMap::new();
+        for method in instance_methods {
+            instance_table.insert(
+                method.clone(),
+                value_function(
+                    functions.next().expect("verified instance method count"),
+                    method,
+                )?,
+            );
+        }
+        let mut static_table = BTreeMap::new();
+        for method in static_methods {
+            static_table.insert(
+                method.clone(),
+                value_function(
+                    functions.next().expect("verified static method count"),
+                    method,
+                )?,
+            );
+        }
+        if let Some(parent) = &superclass {
+            for (method, function) in &instance_table {
+                if function_uses_super(function) && find_instance_method(parent, method).is_none() {
+                    return Err(Error::runtime(format!(
+                        "class {name} method '{method}' uses super but does not override a parent instance method"
+                    )));
+                }
+            }
+            for (method, function) in &static_table {
+                if function_uses_super(function) && find_static_method(parent, method).is_none() {
+                    return Err(Error::runtime(format!(
+                        "class {name} static method '{method}' uses super but does not override a parent static method"
+                    )));
+                }
+            }
+        }
+        frame.stack.push(Value::Class(Rc::new(Class {
+            name: Rc::from(name),
+            superclass,
+            constructor,
+            instance_methods: instance_table,
+            static_methods: static_table,
+            static_fields: RefCell::new(BTreeMap::new()),
+        })));
+        self.record_value_allocations(1);
+        Ok(())
     }
 
     fn recycle_call_arguments(mut args: Vec<Value>) {
@@ -4148,88 +4238,14 @@ impl Vm {
                         instance_methods,
                         static_methods,
                     } => {
-                        let count = usize::from(*constructor)
-                            + instance_methods.len()
-                            + static_methods.len();
-                        let mut functions = take(frame, count)?.into_iter();
-                        let superclass = if *extends {
-                            let parent = pop(frame)?;
-                            let Value::Class(parent) = parent else {
-                                return Err(Error::runtime(format!(
-                                    "class {name} extends value must be a QuickCoffee class"
-                                )));
-                            };
-                            let mut seen = BTreeSet::new();
-                            let mut current = Some(parent.clone());
-                            while let Some(class) = current {
-                                if !seen.insert(Rc::as_ptr(&class) as usize) {
-                                    return Err(Error::runtime(
-                                        "parent class chain contains an inheritance cycle",
-                                    ));
-                                }
-                                current = class.superclass.clone();
-                            }
-                            Some(parent)
-                        } else {
-                            None
-                        };
-                        let constructor = if *constructor {
-                            Some(value_function(
-                                functions.next().expect("verified constructor count"),
-                                "constructor",
-                            )?)
-                        } else {
-                            None
-                        };
-                        let mut instance_table = BTreeMap::new();
-                        for method in instance_methods {
-                            instance_table.insert(
-                                method.clone(),
-                                value_function(
-                                    functions.next().expect("verified instance method count"),
-                                    method,
-                                )?,
-                            );
-                        }
-                        let mut static_table = BTreeMap::new();
-                        for method in static_methods {
-                            static_table.insert(
-                                method.clone(),
-                                value_function(
-                                    functions.next().expect("verified static method count"),
-                                    method,
-                                )?,
-                            );
-                        }
-                        if let Some(parent) = &superclass {
-                            for (method, function) in &instance_table {
-                                if function_uses_super(function)
-                                    && find_instance_method(parent, method).is_none()
-                                {
-                                    return Err(Error::runtime(format!(
-                                        "class {name} method '{method}' uses super but does not override a parent instance method"
-                                    )));
-                                }
-                            }
-                            for (method, function) in &static_table {
-                                if function_uses_super(function)
-                                    && find_static_method(parent, method).is_none()
-                                {
-                                    return Err(Error::runtime(format!(
-                                        "class {name} static method '{method}' uses super but does not override a parent static method"
-                                    )));
-                                }
-                            }
-                        }
-                        frame.stack.push(Value::Class(Rc::new(Class {
-                            name: Rc::from(name.as_str()),
-                            superclass,
-                            constructor,
-                            instance_methods: instance_table,
-                            static_methods: static_table,
-                            static_fields: RefCell::new(BTreeMap::new()),
-                        })));
-                        self.record_value_allocations(1);
+                        self.make_class(
+                            frame,
+                            name,
+                            *extends,
+                            *constructor,
+                            instance_methods,
+                            static_methods,
+                        )?;
                     }
                     Instruction::Call(n) => {
                         return Self::direct_call(frame, *n);

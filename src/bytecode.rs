@@ -54,7 +54,6 @@ pub enum Instruction {
     Constant(usize),
     Load(String),
     LoadOrNil(String),
-    LoadReceiver,
     Store(String),
     Destructure(Pattern),
     Pop,
@@ -123,8 +122,6 @@ pub enum Instruction {
         count: usize,
     },
     MemberCallSpread(String),
-    SuperCall(usize),
-    SuperCallSpread,
     Call(usize),
     CallSpread,
     Construct(usize),
@@ -138,6 +135,9 @@ pub enum Instruction {
         static_methods: Vec<String>,
     },
     Return,
+    LoadReceiver,
+    SuperCall(usize),
+    SuperCallSpread,
 }
 
 impl Chunk {
