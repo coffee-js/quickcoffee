@@ -48,7 +48,7 @@ pub(crate) enum Expr {
     Continue(TokenSpan),
     Return(Option<Box<Expr>>, TokenSpan),
     Function(Vec<Param>, Option<String>, Box<Expr>),
-    BoundFunction(Box<Expr>),
+    BoundFunction(Box<Expr>, TokenSpan),
     Class(String, Option<Box<Expr>>, Vec<ClassMember>),
     Block(Vec<Stmt>),
     Switch(Box<Expr>, Vec<(Vec<Expr>, Expr)>, Option<Box<Expr>>),

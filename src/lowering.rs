@@ -1027,11 +1027,12 @@ impl Compiler {
             Expr::Function(params, rest, body) => {
                 self.function(params, rest.as_ref(), body)?;
             }
-            Expr::BoundFunction(function) => {
+            Expr::BoundFunction(function, arrow_span) => {
                 if !self.receiver_context {
-                    return Err(self.parse_error(
+                    return Err(Error::parse(
                         "receiver-binding => is valid only in a class receiver context",
-                    ));
+                    )
+                    .at_span(arrow_span.into_source_span()));
                 }
                 let Expr::Function(params, rest, body) = function.unspanned() else {
                     return Err(Error::verify("bound function wrapper has no function"));
@@ -1158,7 +1159,7 @@ impl Compiler {
                             _ => None,
                         })
                         .collect::<Option<Vec<_>>>(),
-                    Expr::BoundFunction(function) => match function.unspanned() {
+                    Expr::BoundFunction(function, _) => match function.unspanned() {
                         Expr::Function(params, rest, _) if rest.is_none() => params
                             .iter()
                             .map(|param| match &param.pattern {
