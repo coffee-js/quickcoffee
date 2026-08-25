@@ -5,6 +5,7 @@ pub(crate) enum Expr {
     Located(TokenSpan, Box<Expr>),
     Number(f64),
     Integer(String, u32),
+    Decimal(String),
     String(String),
     Interpolate(Vec<Expr>),
     Bool(bool),

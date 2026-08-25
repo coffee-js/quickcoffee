@@ -17,9 +17,9 @@ pub use module::{
     RestrictedFileModuleLoader,
 };
 pub use vm::{
-    CancellationToken, Context, DiagnosticLabel, DiagnosticLabelKind, Engine, Error, ErrorKind,
-    ExecutionStats, Function, Integer, NativeFunction, Program, ResourceLimit, ScriptError,
-    SourcePosition, SourceSpan, Value, ValueKind,
+    CancellationToken, Context, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
+    ErrorKind, ExecutionStats, Function, Integer, NativeFunction, Program, ResourceLimit,
+    ScriptError, SourcePosition, SourceSpan, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.

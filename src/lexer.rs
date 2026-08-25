@@ -35,6 +35,7 @@ impl Iterator for ColumnChars<'_> {
 pub(crate) enum Token {
     Number(f64),
     Integer(String, u32),
+    Decimal(String),
     String(String, bool),
     Ident(String),
     True,
@@ -680,6 +681,9 @@ fn lex_line(
                         .at_line(line_number));
                     }
                     out.push(Token::Integer(source, 10));
+                } else if matches!(chars.peek(), Some('m')) {
+                    chars.next();
+                    out.push(Token::Decimal(source));
                 } else {
                     out.push(Token::Number(source.parse().map_err(|_| {
                         Error::parse("invalid number").at_line(line_number)

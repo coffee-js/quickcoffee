@@ -610,6 +610,16 @@ fn qcoffee_json_reports_values_and_structured_errors() {
         "{\"ok\":true,\"value\":{\"$quickcoffee\":\"integer\",\"value\":\"9007199254740993\"}}\n"
     );
 
+    let decimal = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "1234567890.012300m"])
+        .output()
+        .unwrap();
+    assert!(decimal.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&decimal.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"decimal\",\"value\":\"1234567890.0123\"}}\n"
+    );
+
     let function = Command::new(bin("qcoffee"))
         .args(["--json", "-e", "(x) -> x"])
         .output()
@@ -773,6 +783,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "existential-assignment",
         "name-updates",
         "exact-integer-updates",
+        "exact-decimal-money",
         "floor-modulo",
         "bitwise",
         "multiline-strings",

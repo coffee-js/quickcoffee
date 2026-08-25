@@ -43,7 +43,7 @@
 ## yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
 ## ! strict-Bool not-पर्यायः अस्ति; != strict-असाम्यमेव तिष्ठति।
 ## chained-comparison मध्ये मध्य-मूल्य एकवारं, पूर्व-false चेत् short-circuit भवति।
-## सामान्य-library साधारण-function रूपेण print, len, type, error, range, str, integer, number, abs, sum, min, max, keys, values, join, split, assert ददाति; error(code, message, data, cause) sealed Error निर्माति, catch Error गृह्णाति, resource-error न गृह्णाति।
+## सामान्य-library साधारण-function रूपेण print, len, type, error, range, str, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert ददाति; error(code, message, data, cause) sealed Error निर्माति, catch Error गृह्णाति, resource-error न गृह्णाति। Decimal m-प्रत्ययं गृह्णाति; अनन्त-दशमलव-विभागः स्पष्ट-scale-rounding अपेक्षते।
 ## कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।
 ## bare-name lambda left, right -> left + right भवति; default, rest, pattern तु parentheses गृह्णन्ति।
 ## return expression केवलं वर्तमान-कार्यं समाप्तं करोति; केवलः return nil फलति, loop शुद्धीकरोति, finally च चलयति।
@@ -136,4 +136,5 @@ default_value ?= 42
 default_value == 42
 ### invalid ` source अत्र उपेक्षितः
 ###
+0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
 42 == 42

@@ -624,3 +624,20 @@ fn signed_host_integers_cross_the_embedding_boundary_exactly() {
     assert_eq!(value.kind(), quickcoffee::ValueKind::Integer);
     assert_eq!(value.as_integer().unwrap().as_i64(), Some(i64::MAX));
 }
+
+#[test]
+fn exact_decimals_cross_the_embedding_boundary_losslessly() {
+    let decimal = quickcoffee::Decimal::parse("-1234567890.012300").unwrap();
+    assert_eq!(decimal.to_plain_string(), "-1234567890.0123");
+    assert_eq!(decimal.scale(), 4);
+    assert_eq!(decimal.coefficient().to_decimal_string(), "-12345678900123");
+
+    let rebuilt = quickcoffee::Decimal::from_parts(decimal.coefficient(), decimal.scale()).unwrap();
+    assert_eq!(rebuilt, decimal);
+    let value = Value::from(rebuilt);
+    assert_eq!(value.kind(), quickcoffee::ValueKind::Decimal);
+    assert_eq!(
+        value.as_decimal().unwrap().to_plain_string(),
+        "-1234567890.0123"
+    );
+}

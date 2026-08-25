@@ -40,7 +40,8 @@
 <p>yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。</p>
 <p>! 是严格 Bool 的 not 别名；!= 仍为严格不等。</p>
 <p>严格或数值比较可成链，保留中间值且前段失败会短路。</p>
-<p>标准库皆为普通函数：print、len、type、error、range、str、integer、number、abs、sum、min、max、keys、values、join、split 与 assert；error(code, message, data, cause) 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。</p>
+<p>标准库皆为普通函数：print、len、type、error、range、str、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split 与 assert；error(code, message, data, cause) 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。</p>
+<p>RFC 0137 Decimal 字面量使用 m 后缀；精确除法拒绝循环小数，decimal_div 与 round_decimal 要求显式 scale 和舍入模式。</p>
 <p>映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。</p>
 <p>映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。</p>
 <p>数组与 Unicode 字符串支持负索引，-1 取末项。</p>
@@ -141,5 +142,6 @@ nil? == false and false? == true and 0? == true
 多行 == '答案 42\n次行'
 ### 这段含无效 ` 源文，却不会参与执行
 ###
+0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
 42 == 42
 </code></pre></main><footer>Final value: <code>true</code></footer>

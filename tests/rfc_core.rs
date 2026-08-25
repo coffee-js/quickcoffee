@@ -68,6 +68,63 @@ fn exact_integer_literals_operations_and_numeric_boundaries() {
     assert!(Context::new().eval("1n / 0n").is_err());
 }
 #[test]
+fn exact_decimal_values_require_explicit_rounding_and_strict_conversions() {
+    assert_eq!(
+        eval("[0.1m + 0.2m, 1.2300m, 1e2m, -7m // 3m, -7m % 3m, -7m %% 3m]").to_string(),
+        "[0.3m, 1.23m, 100m, -3m, -1m, 2m]"
+    );
+    assert_eq!(
+        eval("[1m / 8m, 1.5m ** 2m, 1.2m < 1.11m, 1.0m == 1m]").to_string(),
+        "[0.125m, 2.25m, false, true]"
+    );
+    assert_eq!(
+        eval("[decimal_div(1m, 3m, 2, 'half_even'), decimal_div(1m, 8m, 2, 'half_even'), decimal_div(1m, 8m, 2, 'half_up'), round_decimal(2.345m, 2, 'half_even'), round_decimal(2.355m, 2, 'half_even')]")
+            .to_string(),
+        "[0.33m, 0.12m, 0.13m, 2.34m, 2.36m]"
+    );
+    assert_eq!(
+        eval("[decimal_div(-1m, 8m, 2, 'floor'), decimal_div(-1m, 8m, 2, 'ceiling'), decimal_div(-1m, 8m, 2, 'down'), decimal_div(-1m, 8m, 2, 'up')]")
+            .to_string(),
+        "[-0.13m, -0.12m, -0.12m, -0.13m]"
+    );
+    assert_eq!(
+        eval("[decimal('12.3400'), decimal(42n), integer(42.0m), number(0.5m), type(1m), str(1.20m), \"value #{1.20m}\"]")
+            .to_string(),
+        "[12.34m, 42m, 42n, 0.5, decimal, 1.2, value 1.2]"
+    );
+    assert_eq!(
+        eval(
+            "value = 4m\n[value++, value, --value, sum([1.2m, 2.3m]), min([3m, -1m]), abs(-5.2m)]"
+        )
+        .to_string(),
+        "[4m, 5m, 4m, 3.5m, -1m, 5.2m]"
+    );
+    assert_eq!(
+        eval("error('invoice.total', 'total', {amount: 0.1m}).data.amount").to_string(),
+        "0.1m"
+    );
+
+    for source in [
+        "1m + 1",
+        "1m + 1n",
+        "1m < 2n",
+        "1m / 3m",
+        "1m / 0m",
+        "1m // 0m",
+        "1m % 0m",
+        "1m %% 0m",
+        "decimal(0.1)",
+        "number(0.1m)",
+        "integer(0.1m)",
+        "decimal_div(1m, 3m, -1, 'half_even')",
+        "decimal_div(1m, 3m, 2, 'unknown')",
+        "1e100001m",
+        "1m / (2m ** 100001m)",
+    ] {
+        assert!(Context::new().eval(source).is_err(), "{source}");
+    }
+}
+#[test]
 fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
     assert_eq!(
         eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),
@@ -1062,6 +1119,30 @@ fn bytecode_fingerprints_are_stable_and_content_based() {
     };
     assert_ne!(error_chunk.fingerprint(), other_error_chunk.fingerprint());
     assert_eq!(error_chunk.fingerprint(), error_chunk.clone().fingerprint());
+
+    let decimal_value = eval("1.2300m");
+    let decimal_chunk = Chunk {
+        constants: vec![quickcoffee::Constant::Value(decimal_value)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    };
+    let same_decimal_value = eval("1.23m");
+    let same_decimal_chunk = Chunk {
+        constants: vec![quickcoffee::Constant::Value(same_decimal_value)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    };
+    let other_decimal_value = eval("1.24m");
+    let other_decimal_chunk = Chunk {
+        constants: vec![quickcoffee::Constant::Value(other_decimal_value)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    };
+    assert_eq!(
+        decimal_chunk.fingerprint(),
+        same_decimal_chunk.fingerprint()
+    );
+    assert_ne!(
+        decimal_chunk.fingerprint(),
+        other_decimal_chunk.fingerprint()
+    );
 }
 #[test]
 fn frontend_pipeline_keeps_representative_bytecode_and_value_golden() {
