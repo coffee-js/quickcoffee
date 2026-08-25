@@ -46,7 +46,7 @@ Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatio
 yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
 ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 Comparationes conectae medium semel servant atque priore falso breviant.
-Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
+Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
 Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.
@@ -143,6 +143,8 @@ valor_defectus == 42
 ### fons invalidus ` hic ignoratur
 ###
 0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
 42 == 42
 ````
 

@@ -2,7 +2,7 @@
 
 QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有公开原型链、全局/自由 `this`、`eval` 或嵌入 JavaScript；RFC 0134 另为 class 内部定义受限接收者、构造与继承。
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0137-exact-decimal-values.md](RFCs/0137-exact-decimal-values.md)；已采纳但尚待 issue #121 实现的 class 契约见 [RFCs/0134-class-receivers-and-inheritance.md](RFCs/0134-class-receivers-and-inheritance.md)。
+当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0138-deterministic-script-json.md](RFCs/0138-deterministic-script-json.md)；已采纳但尚待 issue #121 实现的 class 契约见 [RFCs/0134-class-receivers-and-inheritance.md](RFCs/0134-class-receivers-and-inheritance.md)。
 构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
 后续大需求、里程碑和拆分规则见 [ROADMAP.md](ROADMAP.md)。
 当前业务适用范围、语言缺口与 QuickJS 性能对照见 [docs/readiness.zh-CN.md](docs/readiness.zh-CN.md)。

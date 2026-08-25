@@ -5,6 +5,7 @@
 
 mod ast;
 mod bytecode;
+mod json;
 mod lexer;
 mod lowering;
 mod module;

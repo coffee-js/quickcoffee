@@ -1,6 +1,6 @@
 use crate::{
     bytecode::{Chunk, Constant, Instruction, Pattern},
-    compile,
+    compile, json,
     lowering::{self, ChunkSourceMap, CompiledSourceMap},
     parser,
 };
@@ -1727,6 +1727,21 @@ fn array_and_element_allocations(value: &Value) -> u64 {
     }
 }
 
+fn json_value_allocations(value: &Value) -> u64 {
+    match value {
+        Value::Integer(_) | Value::Decimal(_) | Value::String(_) => 1,
+        Value::Array(values) => values
+            .iter()
+            .map(json_value_allocations)
+            .fold(1_u64, u64::saturating_add),
+        Value::Map(values) => values
+            .values()
+            .map(json_value_allocations)
+            .fold(values.len() as u64 + 1, u64::saturating_add),
+        Value::Nil | Value::Bool(_) | Value::Number(_) | Value::Error(_) | Value::Function(_) => 0,
+    }
+}
+
 fn valid_error_code(code: &str) -> bool {
     code.len() <= 64
         && code
@@ -2010,6 +2025,32 @@ impl Context {
                     return Err(Error::runtime("str expects one argument"));
                 }
                 Ok(Value::String(Rc::from(string_value(&xs[0]))))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "parse_json",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("parse_json expects one string argument"));
+                }
+                let Value::String(source) = &xs[0] else {
+                    return Err(Error::runtime("parse_json expects a string"));
+                };
+                json::parse_json(source)
+                    .map_err(|error| Error::domain("json.parse", error.to_string(), Value::Nil))
+            },
+            json_value_allocations,
+        );
+        self.add_builtin(
+            "encode_json",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("encode_json expects one argument"));
+                }
+                json::encode_json(&xs[0])
+                    .map(Value::from)
+                    .map_err(|error| Error::domain("json.encode", error.to_string(), Value::Nil))
             },
             one_value_allocation,
         );

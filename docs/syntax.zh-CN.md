@@ -18,11 +18,13 @@
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。
 
-标准库是普通函数：`print`、`len`、`type`、`error`、`range`、`str`、`integer`、`number`、`decimal`、`decimal_div`、`round_decimal`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。聚合只收同质的有限 Number、Integer 或 Decimal 数组；`sum([])` 为 Number `0`，`min([])` 与 `max([])` 报错。
+标准库是普通函数：`print`、`len`、`type`、`error`、`range`、`str`、`parse_json`、`encode_json`、`integer`、`number`、`decimal`、`decimal_div`、`round_decimal`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。聚合只收同质的有限 Number、Integer 或 Decimal 数组；`sum([])` 为 Number `0`，`min([])` 与 `max([])` 报错。
 
 `123n`、`0xffn`、`0b101n`、`0o755n` 是任意精度 Integer；它与 IEEE-754 Number 严格分型，不做混合算术或排序。Integer 支持精确算术、有符号位运算（不含 `>>>`）、range、索引/切片和 `by`；`integer(value)` 与 `number(value)` 提供显式转换，其中 Integer 转 Number 只接受安全整数范围。完整契约见 RFC 0135。
 
 `12m`、`0.1m`、`1e2m` 是面向金额与比率的规范化精确 Decimal。Decimal、Integer 与 IEEE-754 Number 严格分型，混合算术、排序和聚合报错。Decimal `/` 只接受有限精确结果；`decimal_div(left, right, scale, mode)` 与 `round_decimal(value, scale, mode)` 要求 `down`、`up`、`floor`、`ceiling`、`half_up`、`half_even` 之一。`decimal(value)` 接受 Decimal、Integer 或十进制文本并刻意拒绝 Number；转 Integer/Number 也只在精确时成功。限制、宿主 API 与 CLI 标签 JSON 见 RFC 0137。
+
+`parse_json(string)` 不经过 `f64`：整数 token 映射精确 Integer，小数/指数 token 映射精确 Decimal，重复 object key 与非法 escape 报错。`encode_json(value)` 按 Map key 规范顺序输出紧凑 JSON，保留 Integer/Decimal 数值文本，并拒绝 Error、Function 与非有限 Number。Unicode 与固定输入/输出/容器/深度上限见 RFC 0138；脚本 JSON 与 `qcoffee --json` 结果协议彼此独立。
 
 `error(code, message[, data[, cause]])` 构造密封 Error；`catch` 绑定 Error，可读取 `code`、`message`、`data` 与 `cause`。普通 VM/宿主错误的 code 为 `runtime`，throw 非 Error 值的 code 为 `throw`。源码位置与调用上下文不向脚本暴露，Resource 错误不可捕获。完整契约见 RFC 0136。
 

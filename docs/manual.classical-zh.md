@@ -45,7 +45,7 @@ cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调
 Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。
 Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 -- 后之参，以常字符串数组 argv 见于文中。
-其内府皆常函，如 print、len、type、error、range、str、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split、assert；error(code, message, data, cause) 作密封 Error，catch 得之，而资源之误不可捕。Decimal 以 m 为缀，除不尽者须明定数位与舍法。
+其内府皆常函，如 print、len、type、error、range、str、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split、assert；error(code, message, data, cause) 作密封 Error，catch 得之，而资源之误不可捕。Decimal 以 m 为缀，除不尽者须明定数位与舍法。
 函式取词法之境；末常参可书 y = 2，参缺或传 nil 则于函中取其值；末有余参，则书 tail...。
 常名之参可省其括：left, right -> left + right；常值、余参与解构仍须括之。
 return expression 惟函中可用，反其值而终此函；徒 return 得 nil，且清环行 finally。
@@ -142,6 +142,8 @@ nil? == false and false? == true and 0? == true
 ### 此段有无效 ` 文，机不求之
 ###
 0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
 42 == 42
 ````
 
