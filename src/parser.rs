@@ -977,7 +977,7 @@ impl Parser {
                 | Expr::SoakCall(_, _)
                 | Expr::SoakMember(_, _)
                 | Expr::Function(_, _, _)
-                | Expr::Class(_, _)
+                | Expr::Class(_, _, _)
                 | Expr::Do(_)
         )
     }
@@ -1160,12 +1160,13 @@ impl Parser {
                         "legacy class factory syntax is no longer supported; use an indented class body and new",
                     ));
                 }
-                if self.eat(&Token::Extends) {
-                    return Err(self.previous_error(
-                        "extends is reserved by RFC 0134 and will be implemented after class construction",
-                    ));
-                }
-                Ok(Expr::Class(name, self.class_body()?))
+                let parent = if self.eat(&Token::Extends) {
+                    Some(Box::new(self.expr(0)?))
+                } else {
+                    None
+                };
+                let members = self.class_body()?;
+                Ok(Expr::Class(name, parent, members))
             }
             Token::New => {
                 let target = match self.next() {
@@ -1184,9 +1185,16 @@ impl Parser {
                 Ok(Expr::New(Box::new(target), args))
             }
             Token::Extends => Err(self.previous_error("extends is valid only in a class header")),
-            Token::Super => Err(self.previous_error(
-                "super is reserved by RFC 0134 and is not implemented in this class slice",
-            )),
+            Token::Super => {
+                let args = if self.eat(&Token::LParen) {
+                    self.arguments(Token::RParen)?
+                } else if self.implicit_argument_starts(self.at) {
+                    self.implicit_arguments()?
+                } else {
+                    vec![]
+                };
+                Ok(Expr::Super(args, span))
+            }
             Token::Switch => {
                 let subject = self.expr(0)?;
                 let (cases, fallback) = self.switch_cases()?;

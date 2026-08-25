@@ -34,7 +34,7 @@
 | 运算 | 算术、严格有符号 32 位位运算 `&`、`|`、`^`、`~`、`<<`、`>>`、`>>>` 及其名称复合赋值、名称复合赋值 `name += value`、`-=`, `*=`, `/=`, `%=`, `**=`、名称前后置更新 `++`/`--`、比较（`==`/`is`、`!=`/`isnt`，可短路成链 `a < b < c`）、`and`/`or`、`not`、仅对 `nil` 回退的 `left ? right`、后缀非 nil 测试 `value?`、仅名称的存在性赋值 `name ?= value`、数组成员 `value in array` / `value not in array`、映射自身键 `key of map` / `key not of map`、数组索引与严格切片 `a[start..end]` / `a[start...end]`、映射成员访问、nil 安全后缀 `a?.name`、`a?[i]`、`a?[start..end]`、`f?(args)` | 成员/索引/解构复合赋值、成员/索引/解构 `?=`、字符串/映射切片、隐式截断、未声明名称检查 |
 | 控制 | `if`/`unless`、后置条件、`while … then …`、`until … then …`、语句后置 `body while/until condition`、前置或后置列表推导 `for value[, index] in xs [by step] [when condition] then …` / `value for value in xs`、`switch`/`when`、`try`/`catch`/`finally`、`throw`、函数内 `return`、`break`、`continue` | JS Error 对象、顶层 `return`、映射 `for` 的 `by` |
 | 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, "first-name": first, ...metadata} = map`（标识符或字面字符串键）的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、当前实现中的 `=>` 同义箭头、`do` 立即调用；RFC 0134 将 `=>` 修订为仅在 class 接收者上下文绑定 `this` | 动态 computed 映射键、无括号默认/rest/解构参数、class 外接收者绑定、生成器 |
-| OO/模块 | 缩进 `class Name` 成员体、`constructor: (...) ->`、实例/`@static` 方法、class 内 `this`/`@field`、受限字段写入、`new Class(args...)`、专用 Class/Instance 值与接收者成员调用；历史工厂形式给出迁移诊断。仅嵌入 `Engine::compile_module` 的命名 import/export；宿主可显式构造根目录受限的 `RestrictedFileModuleLoader` | `extends`/`super` 与接收者绑定 `=>`（issue #121 后续阶段）、全局/自由 `this`、任意函数构造、公开原型能力、class 外 `super`/接收者绑定、CLI 文件模块、隐式文件/网络加载 |
+| OO/模块 | 缩进 `class Name` 成员体、`constructor: (...) ->`、实例/`@static` 方法、class 内 `this`/`@field`、受限字段写入、`new Class(args...)`、私有 `class Child extends Parent` 链、静态解析的 `super(args...)`、继承实例/静态查找、专用 Class/Instance 值与接收者成员调用；历史工厂形式给出迁移诊断。仅嵌入 `Engine::compile_module` 的命名 import/export；宿主可显式构造根目录受限的 `RestrictedFileModuleLoader` | 接收者绑定 `=>`（issue #150）、全局/自由 `this`、任意函数构造、公开原型能力、class 外 `super`/接收者绑定、CLI 文件模块、隐式文件/网络加载 |
 
 整数区间支持升序与降序：`[2..4]` 为 `[2, 3, 4]`，`[4..2]` 为 `[4, 3, 2]`；排除上界形式相应省略终点（`[4...2]` 为 `[4, 3]`）。边界必须是有限整数，过长区间仍报错。
 
@@ -57,6 +57,8 @@
 模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。宿主可显式构造 `RestrictedFileModuleLoader`，只读取一个规范根目录内的 UTF-8 `.qc` 文件；依赖必须使用 `./` 或 `../`，省略扩展名时补 `.qc`，绝对/bare 名、平台专用分隔符、词法越界及符号链接逃逸均拒绝。`qcoffee` CLI 暂不解析模块路径。
 
 名称亦支持前置、后置数值更新：`next = ++counter` 产生更新后的值，`previous = counter--` 先产生旧值再减一。`++`、`--` 只接受名称并使用严格数值运算；成员、索引和解构形式在解析阶段拒绝。
+
+派生 class 的父链接只存在于密封的 Class 元数据中，不向脚本公开原型对象。实例与静态成员均先查当前 class，再沿父链查找；覆盖成员中的 `super(args...)` 从定义该成员的 class 的直接父类开始解析，并保留当前接收者。派生 class 未声明构造器时会把 `new` 参数转发给父构造器；显式派生构造器必须在读取或写入 `this`/`@` 前恰好调用一次 `super(args...)`，因此会在函数体执行前写接收者字段的 `constructor: (@name) ->` 简写会触发父构造前访问错误，应改为普通参数并在 `super` 后写 `@name = name`。父值不是 Class、父实现缺失、重复父构造、父构造前接收者访问及普通嵌套函数中的 `super` 都会稳定失败。
 
 算术还包括 CoffeeScript 风格整除 `a // b`（取 `floor(a / b)`）与向下取模 `a %% b`（`(a % b + b) % b`）。普通 `%` 仍是随被除数取符号的余数；名称可使用 `//=`、`%%=` 复合赋值。
 

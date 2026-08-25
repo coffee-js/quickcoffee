@@ -1,6 +1,6 @@
 # QuickCoffee 0.2 前业务适用性与性能基线
 
-本文件是 2026-08-25 在 `main`（RFC 0000–0138）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
+本文件是 2026-08-26 在 `main`（RFC 0000–0138）上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
 
 后续拆分由 [#65：语言业务适用性](https://github.com/coffee-js/quickcoffee/issues/65) 与 [#66：QuickJS 量级性能收敛](https://github.com/coffee-js/quickcoffee/issues/66) 跟踪。
 
@@ -22,7 +22,7 @@ QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的�
 | 多文件业务领域脚本 | 不可用 | 嵌入宿主已有静态模块图核心；CLI 加载、模块包、图指纹和初始化契约尚未定义。 |
 | I/O、HTTP、任务调度、异步业务 | 不可用 | 不提供异步语法/事件循环；这些能力也不能作为隐式标准库加入。 |
 | 文本处理/协议解析 | 条件可用 | RFC 0138 已提供确定性精确 JSON 与 Context 可配置、不可捕获的大小边界；仍没有正则、字节序列或流式 API，一般字符串/集合和 retained-memory 预算继续由 #76 统一。 |
-| 面向对象业务模型 | 条件可用 | 已有缩进 class、构造器、实例/静态方法、class 内 `this`/`@`、`new`、专用 Class/Instance 值与受限字段写入；模块可显式传递 class。`extends`/`super` 与接收者绑定 `=>` 仍由 issue #121 推进；全局/自由 `this`、任意函数构造和公开原型能力仍明确禁止。 |
+| 面向对象业务模型 | 条件可用 | 已有缩进 class、构造器、实例/静态方法、class 内 `this`/`@`、`new`、私有继承链、静态解析 `super`、默认派生构造转发、专用 Class/Instance 值与受限字段写入；模块可显式传递或扩展 class。接收者绑定 `=>` 仍由 #150 推进；全局/自由 `this`、任意函数构造和公开原型能力仍明确禁止。 |
 
 ## 语言规划入口
 
@@ -32,7 +32,7 @@ QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的�
 - [#77](https://github.com/coffee-js/quickcoffee/issues/77)：嵌入 API 0.2 与显式宿主能力。
 - [#78](https://github.com/coffee-js/quickcoffee/issues/78)：确定性的业务数据与文本基元。
 - [#125](https://github.com/coffee-js/quickcoffee/issues/125)：确定性、精确数值、资源有界的脚本 JSON。
-- [#121](https://github.com/coffee-js/quickcoffee/issues/121)：CoffeeScript 风格 class、受限接收者、构造与继承。
+- [#121](https://github.com/coffee-js/quickcoffee/issues/121)：CoffeeScript 风格 class 总体跟踪；继承与 `super` 由 #149 交付，接收者绑定 `=>` 由 #150 继续。
 
 明确非目标仍是：JavaScript 公开原型链、全局/自由 `this`、任意函数构造、隐式转换、`eval`、反引号 JavaScript 和为了兼容而引入的隐式宿主能力。RFC 0134 的 class 内接收者与私有继承链不属于这些全局能力。
 

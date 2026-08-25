@@ -1535,6 +1535,7 @@ pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
 /// Opaque class metadata created only by verified QuickCoffee bytecode.
 pub struct Class {
     name: Rc<str>,
+    superclass: Option<Rc<Class>>,
     constructor: Option<Rc<Function>>,
     instance_methods: BTreeMap<String, Rc<Function>>,
     static_methods: BTreeMap<String, Rc<Function>>,
@@ -1572,11 +1573,24 @@ enum FunctionKind {
     BoundMethod {
         function: Rc<Function>,
         receiver: Value,
+        context: MethodContext,
     },
     UnboundMethod {
         owner: Rc<str>,
         name: Rc<str>,
     },
+}
+#[derive(Clone)]
+struct MethodContext {
+    owner: Rc<Class>,
+    name: Rc<str>,
+    kind: MethodKind,
+}
+#[derive(Clone, Copy)]
+enum MethodKind {
+    Constructor,
+    Instance,
+    Static,
 }
 type Env = Rc<RefCell<Environment>>;
 struct Environment {
@@ -2886,6 +2900,10 @@ struct Frame {
     env: Env,
     bindings: FrameBindings,
     receiver: Option<Value>,
+    method_context: Option<MethodContext>,
+    receiver_initialized: bool,
+    super_called: bool,
+    initialize_caller_receiver_on_return: bool,
     return_override: Option<Value>,
 }
 enum FrameBindings {
@@ -3063,6 +3081,7 @@ enum Step {
         callee: Value,
         args: Vec<Value>,
         return_override: Option<Value>,
+        initialize_caller_receiver: bool,
     },
 }
 impl Vm {
@@ -3112,6 +3131,7 @@ impl Vm {
             callee,
             args,
             return_override: None,
+            initialize_caller_receiver: false,
         })
     }
 
@@ -3147,6 +3167,7 @@ impl Vm {
             callee,
             args,
             return_override: None,
+            initialize_caller_receiver: false,
         })
     }
 
@@ -3164,13 +3185,22 @@ impl Vm {
             fields: RefCell::new(BTreeMap::new()),
         }));
         self.record_value_allocations(1);
-        if let Some(constructor) = &class.constructor {
-            let callee = bound_method(constructor.clone(), instance.clone());
+        if let Some((owner, constructor)) = find_constructor(&class) {
+            let callee = bound_method(
+                constructor,
+                instance.clone(),
+                MethodContext {
+                    owner,
+                    name: Rc::from("constructor"),
+                    kind: MethodKind::Constructor,
+                },
+            );
             self.record_value_allocations(1);
             return Ok(Step::Call {
                 callee,
                 args,
                 return_override: Some(instance),
+                initialize_caller_receiver: false,
             });
         }
         if !args.is_empty() {
@@ -3181,6 +3211,107 @@ impl Vm {
         }
         frame.stack.push(instance);
         Ok(Step::Continue)
+    }
+
+    fn super_call(&mut self, frame: &mut Frame, args: Vec<Value>) -> Result<Step, Error> {
+        let context = frame
+            .method_context
+            .clone()
+            .ok_or_else(|| Error::runtime("super call outside class member"))?;
+        let receiver = frame
+            .receiver
+            .clone()
+            .ok_or_else(|| Error::runtime("super call has no receiver"))?;
+        let parent = context.owner.superclass.clone().ok_or_else(|| {
+            Error::runtime(format!("class {} has no parent class", context.owner.name))
+        })?;
+        match context.kind {
+            MethodKind::Constructor => {
+                if frame.super_called {
+                    return Err(Error::runtime(
+                        "derived constructor cannot call super more than once",
+                    ));
+                }
+                frame.super_called = true;
+                let Some((owner, constructor)) = find_constructor(&parent) else {
+                    if !args.is_empty() {
+                        return Err(Error::runtime(format!(
+                            "class {} has no constructor and expects no arguments",
+                            parent.name
+                        )));
+                    }
+                    frame.receiver_initialized = true;
+                    frame.stack.push(Value::Nil);
+                    return Ok(Step::Continue);
+                };
+                let callee = bound_method(
+                    constructor,
+                    receiver,
+                    MethodContext {
+                        owner,
+                        name: Rc::from("constructor"),
+                        kind: MethodKind::Constructor,
+                    },
+                );
+                self.record_value_allocations(1);
+                Ok(Step::Call {
+                    callee,
+                    args,
+                    return_override: Some(Value::Nil),
+                    initialize_caller_receiver: true,
+                })
+            }
+            MethodKind::Instance => {
+                let (owner, function) =
+                    find_instance_method(&parent, &context.name).ok_or_else(|| {
+                        Error::runtime(format!(
+                            "parent of {} has no instance method '{}'",
+                            context.owner.name, context.name
+                        ))
+                    })?;
+                let callee = bound_method(
+                    function,
+                    receiver,
+                    MethodContext {
+                        owner,
+                        name: context.name,
+                        kind: MethodKind::Instance,
+                    },
+                );
+                self.record_value_allocations(1);
+                Ok(Step::Call {
+                    callee,
+                    args,
+                    return_override: None,
+                    initialize_caller_receiver: false,
+                })
+            }
+            MethodKind::Static => {
+                let (owner, function) =
+                    find_static_method(&parent, &context.name).ok_or_else(|| {
+                        Error::runtime(format!(
+                            "parent of {} has no static method '{}'",
+                            context.owner.name, context.name
+                        ))
+                    })?;
+                let callee = bound_method(
+                    function,
+                    receiver,
+                    MethodContext {
+                        owner,
+                        name: context.name,
+                        kind: MethodKind::Static,
+                    },
+                );
+                self.record_value_allocations(1);
+                Ok(Step::Call {
+                    callee,
+                    args,
+                    return_override: None,
+                    initialize_caller_receiver: false,
+                })
+            }
+        }
     }
 
     fn recycle_call_arguments(mut args: Vec<Value>) {
@@ -3205,6 +3336,8 @@ impl Vm {
             | Instruction::CallSpread
             | Instruction::MemberCall { .. }
             | Instruction::MemberCallSpread(_)
+            | Instruction::SuperCall(_)
+            | Instruction::SuperCallSpread
             | Instruction::Construct(_)
             | Instruction::ConstructSpread => self.calls += 1,
             Instruction::MakeArray(_)
@@ -3303,6 +3436,10 @@ impl Vm {
                 .map(FrameBindings::Guarded)
                 .unwrap_or(FrameBindings::Raw),
             receiver: None,
+            method_context: None,
+            receiver_initialized: true,
+            super_called: false,
+            initialize_caller_receiver_on_return: false,
             return_override: None,
         }];
         loop {
@@ -3370,6 +3507,18 @@ impl Vm {
                             check_value_numeric_resources(&value, self.resource_limits)?;
                         }
                         frame.stack.push(value);
+                    }
+                    Instruction::LoadReceiver => {
+                        if !frame.receiver_initialized {
+                            return Err(Error::runtime(
+                                "derived constructor cannot access its receiver before super",
+                            ));
+                        }
+                        let receiver = frame
+                            .receiver
+                            .clone()
+                            .ok_or_else(|| Error::runtime("receiver load outside class member"))?;
+                        frame.stack.push(receiver);
                     }
                     Instruction::Store(n) => {
                         let v = pop(frame)?;
@@ -3912,6 +4061,11 @@ impl Vm {
                         frame.stack.push(value);
                     }
                     Instruction::SetMember(name) => {
+                        if !frame.receiver_initialized {
+                            return Err(Error::runtime(
+                                "derived constructor cannot access its receiver before super",
+                            ));
+                        }
                         let value = pop(frame)?;
                         let target = frame.receiver.clone().ok_or_else(|| {
                             Error::runtime("receiver field write outside class member")
@@ -3935,7 +4089,19 @@ impl Vm {
                             callee,
                             args: args.as_ref().clone(),
                             return_override: None,
+                            initialize_caller_receiver: false,
                         });
+                    }
+                    Instruction::SuperCall(count) => {
+                        let args = take(frame, *count)?;
+                        return self.super_call(frame, args);
+                    }
+                    Instruction::SuperCallSpread => {
+                        let args = pop(frame)?;
+                        let Value::Array(args) = args else {
+                            return Err(Error::runtime("super splat expects an array"));
+                        };
+                        return self.super_call(frame, args.as_ref().clone());
                     }
                     Instruction::MakeFunction(i) => match frame
                         .chunk
@@ -3977,6 +4143,7 @@ impl Vm {
                     },
                     Instruction::MakeClass {
                         name,
+                        extends,
                         constructor,
                         instance_methods,
                         static_methods,
@@ -3985,6 +4152,27 @@ impl Vm {
                             + instance_methods.len()
                             + static_methods.len();
                         let mut functions = take(frame, count)?.into_iter();
+                        let superclass = if *extends {
+                            let parent = pop(frame)?;
+                            let Value::Class(parent) = parent else {
+                                return Err(Error::runtime(format!(
+                                    "class {name} extends value must be a QuickCoffee class"
+                                )));
+                            };
+                            let mut seen = BTreeSet::new();
+                            let mut current = Some(parent.clone());
+                            while let Some(class) = current {
+                                if !seen.insert(Rc::as_ptr(&class) as usize) {
+                                    return Err(Error::runtime(
+                                        "parent class chain contains an inheritance cycle",
+                                    ));
+                                }
+                                current = class.superclass.clone();
+                            }
+                            Some(parent)
+                        } else {
+                            None
+                        };
                         let constructor = if *constructor {
                             Some(value_function(
                                 functions.next().expect("verified constructor count"),
@@ -4013,8 +4201,29 @@ impl Vm {
                                 )?,
                             );
                         }
+                        if let Some(parent) = &superclass {
+                            for (method, function) in &instance_table {
+                                if function_uses_super(function)
+                                    && find_instance_method(parent, method).is_none()
+                                {
+                                    return Err(Error::runtime(format!(
+                                        "class {name} method '{method}' uses super but does not override a parent instance method"
+                                    )));
+                                }
+                            }
+                            for (method, function) in &static_table {
+                                if function_uses_super(function)
+                                    && find_static_method(parent, method).is_none()
+                                {
+                                    return Err(Error::runtime(format!(
+                                        "class {name} static method '{method}' uses super but does not override a parent static method"
+                                    )));
+                                }
+                            }
+                        }
                         frame.stack.push(Value::Class(Rc::new(Class {
                             name: Rc::from(name.as_str()),
+                            superclass,
                             constructor,
                             instance_methods: instance_table,
                             static_methods: static_table,
@@ -4035,6 +4244,7 @@ impl Vm {
                             callee,
                             args: args.as_ref().clone(),
                             return_override: None,
+                            initialize_caller_receiver: false,
                         });
                     }
                     Instruction::Construct(count) => {
@@ -4054,6 +4264,15 @@ impl Vm {
                         if !frame.handlers.is_empty() {
                             return Err(Error::runtime("handler leaked at Return"));
                         }
+                        if frame.method_context.as_ref().is_some_and(|context| {
+                            matches!(context.kind, MethodKind::Constructor)
+                                && context.owner.superclass.is_some()
+                        }) && !frame.receiver_initialized
+                        {
+                            return Err(Error::runtime(
+                                "derived constructor must call super exactly once",
+                            ));
+                        }
                         let v = pop(frame)?;
                         return Ok(Step::Return(v));
                     }
@@ -4063,15 +4282,17 @@ impl Vm {
             match step {
                 Ok(Step::Continue) => {}
                 Ok(Step::Return(value)) => {
-                    let value = frames
-                        .last_mut()
-                        .and_then(|frame| frame.return_override.take())
-                        .unwrap_or(value);
+                    let returning = frames.last_mut().expect("VM has a returning frame");
+                    let value = returning.return_override.take().unwrap_or(value);
+                    let initialize_caller_receiver = returning.initialize_caller_receiver_on_return;
                     if frames.len() > 1 {
                         self.call_depth = self.call_depth.saturating_sub(1);
                     }
                     frames.pop();
                     if let Some(parent) = frames.last_mut() {
+                        if initialize_caller_receiver {
+                            parent.receiver_initialized = true;
+                        }
                         parent.stack.push(value);
                     } else {
                         return Ok(value);
@@ -4081,6 +4302,7 @@ impl Vm {
                     callee,
                     args,
                     return_override,
+                    initialize_caller_receiver,
                 }) => {
                     let frame_count = frames.len();
                     let result = call(self, &mut frames, callee, &args);
@@ -4098,6 +4320,19 @@ impl Vm {
                                         frames.last_mut().expect("constructor call has a caller");
                                     caller.stack.pop();
                                     caller.stack.push(value);
+                                }
+                            }
+                            if initialize_caller_receiver {
+                                if frames.len() > frame_count {
+                                    frames
+                                        .last_mut()
+                                        .expect("super call has a frame")
+                                        .initialize_caller_receiver_on_return = true;
+                                } else {
+                                    frames
+                                        .last_mut()
+                                        .expect("super call has a caller")
+                                        .receiver_initialized = true;
                                 }
                             }
                         }
@@ -4137,10 +4372,70 @@ fn value_function(value: Value, name: &str) -> Result<Rc<Function>, Error> {
     Ok(function)
 }
 
-fn bound_method(function: Rc<Function>, receiver: Value) -> Value {
+fn bound_method(function: Rc<Function>, receiver: Value, context: MethodContext) -> Value {
     Value::Function(Rc::new(Function {
-        inner: FunctionKind::BoundMethod { function, receiver },
+        inner: FunctionKind::BoundMethod {
+            function,
+            receiver,
+            context,
+        },
     }))
+}
+
+fn find_constructor(class: &Rc<Class>) -> Option<(Rc<Class>, Rc<Function>)> {
+    let mut current = Some(class.clone());
+    while let Some(class) = current {
+        if let Some(constructor) = &class.constructor {
+            return Some((class.clone(), constructor.clone()));
+        }
+        current = class.superclass.clone();
+    }
+    None
+}
+
+fn function_uses_super(function: &Function) -> bool {
+    match &function.inner {
+        FunctionKind::Bytecode { chunk, .. } => chunk.code.iter().any(|instruction| {
+            matches!(
+                instruction,
+                Instruction::SuperCall(_) | Instruction::SuperCallSpread
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn find_instance_method(class: &Rc<Class>, name: &str) -> Option<(Rc<Class>, Rc<Function>)> {
+    let mut current = Some(class.clone());
+    while let Some(class) = current {
+        if let Some(function) = class.instance_methods.get(name) {
+            return Some((class.clone(), function.clone()));
+        }
+        current = class.superclass.clone();
+    }
+    None
+}
+
+fn find_static_method(class: &Rc<Class>, name: &str) -> Option<(Rc<Class>, Rc<Function>)> {
+    let mut current = Some(class.clone());
+    while let Some(class) = current {
+        if let Some(function) = class.static_methods.get(name) {
+            return Some((class.clone(), function.clone()));
+        }
+        current = class.superclass.clone();
+    }
+    None
+}
+
+fn find_static_field(class: &Rc<Class>, name: &str) -> Option<Value> {
+    let mut current = Some(class.clone());
+    while let Some(class) = current {
+        if let Some(value) = class.static_fields.borrow().get(name).cloned() {
+            return Some(value);
+        }
+        current = class.superclass.clone();
+    }
+    None
 }
 
 fn unbound_method(owner: &str, name: &str) -> Value {
@@ -4172,35 +4467,47 @@ fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, E
             if let Some(value) = instance.fields.borrow().get(name).cloned() {
                 return Ok(value);
             }
-            let function = instance
-                .class
-                .instance_methods
-                .get(name)
-                .cloned()
-                .ok_or_else(|| {
+            let (owner, function) =
+                find_instance_method(&instance.class, name).ok_or_else(|| {
                     Error::runtime(format!(
                         "instance of {} has no member '{name}'",
                         instance.class.name
                     ))
                 })?;
             if bind_method {
-                Ok(bound_method(function, Value::Instance(instance)))
+                Ok(bound_method(
+                    function,
+                    Value::Instance(instance),
+                    MethodContext {
+                        owner,
+                        name: Rc::from(name),
+                        kind: MethodKind::Instance,
+                    },
+                ))
             } else {
                 Ok(unbound_method(&instance.class.name, name))
             }
         }
         Value::Class(class) => {
-            if let Some(value) = class.static_fields.borrow().get(name).cloned() {
+            if let Some(value) = find_static_field(&class, name) {
                 return Ok(value);
             }
-            let function = class.static_methods.get(name).cloned().ok_or_else(|| {
+            let (owner, function) = find_static_method(&class, name).ok_or_else(|| {
                 Error::runtime(format!(
                     "class {} has no static member '{name}'",
                     class.name
                 ))
             })?;
             if bind_method {
-                Ok(bound_method(function, Value::Class(class)))
+                Ok(bound_method(
+                    function,
+                    Value::Class(class),
+                    MethodContext {
+                        owner,
+                        name: Rc::from(name),
+                        kind: MethodKind::Static,
+                    },
+                ))
             } else {
                 Ok(unbound_method(&class.name, name))
             }
@@ -4231,6 +4538,16 @@ fn set_receiver_member(target: Value, name: &str, value: Value) -> Result<(), Er
 }
 
 fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> Result<(), Error> {
+    call_with_context(vm, frames, callee, args, None)
+}
+
+fn call_with_context(
+    vm: &mut Vm,
+    frames: &mut Vec<Frame>,
+    callee: Value,
+    args: &[Value],
+    method_context: Option<MethodContext>,
+) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
             FunctionKind::Native {
@@ -4270,11 +4587,18 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
             FunctionKind::BoundMethod {
                 function: method,
                 receiver,
+                context,
             } => {
                 let mut bound_args = Vec::with_capacity(args.len() + 1);
                 bound_args.push(receiver.clone());
                 bound_args.extend_from_slice(args);
-                call(vm, frames, Value::Function(method.clone()), &bound_args)?;
+                call_with_context(
+                    vm,
+                    frames,
+                    Value::Function(method.clone()),
+                    &bound_args,
+                    Some(context.clone()),
+                )?;
             }
             FunctionKind::UnboundMethod { owner, name } => {
                 return Err(Error::runtime(format!(
@@ -4381,6 +4705,10 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     (None, None) => FrameBindings::Raw,
                     (None, Some(_)) => unreachable!("fast locals require a binding plan"),
                 };
+                let receiver_initialized = !method_context.as_ref().is_some_and(|context| {
+                    matches!(context.kind, MethodKind::Constructor)
+                        && context.owner.superclass.is_some()
+                });
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
@@ -4392,6 +4720,10 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     env: local,
                     bindings,
                     receiver: receiver.then(|| args[0].clone()),
+                    method_context,
+                    receiver_initialized,
+                    super_called: false,
+                    initialize_caller_receiver_on_return: false,
                     return_override: None,
                 });
                 vm.call_depth += 1;

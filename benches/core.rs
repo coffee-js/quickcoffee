@@ -144,6 +144,12 @@ fn main() {
             expected: "5050",
         },
         Workload {
+            name: "class-inherited-super-dispatch",
+            source: "class Base\n  constructor: (@value) ->\n  score: -> @value\nclass Child extends Base\n  score: -> super() + 1\nchild = new Child(41)\nsum = 0\ni = 0\nwhile i < 100\n  sum += child.score()\n  i++\nsum",
+            iterations: 1_000,
+            expected: "4200",
+        },
+        Workload {
             name: "negative-indexing",
             source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
             iterations: 20_000,

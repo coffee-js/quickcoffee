@@ -795,6 +795,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "map-spread",
         "member-lookup-loop",
         "class-construction-dispatch",
+        "class-inherited-super-dispatch",
         "negative-indexing",
         "stepped-string-iteration",
         "signed-by-iteration",
@@ -963,6 +964,24 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(classes_stdout.contains("\"profile_calls\":200,\"profile_container_ops\":301"));
     assert!(classes_stdout.contains("\"profile_value_allocations\":303"));
     assert!(classes_stdout.contains("\"profile_environment_allocations\":200"));
+    let inherited = Command::new(bin("qbench"))
+        .args([
+            "--only",
+            "class-inherited-super-dispatch",
+            "--json",
+            "--iterations",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(inherited.status.success());
+    let inherited_stdout = String::from_utf8_lossy(&inherited.stdout);
+    assert_eq!(inherited_stdout.lines().count(), 1);
+    assert!(inherited_stdout.contains("\"name\":\"class-inherited-super-dispatch\""));
+    assert!(inherited_stdout.contains("\"expected\":\"4200\",\"compile_ns\":"));
+    assert!(inherited_stdout.contains("\"profile_calls\":201,\"profile_container_ops\":103"));
+    assert!(inherited_stdout.contains("\"profile_value_allocations\":207"));
+    assert!(inherited_stdout.contains("\"profile_environment_allocations\":201"));
     let unknown = Command::new(bin("qbench"))
         .args(["--only", "missing-workload"])
         .output()

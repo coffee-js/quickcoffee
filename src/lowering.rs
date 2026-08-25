@@ -349,6 +349,7 @@ struct Compiler {
     loops: Vec<LoopContext>,
     in_function: bool,
     receiver_context: bool,
+    super_context: bool,
     return_cleanups: Vec<ReturnCleanup>,
 }
 struct LoopContext {
@@ -626,7 +627,7 @@ impl Compiler {
                 if !self.receiver_context {
                     return Err(self.parse_error("this and @ are valid only in class members"));
                 }
-                self.emit(Instruction::Load(RECEIVER_NAME.to_owned()));
+                self.emit(Instruction::LoadReceiver);
             }
             Expr::Assign(n, value) => {
                 self.expr(value)?;
@@ -1019,9 +1020,22 @@ impl Compiler {
             Expr::Function(params, rest, body) => {
                 self.function(params, rest.as_ref(), body)?;
             }
-            Expr::Class(name, members) => {
-                self.class(name, members)?;
+            Expr::Class(name, parent, members) => {
+                self.class(name, parent.as_deref(), members)?;
                 self.emit(Instruction::Store(name.clone()));
+            }
+            Expr::Super(items, span) => {
+                if !self.super_context {
+                    let error = Error::parse("super is valid only in members of a derived class")
+                        .at_span(span.into_source_span());
+                    return Err(error);
+                }
+                let spread = self.items(items, false)?;
+                self.emit(if spread {
+                    Instruction::SuperCallSpread
+                } else {
+                    Instruction::SuperCall(items.len())
+                });
             }
             Expr::Block(statements) => {
                 if statements.is_empty() {
@@ -1169,9 +1183,14 @@ impl Compiler {
         rest: Option<&String>,
         body: &Expr,
     ) -> Result<(), Error> {
-        self.function_inner(params, rest, body, false)
+        self.function_inner(params, rest, body, false, false)
     }
-    fn class(&mut self, name: &str, members: &[ClassMember]) -> Result<(), Error> {
+    fn class(
+        &mut self,
+        name: &str,
+        parent: Option<&Expr>,
+        members: &[ClassMember],
+    ) -> Result<(), Error> {
         let constructor = members
             .iter()
             .find(|member| !member.is_static && member.name == "constructor");
@@ -1180,6 +1199,9 @@ impl Compiler {
             .filter(|member| !member.is_static && member.name != "constructor")
             .collect();
         let static_methods: Vec<_> = members.iter().filter(|member| member.is_static).collect();
+        if let Some(parent) = parent {
+            self.expr(parent)?;
+        }
         if let Some(constructor) = constructor {
             let previous = self.enter_span(constructor.span);
             self.function_inner(
@@ -1187,16 +1209,24 @@ impl Compiler {
                 constructor.rest.as_ref(),
                 &constructor.body,
                 true,
+                parent.is_some(),
             )?;
             self.current_span = previous;
         }
         for member in instance_methods.iter().chain(static_methods.iter()) {
             let previous = self.enter_span(member.span);
-            self.function_inner(&member.params, member.rest.as_ref(), &member.body, true)?;
+            self.function_inner(
+                &member.params,
+                member.rest.as_ref(),
+                &member.body,
+                true,
+                parent.is_some(),
+            )?;
             self.current_span = previous;
         }
         self.emit(Instruction::MakeClass {
             name: name.to_owned(),
+            extends: parent.is_some(),
             constructor: constructor.is_some(),
             instance_methods: instance_methods
                 .iter()
@@ -1215,10 +1245,12 @@ impl Compiler {
         rest: Option<&String>,
         body: &Expr,
         receiver: bool,
+        super_context: bool,
     ) -> Result<(), Error> {
         let mut inner = Compiler {
             in_function: true,
             receiver_context: receiver,
+            super_context,
             record_source_map: self.record_source_map,
             ..Default::default()
         };

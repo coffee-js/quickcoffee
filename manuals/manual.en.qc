@@ -34,7 +34,7 @@
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
-## This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. Indented classes now support constructors, instance/static methods, confined receivers and new; extends/super and receiver-bound => remain later RFC 0134 stages.
+## This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. Indented classes support constructors, instance/static methods, confined receivers, new, private extends chains, and statically resolved super; receiver-bound => remains a later RFC 0134 stage.
 ## # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 ## Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
@@ -79,8 +79,12 @@ class ManualPoint
   constructor: (@x, @y = 2) ->
   sum: -> @x + @y
   @origin: -> new ManualPoint(0, 0)
+class NamedManualPoint extends ManualPoint
+  constructor: (x, y) -> super(x, y)
+  sum: -> super() + 1
 manual_point = new ManualPoint(40)
-manual_point.sum() == 42 and ManualPoint.origin().sum() == 0 and type(manual_point) == 'instance'
+named_manual_point = new NamedManualPoint(39, 2)
+manual_point.sum() == 42 and ManualPoint.origin().sum() == 0 and named_manual_point.sum() == 42 and type(manual_point) == 'instance'
 base = 20
 add = (x) ->
   result = x + base

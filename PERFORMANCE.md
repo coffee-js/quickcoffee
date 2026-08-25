@@ -132,6 +132,8 @@ issue #119 在改动公开 `Value::Map` 或内部成员键表示之前加入 `me
 
 issue #147 为 RFC 0134 的首个 class 阶段加入 `class-construction-dispatch`：100 轮分别构造带接收者字段的 `Counter` 并调用一次实例方法，结果必须为 `5050`。单次 profile 锁定 200 次调用（构造器与方法各 100）、301 次 class/instance 容器操作、303 次托管值分配事件和 200 个调用环境事件；负载同时进入 qbench 与 `cargo bench --bench core`，后续 class dispatch、字段槽位和继承查找优化必须保留语义结果并解释这些事件变化。
 
+issue #149 再加入 `class-inherited-super-dispatch`：`Child` 覆盖父方法并在 100 轮热调用中以静态解析的 `super()` 读取父实现，结果必须为 `4200`。单次 profile 锁定 201 次调用（一次继承构造、100 次子方法与 100 次父方法）、103 次 class/instance 容器操作、207 次托管值分配事件和 201 个调用环境事件；负载同时进入 qbench 与 `cargo bench --bench core`，用于隔离私有父链查找和 `super` 调度成本。
+
 `scripts/qbench_compare.py` 要求每个负载恰好包含一组 AB 与一组 BA、序号连续、pair 完整且迭代数/样本数/期望值一致。每个 phase 先分别计算两组 candidate-base 效应，再以配对中位数作为审阅效应。只有聚合效应以及 AB、BA 两个方向各自都超过 `max(5% × baseline, 3 × (base MAD + candidate MAD), 0.1 ms)` 才产生 warning；配对差值 MAD、AB/BA 全局中位数、未配对 side 中位数及正向负载数用于诊断，不从单项结果中扣除，因此不会隐藏真实的全局回退。
 
 绝对下限避免把亚毫秒 verify 等阶段的几十微秒 runner 抖动放大成告警；它不替代相对与 MAD 门槛。warning **不阻塞** PR；workflow job 本身也设置 `continue-on-error`，因为共享 runner 数据仍用于建立噪声模型，不能当成稳定发布阈值。解析错误、删除既有负载或配对契约失配仍让该实验 job 显式报错，避免把缺失数据当成“无回归”。版本化 ordered JSONL、两边原始 runs、candidate-only 记录、paired comparison JSON，以及包含 base/head revision、UTC 时间、runner、平台、Python、`rustc -Vv` 和实际命令的 metadata JSON 保留 30 天；Markdown step summary 展示告警、全部 phase 明细和 compile/execute 顺序偏差摘要。跨 runner、跨平台或历史 artifact 不直接套用这个阈值；在 A/A 校准不再显示持久方向偏差前，报告继续保持非阻断。
