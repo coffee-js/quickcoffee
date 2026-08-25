@@ -2,7 +2,7 @@ use crate::{
     ast::{Binary, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update},
     bytecode::{Chunk, Constant, Instruction, Pattern},
     lexer::TokenSpan,
-    vm::{Error, Value},
+    vm::{Error, Integer, Value},
 };
 use std::{collections::BTreeMap, rc::Rc};
 
@@ -102,13 +102,20 @@ fn constant_value(expression: &Expr) -> Option<Value> {
     match expression {
         Expr::Located(_, expression) => constant_value(expression),
         Expr::Number(value) => Some(Value::Number(*value)),
+        Expr::Integer(digits, radix) => Some(Value::Integer(Rc::new(Integer::parse_radix(
+            digits, *radix,
+        )?))),
         Expr::String(value) => Some(Value::String(Rc::from(value.as_str()))),
         Expr::Bool(value) => Some(Value::Bool(*value)),
         Expr::Nil => Some(Value::Nil),
         Expr::Interpolate(parts) => {
             let mut output = String::new();
             for part in parts {
-                output.push_str(&constant_value(part)?.to_string());
+                let value = constant_value(part)?;
+                match value {
+                    Value::Integer(value) => output.push_str(&value.to_decimal_string()),
+                    value => output.push_str(&value.to_string()),
+                }
             }
             Some(Value::String(Rc::from(output)))
         }
@@ -138,9 +145,20 @@ fn constant_value(expression: &Expr) -> Option<Value> {
         Expr::Unary(operator, operand) => {
             let value = constant_value(operand)?;
             match operator {
-                Unary::Neg => Some(Value::Number(-value.as_number()?)),
+                Unary::Neg => match value {
+                    Value::Number(value) => Some(Value::Number(-value)),
+                    Value::Integer(value) => Integer::from_bigint(-value.inner())
+                        .ok()
+                        .map(|value| Value::Integer(Rc::new(value))),
+                    _ => None,
+                },
                 Unary::Not => Some(Value::Bool(!value.as_bool()?)),
-                Unary::BitNot => Some(Value::Number((!constant_bit_integer(&value)?) as f64)),
+                Unary::BitNot => match value {
+                    Value::Integer(value) => Integer::from_bigint(!value.inner())
+                        .ok()
+                        .map(|value| Value::Integer(Rc::new(value))),
+                    value => Some(Value::Number((!constant_bit_integer(&value)?) as f64)),
+                },
             }
         }
         Expr::Exists(operand) => Some(Value::Bool(!matches!(constant_value(operand)?, Value::Nil))),
@@ -159,6 +177,26 @@ fn constant_value(expression: &Expr) -> Option<Value> {
 }
 
 fn constant_binary(operator: Binary, left: Value, right: Value) -> Option<Value> {
+    if let (Value::Integer(left), Value::Integer(right)) = (&left, &right) {
+        let integer = |value| {
+            Integer::from_bigint(value)
+                .ok()
+                .map(|value| Value::Integer(Rc::new(value)))
+        };
+        match operator {
+            Binary::Add => return integer(left.inner() + right.inner()),
+            Binary::Sub => return integer(left.inner() - right.inner()),
+            Binary::Mul => return integer(left.inner() * right.inner()),
+            Binary::BitAnd => return integer(left.inner() & right.inner()),
+            Binary::BitOr => return integer(left.inner() | right.inner()),
+            Binary::BitXor => return integer(left.inner() ^ right.inner()),
+            Binary::Lt => return Some(Value::Bool(left < right)),
+            Binary::Le => return Some(Value::Bool(left <= right)),
+            Binary::Gt => return Some(Value::Bool(left > right)),
+            Binary::Ge => return Some(Value::Bool(left >= right)),
+            _ => {}
+        }
+    }
     match operator {
         Binary::Coalesce => Some(if matches!(left, Value::Nil) {
             right
@@ -271,6 +309,7 @@ fn constant_equal(left: &Value, right: &Value) -> bool {
         (Value::Nil, Value::Nil) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::Number(left), Value::Number(right)) => left == right,
+        (Value::Integer(left), Value::Integer(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len()
@@ -539,6 +578,12 @@ impl Compiler {
         match e {
             Expr::Located(..) => unreachable!("handled before constant folding"),
             Expr::Number(n) => self.emit_const(Value::Number(*n)),
+            Expr::Integer(digits, radix) => {
+                let value = Integer::parse_radix(digits, *radix).ok_or_else(|| {
+                    Error::parse("invalid integer literal or integer exceeds the size limit")
+                })?;
+                self.emit_const(Value::Integer(Rc::new(value)));
+            }
             Expr::String(s) => self.emit_const(Value::String(Rc::from(s.as_str()))),
             Expr::Interpolate(parts) => {
                 for part in parts {
@@ -574,10 +619,9 @@ impl Compiler {
                 if !prefix {
                     self.emit(Instruction::Dup);
                 }
-                self.emit_const(Value::Number(1.));
                 self.emit(match update {
-                    Update::Increment => Instruction::Add,
-                    Update::Decrement => Instruction::Sub,
+                    Update::Increment => Instruction::Increment,
+                    Update::Decrement => Instruction::Decrement,
                 });
                 self.emit(Instruction::Store(name.clone()));
                 if !prefix {
@@ -1163,6 +1207,23 @@ impl Compiler {
 mod tests {
     use super::*;
     use crate::{ErrorKind, parser};
+
+    #[test]
+    fn exact_integer_arithmetic_is_constant_folded() {
+        let expression = Expr::Binary(
+            Box::new(Expr::Integer("1".to_owned(), 10)),
+            Binary::Add,
+            Box::new(Expr::Integer("2".to_owned(), 10)),
+        );
+        let value = constant_value(&expression).expect("integer addition folds");
+        assert_eq!(value.to_string(), "3n");
+        let program = parser::parse("1n + 2n").unwrap();
+        let chunk = compile(&program).unwrap();
+        assert_eq!(chunk.code.len(), 2);
+        assert!(!chunk.disassemble().contains("Add"));
+        let public_chunk = crate::compile("1n + 2n").unwrap();
+        assert_eq!(public_chunk.code.len(), 2);
+    }
 
     fn replace_mapped_chunk(
         source_map: &mut CompiledSourceMap,

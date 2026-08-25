@@ -57,6 +57,8 @@ pub enum Instruction {
     Not,
     BitNot,
     Exists,
+    Increment,
+    Decrement,
     Add,
     Sub,
     Mul,
@@ -277,6 +279,8 @@ impl Chunk {
                 | Instruction::Not
                 | Instruction::BitNot
                 | Instruction::Exists
+                | Instruction::Increment
+                | Instruction::Decrement
                 | Instruction::Stringify
                 | Instruction::Member(_) => {
                     require(1)?;
@@ -504,6 +508,14 @@ impl FingerprintEncoder {
                 self.tag(0x22);
                 self.u64(value.to_bits());
             }
+            Value::Integer(value) => {
+                self.tag(0x27);
+                let bytes = value.inner().to_signed_bytes_le();
+                self.u64(bytes.len() as u64);
+                for byte in bytes {
+                    self.byte(byte);
+                }
+            }
             Value::String(value) => {
                 self.tag(0x23);
                 self.string(value);
@@ -706,6 +718,8 @@ impl FingerprintEncoder {
                 self.u64(*index as u64);
             }
             Instruction::Return => simple!(0x7b),
+            Instruction::Increment => simple!(0x7c),
+            Instruction::Decrement => simple!(0x7d),
         }
     }
 }

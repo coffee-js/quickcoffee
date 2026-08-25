@@ -39,7 +39,7 @@
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
 ## ! is a strict Bool alias for not; != remains strict inequality.
 ## Chained strict or numeric comparisons keep the middle value once and short-circuit.
-## The standard library is ordinary functions: print, len, type, range, str, abs, sum, min, max, keys, values, join, split, and assert. Numeric aggregators accept strict finite-number arrays.
+## The standard library is ordinary functions: print, len, type, range, str, integer, number, abs, sum, min, max, keys, values, join, split, and assert. Aggregators accept homogeneous finite Number or Integer arrays. RFC 0135's 123n is arbitrary-precision Integer, strictly distinct from Number and convertible only explicitly.
 ## switch/when selects one strict-equality branch without fallthrough.
 ## try/catch/finally handles QuickCoffee runtime errors without JavaScript Error objects.
 ## Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.

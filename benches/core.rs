@@ -72,6 +72,12 @@ fn main() {
             expected: "4950",
         },
         Workload {
+            name: "exact-integer-updates",
+            source: "value = 9007199254740993n\ni = 0\nwhile i < 100\n  value += 7n\n  i++\nvalue",
+            iterations: 1_000,
+            expected: "9007199254741693n",
+        },
+        Workload {
             name: "floor-modulo",
             source: "sum = 0\ni = -100\nwhile i < 100\n  sum += i // 3\n  sum += i %% 7\n  i += 1\nsum",
             iterations: 10_000,

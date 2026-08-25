@@ -34,6 +34,7 @@ impl Iterator for ColumnChars<'_> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Token {
     Number(f64),
+    Integer(String, u32),
     String(String, bool),
     Ident(String),
     True,
@@ -623,11 +624,16 @@ fn lex_line(
                             return Err(Error::parse(format!("invalid base-{radix} number"))
                                 .at_line(line_number));
                         }
-                        let value = u64::from_str_radix(&digits, radix).map_err(|_| {
-                            Error::parse(format!("invalid base-{radix} number"))
-                                .at_line(line_number)
-                        })?;
-                        out.push(Token::Number(value as f64));
+                        if matches!(chars.peek(), Some('n')) {
+                            chars.next();
+                            out.push(Token::Integer(digits, radix));
+                        } else {
+                            let value = u64::from_str_radix(&digits, radix).map_err(|_| {
+                                Error::parse(format!("invalid base-{radix} number"))
+                                    .at_line(line_number)
+                            })?;
+                            out.push(Token::Number(value as f64));
+                        }
                         if columns_are_precise {
                             out.set_columns_since(
                                 first_new_token,
@@ -650,7 +656,9 @@ fn lex_line(
                         break;
                     }
                 }
+                let mut saw_exponent = false;
                 if matches!(chars.peek(), Some('e' | 'E')) {
+                    saw_exponent = true;
                     source.push(chars.next().expect("peeked"));
                     if matches!(chars.peek(), Some('+' | '-')) {
                         source.push(chars.next().expect("peeked"));
@@ -663,9 +671,20 @@ fn lex_line(
                         return Err(Error::parse("invalid exponent").at_line(line_number));
                     }
                 }
-                out.push(Token::Number(source.parse().map_err(|_| {
-                    Error::parse("invalid number").at_line(line_number)
-                })?));
+                if matches!(chars.peek(), Some('n')) {
+                    chars.next();
+                    if saw_dot || saw_exponent {
+                        return Err(Error::parse(
+                            "integer literal cannot have a fraction or exponent",
+                        )
+                        .at_line(line_number));
+                    }
+                    out.push(Token::Integer(source, 10));
+                } else {
+                    out.push(Token::Number(source.parse().map_err(|_| {
+                        Error::parse("invalid number").at_line(line_number)
+                    })?));
+                }
             }
             '\'' | '"' => {
                 let quote = ch;

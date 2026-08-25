@@ -45,7 +45,7 @@ cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调
 Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。
 Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 -- 后之参，以常字符串数组 argv 见于文中。
-其内府皆常函，如 print、len、type、range、str、abs、sum、min、max、keys、values、join、split、assert；数聚函唯受有限数之列。
+其内府皆常函，如 print、len、type、range、str、integer、number、abs、sum、min、max、keys、values、join、split、assert；数聚函唯受同类有限 Number 或 Integer 之列。RFC 0135 以 123n 为任意精度 Integer，与 Number 严别，唯明转之。
 函式取词法之境；末常参可书 y = 2，参缺或传 nil 则于函中取其值；末有余参，则书 tail...。
 常名之参可省其括：left, right -> left + right；常值、余参与解构仍须括之。
 return expression 惟函中可用，反其值而终此函；徒 return 得 nil，且清环行 finally。

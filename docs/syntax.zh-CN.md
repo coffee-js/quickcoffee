@@ -18,7 +18,9 @@
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。
 
-标准库是普通函数：`print`、`len`、`type`、`range`、`str`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。数值聚合只收一个有限数数组；`sum([])` 为 `0`，`min([])` 与 `max([])` 报错。
+标准库是普通函数：`print`、`len`、`type`、`range`、`str`、`integer`、`number`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。聚合只收同质的有限 Number 或 Integer 数组；`sum([])` 为 Number `0`，`min([])` 与 `max([])` 报错。
+
+`123n`、`0xffn`、`0b101n`、`0o755n` 是任意精度 Integer；它与 IEEE-754 Number 严格分型，不做混合算术或排序。Integer 支持精确算术、有符号位运算（不含 `>>>`）、range、索引/切片和 `by`；`integer(value)` 与 `number(value)` 是唯一数值类型转换，其中 Integer 转 Number 只接受安全整数范围。完整契约见 RFC 0135。
 
 | 类别 | 支持 | 不支持（本版） |
 |---|---|---|

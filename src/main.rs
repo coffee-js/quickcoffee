@@ -48,6 +48,10 @@ fn json_value(value: &Value) -> String {
                 "null".to_owned()
             }
         }
+        quickcoffee::ValueKind::Integer => format!(
+            "{{\"$quickcoffee\":\"integer\",\"value\":\"{}\"}}",
+            value.as_integer().unwrap().to_decimal_string()
+        ),
         quickcoffee::ValueKind::String => {
             format!("\"{}\"", json_escape(value.as_str().unwrap()))
         }
