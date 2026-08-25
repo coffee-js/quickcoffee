@@ -27,4 +27,4 @@ Integer 可作为 range 边界、Array/String 索引与切片边界以及 `for .
 
 ## 资源边界
 
-本阶段对单个 Integer 使用 1,000,000 bit 的硬上限，并在幂和左移前做增长检查；range 继续受既有最大元素数约束。issue #76 将把固定上限纳入可配置、可统计的统一内存预算。任何失败均是可审计错误，不回退成 Number。
+编译期字面量与宿主 `Integer` 构造保留 1,000,000 bit 的绝对实现天花板；`ResourceLimits::max_integer_bits`（默认同为 1,000,000）另行定义每个 Context 的 script-observable 边界。常量、全局/native 返回、算术、位运算、移位、幂、聚合与 JSON 数字在进入脚本前使用 `ResourceLimit::IntegerBits` 失败，资源错误不可捕获且不回退成 Number。共享 Program 不编码 Context 策略；range 继续受既有最大元素数约束。

@@ -1,3 +1,7 @@
+use crate::vm::{
+    decimal_source_failure_limit, decimal_text_resource_preflight,
+    integer_digits_resource_preflight,
+};
 use crate::{Decimal, Integer, ResourceLimit, ResourceLimits, Value};
 use num_bigint::BigInt;
 use std::{collections::BTreeMap, fmt, rc::Rc};
@@ -310,21 +314,69 @@ impl JsonParser<'_> {
         }
         let source = &self.source[start..self.cursor];
         if decimal {
-            let value = Decimal::parse(source)
-                .ok_or_else(|| self.syntax("JSON decimal exceeds the exact numeric limits"))?;
+            decimal_text_resource_preflight(source, self.limits).map_err(|error| {
+                JsonFailure::resource(
+                    error
+                        .resource_limit()
+                        .expect("decimal preflight only returns resource errors"),
+                    error.message(),
+                )
+            })?;
+            let value = Decimal::parse(source).ok_or_else(|| {
+                JsonFailure::resource(
+                    decimal_source_failure_limit(source),
+                    "JSON decimal exceeds the implementation numeric limit",
+                )
+            })?;
+            if value.scale() > self.limits.max_decimal_scale() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::DecimalScale,
+                    format!("decimal scale exceeds {}", self.limits.max_decimal_scale()),
+                ));
+            }
+            if value.inner().bits() > self.limits.max_decimal_coefficient_bits() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::DecimalCoefficientBits,
+                    format!(
+                        "decimal coefficient magnitude exceeds {} bits",
+                        self.limits.max_decimal_coefficient_bits()
+                    ),
+                ));
+            }
             Ok(Value::Decimal(Rc::new(value)))
         } else {
             let (negative, digits) = source
                 .strip_prefix('-')
                 .map_or((false, source), |digits| (true, digits));
+            integer_digits_resource_preflight(digits, self.limits).map_err(|error| {
+                JsonFailure::resource(
+                    error
+                        .resource_limit()
+                        .expect("integer preflight only returns resource errors"),
+                    error.message(),
+                )
+            })?;
             let mut value = BigInt::parse_bytes(digits.as_bytes(), 10)
                 .ok_or_else(|| self.syntax("invalid JSON integer"))?;
             if negative {
                 value = -value;
             }
+            if value.bits() > self.limits.max_integer_bits() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::IntegerBits,
+                    format!(
+                        "integer magnitude exceeds {} bits",
+                        self.limits.max_integer_bits()
+                    ),
+                ));
+            }
             Ok(Value::Integer(Rc::new(
-                Integer::from_bigint(value)
-                    .map_err(|_| self.syntax("JSON integer exceeds the exact numeric limits"))?,
+                Integer::from_bigint(value).map_err(|_| {
+                    JsonFailure::resource(
+                        ResourceLimit::IntegerBits,
+                        "JSON integer exceeds the implementation numeric limit",
+                    )
+                })?,
             )))
         }
     }
@@ -726,6 +778,11 @@ mod tests {
                 .unwrap_err()
                 .resource_limit(),
             Some(ResourceLimit::JsonNestingDepth)
+        );
+
+        assert_eq!(
+            parse_json("1e100001").unwrap_err().resource_limit(),
+            Some(ResourceLimit::DecimalScale)
         );
     }
 }

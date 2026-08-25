@@ -29,6 +29,6 @@ Rust API 暴露不透明 `Decimal`，提供字符串解析、coefficient/scale �
 
 ## 资源与确定性
 
-单个 Decimal coefficient 暂设 1,000,000 bit 上限，scale 暂设 100,000 上限；解析、对齐、乘法、幂、精确除法和显式舍入越界均报错，绝不回退成 Number。issue #76 将这些固定守卫纳入统一可配置资源预算。字节码指纹给 Decimal 独立类型标签，并编码规范 coefficient 与 scale；同值不同输入格式产生相同指纹。
+编译期字面量及宿主 `Decimal::parse` / `from_parts` 保留 coefficient 1,000,000 bit、scale 100,000 的绝对实现天花板。`ResourceLimits::max_decimal_coefficient_bits` 与 `max_decimal_scale`（默认同值）另行定义每个 Context 的 script-observable 边界；常量、全局/native 返回、解析、对齐、比较、聚合、乘法、幂、精确/显式除法、舍入、转换与 JSON 数字分别以不可捕获的 `DecimalCoefficientBits` 或 `DecimalScale` 失败。可预测增长在大幂分配前预检，最终规范值再次检查且绝不回退成 Number。共享 Program 与指纹不编码 Context 策略；字节码仍以独立类型标签编码规范 coefficient 与 scale，同值不同输入格式产生相同指纹。
 
 RFC 0050、0056、0060、0113、0117 与 0135 中只列 Number/Integer 的数值范围由本 RFC 扩展；既有 Number 与 Integer 行为保持不变。

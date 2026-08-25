@@ -184,6 +184,25 @@ impl Decimal {
     pub(crate) fn inner(&self) -> &BigInt {
         &self.coefficient
     }
+    pub(crate) fn parse_with_resource_limits(
+        source: &str,
+        limits: ResourceLimits,
+    ) -> Result<Self, Error> {
+        decimal_text_resource_preflight(source, limits)?;
+        let value = match Self::parse(source) {
+            Some(value) => value,
+            None if decimal_source_is_syntactically_valid(source) => {
+                let limit = decimal_source_failure_limit(source);
+                return Err(Error::resource(
+                    limit,
+                    "decimal text exceeds the implementation numeric limit",
+                ));
+            }
+            None => return Err(Error::runtime("string is not a valid bounded decimal")),
+        };
+        check_decimal_resource(&value, limits)?;
+        Ok(value)
+    }
     pub(crate) fn from_bigint(mut coefficient: BigInt, mut scale: u32) -> Result<Self, Error> {
         if scale > MAX_DECIMAL_SCALE {
             return Err(Error::runtime(
@@ -224,6 +243,274 @@ impl From<i64> for Decimal {
         }
     }
 }
+
+pub(crate) fn decimal_source_is_syntactically_valid(source: &str) -> bool {
+    if source.is_empty() || source.trim() != source {
+        return false;
+    }
+    let source = source.strip_prefix(['+', '-']).unwrap_or(source);
+    let mut exponent_parts = source.split(['e', 'E']);
+    let Some(mantissa) = exponent_parts.next() else {
+        return false;
+    };
+    if let Some(exponent) = exponent_parts.next() {
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
+        if exponent.is_empty() || !exponent.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+    }
+    if exponent_parts.next().is_some() {
+        return false;
+    }
+    let mut point_parts = mantissa.split('.');
+    let whole = point_parts.next().unwrap_or("");
+    let fraction = point_parts.next().unwrap_or("");
+    point_parts.next().is_none()
+        && !whole.is_empty()
+        && whole.bytes().all(|byte| byte.is_ascii_digit())
+        && fraction.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+pub(crate) fn decimal_source_failure_limit(source: &str) -> ResourceLimit {
+    let source = source.strip_prefix(['+', '-']).unwrap_or(source);
+    let mut exponent_parts = source.split(['e', 'E']);
+    let mantissa = exponent_parts.next().unwrap_or("");
+    let exponent = match exponent_parts.next().unwrap_or("0").parse::<i64>() {
+        Ok(exponent) if exponent.unsigned_abs() <= u64::from(MAX_DECIMAL_SCALE) => exponent,
+        _ => return ResourceLimit::DecimalScale,
+    };
+    let fraction_len = mantissa
+        .split_once('.')
+        .map_or(0, |(_, fraction)| fraction.len());
+    match i64::try_from(fraction_len)
+        .ok()
+        .and_then(|length| length.checked_sub(exponent))
+    {
+        Some(scale) if scale >= 0 && scale <= i64::from(MAX_DECIMAL_SCALE) => {
+            ResourceLimit::DecimalCoefficientBits
+        }
+        Some(scale) if scale < 0 && scale.unsigned_abs() <= u64::from(MAX_DECIMAL_SCALE) => {
+            ResourceLimit::DecimalCoefficientBits
+        }
+        _ => ResourceLimit::DecimalScale,
+    }
+}
+
+pub(crate) fn decimal_text_resource_preflight(
+    source: &str,
+    limits: ResourceLimits,
+) -> Result<(), Error> {
+    if !decimal_source_is_syntactically_valid(source) {
+        return Ok(());
+    }
+    let source = source.strip_prefix(['+', '-']).unwrap_or(source);
+    let mut exponent_parts = source.split(['e', 'E']);
+    let mantissa = exponent_parts.next().unwrap_or("");
+    let exponent = exponent_parts.next().unwrap_or("0");
+    let exponent = exponent.parse::<i64>().map_err(|_| {
+        Error::resource(
+            ResourceLimit::DecimalScale,
+            "decimal exponent exceeds the implementation scale limit",
+        )
+    })?;
+    if exponent.unsigned_abs() > u64::from(MAX_DECIMAL_SCALE) {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {}", decimal_scale_limit(limits)),
+        ));
+    }
+
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let raw_scale = i64::try_from(fraction.len())
+        .ok()
+        .and_then(|length| length.checked_sub(exponent))
+        .ok_or_else(|| {
+            Error::resource(
+                ResourceLimit::DecimalScale,
+                "decimal scale exceeds the implementation limit",
+            )
+        })?;
+    let appended_zeros = if raw_scale < 0 {
+        usize::try_from(raw_scale.unsigned_abs()).map_err(|_| {
+            Error::resource(
+                ResourceLimit::DecimalScale,
+                "decimal scale exceeds the implementation limit",
+            )
+        })?
+    } else {
+        0
+    };
+    if appended_zeros > MAX_DECIMAL_SCALE as usize {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            "decimal exponent exceeds the implementation scale limit",
+        ));
+    }
+    let raw_scale = u32::try_from(raw_scale.max(0)).map_err(|_| {
+        Error::resource(
+            ResourceLimit::DecimalScale,
+            "decimal scale exceeds the implementation limit",
+        )
+    })?;
+    let trailing_zeros = whole
+        .bytes()
+        .chain(fraction.bytes())
+        .rev()
+        .take_while(|byte| *byte == b'0')
+        .count();
+    let removable = raw_scale.min(u32::try_from(trailing_zeros).unwrap_or(u32::MAX));
+    let normalized_scale = raw_scale - removable;
+    let scale_limit = decimal_scale_limit(limits);
+    if normalized_scale > scale_limit {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {scale_limit}"),
+        ));
+    }
+
+    let original_digits = whole.len().saturating_add(fraction.len());
+    let normalized_digits = original_digits
+        .saturating_add(appended_zeros)
+        .saturating_sub(removable as usize);
+    let leading_zeros = whole
+        .bytes()
+        .chain(fraction.bytes())
+        .take_while(|byte| *byte == b'0')
+        .count()
+        .min(normalized_digits);
+    let significant_digits = if leading_zeros >= original_digits {
+        0
+    } else {
+        normalized_digits.saturating_sub(leading_zeros)
+    };
+    let minimum_bits = if significant_digits == 0 {
+        0
+    } else {
+        u64::try_from(significant_digits.saturating_sub(1))
+            .unwrap_or(u64::MAX)
+            .saturating_mul(3)
+            .saturating_add(1)
+    };
+    let coefficient_limit = decimal_coefficient_bit_limit(limits);
+    if minimum_bits > coefficient_limit {
+        Err(Error::resource(
+            ResourceLimit::DecimalCoefficientBits,
+            format!("decimal coefficient magnitude exceeds {coefficient_limit} bits"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn integer_digits_resource_preflight(
+    digits: &str,
+    limits: ResourceLimits,
+) -> Result<(), Error> {
+    let significant_digits = digits.trim_start_matches('0').len();
+    let minimum_bits = if significant_digits == 0 {
+        0
+    } else {
+        u64::try_from(significant_digits.saturating_sub(1))
+            .unwrap_or(u64::MAX)
+            .saturating_mul(3)
+            .saturating_add(1)
+    };
+    let limit = integer_bit_limit(limits);
+    if minimum_bits > limit {
+        Err(Error::resource(
+            ResourceLimit::IntegerBits,
+            format!("integer magnitude exceeds {limit} bits"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn integer_bit_limit(limits: ResourceLimits) -> u64 {
+    limits.max_integer_bits().min(MAX_INTEGER_BITS)
+}
+
+fn decimal_coefficient_bit_limit(limits: ResourceLimits) -> u64 {
+    limits.max_decimal_coefficient_bits().min(MAX_DECIMAL_BITS)
+}
+
+fn decimal_scale_limit(limits: ResourceLimits) -> u32 {
+    limits.max_decimal_scale().min(MAX_DECIMAL_SCALE)
+}
+
+fn check_integer_resource(value: &BigInt, limits: ResourceLimits) -> Result<(), Error> {
+    let limit = integer_bit_limit(limits);
+    if limit == MAX_INTEGER_BITS {
+        return Ok(());
+    }
+    if value.bits() > limit {
+        Err(Error::resource(
+            ResourceLimit::IntegerBits,
+            format!("integer magnitude exceeds {limit} bits"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn check_decimal_resource(value: &Decimal, limits: ResourceLimits) -> Result<(), Error> {
+    let scale_limit = decimal_scale_limit(limits);
+    if scale_limit < MAX_DECIMAL_SCALE && value.scale > scale_limit {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {scale_limit}"),
+        ));
+    }
+    let coefficient_limit = decimal_coefficient_bit_limit(limits);
+    if coefficient_limit < MAX_DECIMAL_BITS && value.coefficient.bits() > coefficient_limit {
+        Err(Error::resource(
+            ResourceLimit::DecimalCoefficientBits,
+            format!("decimal coefficient magnitude exceeds {coefficient_limit} bits"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn resource_integer(value: BigInt, limits: ResourceLimits) -> Result<Integer, Error> {
+    let limit = integer_bit_limit(limits);
+    if value.bits() > limit {
+        Err(Error::resource(
+            ResourceLimit::IntegerBits,
+            format!("integer magnitude exceeds {limit} bits"),
+        ))
+    } else {
+        Ok(Integer(value))
+    }
+}
+
+#[inline]
+fn resource_decimal(
+    coefficient: BigInt,
+    scale: u32,
+    limits: ResourceLimits,
+) -> Result<Decimal, Error> {
+    let value = Decimal::from_bigint(coefficient, scale).map_err(|_| {
+        if scale > MAX_DECIMAL_SCALE {
+            Error::resource(
+                ResourceLimit::DecimalScale,
+                format!("decimal scale exceeds {MAX_DECIMAL_SCALE} implementation limit"),
+            )
+        } else {
+            Error::resource(
+                ResourceLimit::DecimalCoefficientBits,
+                format!(
+                    "decimal coefficient magnitude exceeds {MAX_DECIMAL_BITS} implementation bits"
+                ),
+            )
+        }
+    })?;
+    if decimal_limits_active(limits) {
+        check_decimal_resource(&value, limits)?;
+    }
+    Ok(value)
+}
 impl Ord for Decimal {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let scale = self.scale.max(other.scale);
@@ -242,36 +529,95 @@ fn decimal_power_of_ten(exponent: u32) -> BigInt {
     BigInt::from(10_u8).pow(exponent)
 }
 
-fn decimal_add(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+#[inline]
+fn check_decimal_power_growth(
+    coefficient: &BigInt,
+    exponent: u32,
+    limits: ResourceLimits,
+) -> Result<(), Error> {
+    let limit = decimal_coefficient_bit_limit(limits);
+    if limit == MAX_DECIMAL_BITS || coefficient.is_zero() {
+        return Ok(());
+    }
+    let minimum_bits = coefficient
+        .bits()
+        .saturating_add(u64::from(exponent).saturating_mul(3))
+        .saturating_sub(1);
+    if minimum_bits > limit {
+        Err(Error::resource(
+            ResourceLimit::DecimalCoefficientBits,
+            format!("decimal coefficient magnitude exceeds {limit} bits"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn decimal_add(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
-    Decimal::from_bigint(
+    if decimal_limits_active(limits) {
+        check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
+        check_decimal_power_growth(right.inner(), scale - right.scale, limits)?;
+    }
+    resource_decimal(
         left.inner() * decimal_power_of_ten(scale - left.scale)
             + right.inner() * decimal_power_of_ten(scale - right.scale),
         scale,
+        limits,
     )
 }
 
-fn decimal_sub(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+#[inline]
+fn decimal_sub(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
-    Decimal::from_bigint(
+    if decimal_limits_active(limits) {
+        check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
+        check_decimal_power_growth(right.inner(), scale - right.scale, limits)?;
+    }
+    resource_decimal(
         left.inner() * decimal_power_of_ten(scale - left.scale)
             - right.inner() * decimal_power_of_ten(scale - right.scale),
         scale,
+        limits,
     )
 }
 
-fn decimal_mul(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_mul(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
     let scale = left
         .scale
         .checked_add(right.scale)
         .ok_or_else(|| Error::runtime("decimal multiplication exceeds the scale limit"))?;
-    Decimal::from_bigint(left.inner() * right.inner(), scale)
+    if scale > decimal_scale_limit(limits) {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {}", decimal_scale_limit(limits)),
+        ));
+    }
+    let minimum_bits = left
+        .inner()
+        .bits()
+        .saturating_add(right.inner().bits())
+        .saturating_sub(1);
+    if !left.inner().is_zero()
+        && !right.inner().is_zero()
+        && minimum_bits > decimal_coefficient_bit_limit(limits)
+    {
+        return Err(Error::resource(
+            ResourceLimit::DecimalCoefficientBits,
+            format!(
+                "decimal coefficient magnitude exceeds {} bits",
+                decimal_coefficient_bit_limit(limits)
+            ),
+        ));
+    }
+    resource_decimal(left.inner() * right.inner(), scale, limits)
 }
 
-fn bounded_factor_exponent(value: &BigInt, factor: u8) -> u32 {
+fn bounded_factor_exponent(value: &BigInt, factor: u8, limit: u32) -> u32 {
     let factor = BigInt::from(factor);
     let mut low = 0_u32;
-    let mut high = MAX_DECIMAL_SCALE + 1;
+    let mut high = limit.saturating_add(1);
     while low < high {
         let middle = low + (high - low).div_ceil(2);
         if (value % factor.pow(middle)).is_zero() {
@@ -283,10 +629,16 @@ fn bounded_factor_exponent(value: &BigInt, factor: u8) -> u32 {
     low
 }
 
-fn decimal_exact_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_exact_div(
+    left: &Decimal,
+    right: &Decimal,
+    limits: ResourceLimits,
+) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal division by zero"));
     }
+    check_decimal_power_growth(left.inner(), right.scale, limits)?;
+    check_decimal_power_growth(right.inner(), left.scale, limits)?;
     let mut numerator = left.inner() * decimal_power_of_ten(right.scale);
     let mut denominator = right.inner() * decimal_power_of_ten(left.scale);
     let gcd = numerator.gcd(&denominator);
@@ -298,11 +650,13 @@ fn decimal_exact_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> 
     }
     let two = BigInt::from(2_u8);
     let five = BigInt::from(5_u8);
-    let twos = bounded_factor_exponent(&denominator, 2);
-    let fives = bounded_factor_exponent(&denominator, 5);
-    if twos > MAX_DECIMAL_SCALE || fives > MAX_DECIMAL_SCALE {
-        return Err(Error::runtime(
-            "decimal division exceeds the implementation scale limit",
+    let scale_limit = decimal_scale_limit(limits);
+    let twos = bounded_factor_exponent(&denominator, 2, scale_limit);
+    let fives = bounded_factor_exponent(&denominator, 5, scale_limit);
+    if twos > scale_limit || fives > scale_limit {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {scale_limit}"),
         ));
     }
     denominator /= two.pow(twos) * five.pow(fives);
@@ -312,49 +666,74 @@ fn decimal_exact_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> 
         ));
     }
     let scale = twos.max(fives);
-    if scale > MAX_DECIMAL_SCALE {
-        return Err(Error::runtime(
-            "decimal division exceeds the implementation scale limit",
+    check_decimal_power_growth(&numerator, scale - twos, limits)?;
+    check_decimal_power_growth(&numerator, scale - fives, limits)?;
+    numerator *= two.pow(scale - twos) * five.pow(scale - fives);
+    resource_decimal(numerator, scale, limits)
+}
+
+fn aligned_decimal_coefficients(
+    left: &Decimal,
+    right: &Decimal,
+    limits: ResourceLimits,
+) -> Result<(BigInt, BigInt, u32), Error> {
+    let scale = left.scale.max(right.scale);
+    check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
+    check_decimal_power_growth(right.inner(), scale - right.scale, limits)?;
+    let left = left.inner() * decimal_power_of_ten(scale - left.scale);
+    let right = right.inner() * decimal_power_of_ten(scale - right.scale);
+    let limit = decimal_coefficient_bit_limit(limits);
+    if limit < MAX_DECIMAL_BITS && (left.bits() > limit || right.bits() > limit) {
+        return Err(Error::resource(
+            ResourceLimit::DecimalCoefficientBits,
+            format!("decimal aligned coefficient magnitude exceeds {limit} bits"),
         ));
     }
-    numerator *= two.pow(scale - twos) * five.pow(scale - fives);
-    Decimal::from_bigint(numerator, scale)
+    Ok((left, right, scale))
 }
 
-fn aligned_decimal_coefficients(left: &Decimal, right: &Decimal) -> (BigInt, BigInt, u32) {
-    let scale = left.scale.max(right.scale);
-    (
-        left.inner() * decimal_power_of_ten(scale - left.scale),
-        right.inner() * decimal_power_of_ten(scale - right.scale),
-        scale,
-    )
+fn decimal_cmp_resource(
+    left: &Decimal,
+    right: &Decimal,
+    limits: ResourceLimits,
+) -> Result<std::cmp::Ordering, Error> {
+    let (left, right, _) = aligned_decimal_coefficients(left, right, limits)?;
+    Ok(left.cmp(&right))
 }
 
-fn decimal_floor_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_floor_div(
+    left: &Decimal,
+    right: &Decimal,
+    limits: ResourceLimits,
+) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal floor division by zero"));
     }
-    let (left, right, _) = aligned_decimal_coefficients(left, right);
-    Decimal::from_bigint(integer_floor_div(&left, &right)?, 0)
+    let (left, right, _) = aligned_decimal_coefficients(left, right, limits)?;
+    resource_decimal(integer_floor_div(&left, &right)?, 0, limits)
 }
 
-fn decimal_rem(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_rem(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal remainder by zero"));
     }
-    let (left, right, scale) = aligned_decimal_coefficients(left, right);
-    Decimal::from_bigint(integer_rem(&left, &right)?, scale)
+    let (left, right, scale) = aligned_decimal_coefficients(left, right, limits)?;
+    resource_decimal(integer_rem(&left, &right)?, scale, limits)
 }
 
-fn decimal_modulo(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_modulo(
+    left: &Decimal,
+    right: &Decimal,
+    limits: ResourceLimits,
+) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal modulo by zero"));
     }
-    let (left, right, scale) = aligned_decimal_coefficients(left, right);
-    Decimal::from_bigint(integer_modulo(&left, &right)?, scale)
+    let (left, right, scale) = aligned_decimal_coefficients(left, right, limits)?;
+    resource_decimal(integer_modulo(&left, &right)?, scale, limits)
 }
 
-fn decimal_pow(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+fn decimal_pow(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
     if right.scale != 0 {
         return Err(Error::runtime(
             "decimal exponent must be a non-negative whole Decimal",
@@ -367,14 +746,26 @@ fn decimal_pow(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
         .scale
         .checked_mul(exponent)
         .ok_or_else(|| Error::runtime("decimal power exceeds the implementation scale limit"))?;
-    if left.inner().bits().saturating_mul(u64::from(exponent)) > MAX_DECIMAL_BITS
-        || scale > MAX_DECIMAL_SCALE
+    if left.inner().bits().saturating_mul(u64::from(exponent))
+        > decimal_coefficient_bit_limit(limits)
+        || scale > decimal_scale_limit(limits)
     {
-        return Err(Error::runtime(
-            "decimal power exceeds the implementation limits",
-        ));
+        return Err(if scale > decimal_scale_limit(limits) {
+            Error::resource(
+                ResourceLimit::DecimalScale,
+                format!("decimal scale exceeds {}", decimal_scale_limit(limits)),
+            )
+        } else {
+            Error::resource(
+                ResourceLimit::DecimalCoefficientBits,
+                format!(
+                    "decimal coefficient magnitude exceeds {} bits",
+                    decimal_coefficient_bit_limit(limits)
+                ),
+            )
+        });
     }
-    Decimal::from_bigint(left.inner().pow(exponent), scale)
+    resource_decimal(left.inner().pow(exponent), scale, limits)
 }
 
 #[derive(Clone, Copy)]
@@ -405,7 +796,7 @@ impl DecimalRounding {
     }
 }
 
-fn decimal_scale_argument(value: &Value) -> Result<u32, Error> {
+fn decimal_scale_argument(value: &Value, limits: ResourceLimits) -> Result<u32, Error> {
     let scale = match value {
         Value::Number(value)
             if value.is_finite()
@@ -424,7 +815,12 @@ fn decimal_scale_argument(value: &Value) -> Result<u32, Error> {
             ));
         }
     };
-    if scale > MAX_DECIMAL_SCALE {
+    if scale > decimal_scale_limit(limits) {
+        Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {}", decimal_scale_limit(limits)),
+        ))
+    } else if scale > MAX_DECIMAL_SCALE {
         Err(Error::runtime(
             "decimal scale exceeds the implementation limit",
         ))
@@ -477,21 +873,36 @@ fn decimal_div_rounded(
     right: &Decimal,
     scale: u32,
     rounding: DecimalRounding,
+    limits: ResourceLimits,
 ) -> Result<Decimal, Error> {
     let numerator_scale = right
         .scale
         .checked_add(scale)
         .ok_or_else(|| Error::runtime("decimal division exceeds the scale limit"))?;
+    if scale > decimal_scale_limit(limits) {
+        return Err(Error::resource(
+            ResourceLimit::DecimalScale,
+            format!("decimal scale exceeds {}", decimal_scale_limit(limits)),
+        ));
+    }
+    check_decimal_power_growth(left.inner(), numerator_scale, limits)?;
+    check_decimal_power_growth(right.inner(), left.scale, limits)?;
     let numerator = left.inner() * decimal_power_of_ten(numerator_scale);
     let denominator = right.inner() * decimal_power_of_ten(left.scale);
-    Decimal::from_bigint(
+    resource_decimal(
         round_decimal_ratio(numerator, denominator, rounding)?,
         scale,
+        limits,
     )
 }
 
-fn decimal_round(value: &Decimal, scale: u32, rounding: DecimalRounding) -> Result<Decimal, Error> {
-    decimal_div_rounded(value, &Decimal::from(1_i64), scale, rounding)
+fn decimal_round(
+    value: &Decimal,
+    scale: u32,
+    rounding: DecimalRounding,
+    limits: ResourceLimits,
+) -> Result<Decimal, Error> {
+    decimal_div_rounded(value, &Decimal::from(1_i64), scale, rounding, limits)
 }
 
 /// An immutable structured error visible to QuickCoffee scripts and embedding hosts.
@@ -746,6 +1157,42 @@ impl From<&str> for Value {
         Self::string(value)
     }
 }
+
+fn numeric_limits_active(limits: ResourceLimits) -> bool {
+    integer_bit_limit(limits) < MAX_INTEGER_BITS || decimal_limits_active(limits)
+}
+
+fn decimal_limits_active(limits: ResourceLimits) -> bool {
+    decimal_coefficient_bit_limit(limits) < MAX_DECIMAL_BITS
+        || decimal_scale_limit(limits) < MAX_DECIMAL_SCALE
+}
+
+fn check_value_numeric_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Integer(value) => check_integer_resource(value.inner(), limits)?,
+            Value::Decimal(value) => check_decimal_resource(value, limits)?,
+            Value::Array(values) => pending.extend(values.iter()),
+            Value::Map(values) => pending.extend(values.values()),
+            Value::Error(error) => {
+                pending.push(&error.data);
+                let mut cause = error.cause.as_deref();
+                while let Some(error) = cause {
+                    pending.push(&error.data);
+                    cause = error.cause.as_deref();
+                }
+            }
+            Value::Nil
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Function(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// Stable category for an error crossing the Rust embedding boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
@@ -1090,7 +1537,7 @@ enum FunctionKind {
     },
     ResourceBuiltin {
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
-        allocation_profile: fn(&Value) -> u64,
+        allocation_profile: Option<fn(&Value) -> u64>,
     },
 }
 type Env = Rc<RefCell<Environment>>;
@@ -1950,7 +2397,22 @@ impl Context {
             Value::Function(Rc::new(Function {
                 inner: FunctionKind::ResourceBuiltin {
                     function,
-                    allocation_profile,
+                    allocation_profile: Some(allocation_profile),
+                },
+            })),
+        );
+    }
+    fn add_unprofiled_resource_builtin(
+        &mut self,
+        name: impl Into<String>,
+        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+    ) {
+        self.set_global(
+            name,
+            Value::Function(Rc::new(Function {
+                inner: FunctionKind::ResourceBuiltin {
+                    function,
+                    allocation_profile: None,
                 },
             })),
         );
@@ -1988,6 +2450,7 @@ impl Context {
             instructions: 0,
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
+            numeric_limits_active: numeric_limits_active(self.resource_limits),
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
@@ -2113,7 +2576,7 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_native("number", |xs| {
+        self.add_unprofiled_resource_builtin("number", |xs, limits| {
             if xs.len() != 1 {
                 return Err(Error::runtime("number expects one argument"));
             }
@@ -2129,24 +2592,24 @@ impl Context {
                         })?;
                     Ok(Value::Number(value as f64))
                 }
-                Value::Decimal(value) => decimal_to_exact_number(value).map(Value::Number),
+                Value::Decimal(value) => decimal_to_exact_number(value, limits).map(Value::Number),
                 _ => Err(Error::runtime(
                     "number expects a number, integer, or exactly representable decimal",
                 )),
             }
         });
-        self.add_builtin(
+        self.add_resource_builtin(
             "decimal",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 1 {
                     return Err(Error::runtime("decimal expects one argument"));
                 }
                 let value = match &xs[0] {
                     Value::Decimal(value) => (**value).clone(),
-                    Value::Integer(value) => Decimal::from_bigint(value.inner().clone(), 0)?,
-                    Value::String(value) => Decimal::parse(value).ok_or_else(|| {
-                        Error::runtime("string is not a valid bounded decimal")
-                    })?,
+                    Value::Integer(value) => {
+                        resource_decimal(value.inner().clone(), 0, limits)?
+                    }
+                    Value::String(value) => Decimal::parse_with_resource_limits(value, limits)?,
                     Value::Number(_) => {
                         return Err(Error::runtime(
                             "decimal does not accept Number; use a suffixed literal or decimal string",
@@ -2162,9 +2625,9 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "decimal_div",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 4 {
                     return Err(Error::runtime(
                         "decimal_div expects two decimals, scale, and rounding mode",
@@ -2175,17 +2638,17 @@ impl Context {
                         "decimal_div expects Decimal dividend and divisor",
                     ));
                 };
-                let scale = decimal_scale_argument(&xs[2])?;
+                let scale = decimal_scale_argument(&xs[2], limits)?;
                 let rounding = DecimalRounding::parse(&xs[3])?;
                 Ok(Value::Decimal(Rc::new(decimal_div_rounded(
-                    left, right, scale, rounding,
+                    left, right, scale, rounding, limits,
                 )?)))
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "round_decimal",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 3 {
                     return Err(Error::runtime(
                         "round_decimal expects a decimal, scale, and rounding mode",
@@ -2194,10 +2657,10 @@ impl Context {
                 let Value::Decimal(value) = &xs[0] else {
                     return Err(Error::runtime("round_decimal expects a Decimal value"));
                 };
-                let scale = decimal_scale_argument(&xs[1])?;
+                let scale = decimal_scale_argument(&xs[1], limits)?;
                 let rounding = DecimalRounding::parse(&xs[2])?;
                 Ok(Value::Decimal(Rc::new(decimal_round(
-                    value, scale, rounding,
+                    value, scale, rounding, limits,
                 )?)))
             },
             one_value_allocation,
@@ -2220,9 +2683,15 @@ impl Context {
                 )),
             }
         });
-        self.add_native("sum", |xs| aggregate_numeric(xs, "sum", Aggregate::Sum));
-        self.add_native("min", |xs| aggregate_numeric(xs, "min", Aggregate::Min));
-        self.add_native("max", |xs| aggregate_numeric(xs, "max", Aggregate::Max));
+        self.add_unprofiled_resource_builtin("sum", |xs, limits| {
+            aggregate_numeric(xs, "sum", Aggregate::Sum, limits)
+        });
+        self.add_unprofiled_resource_builtin("min", |xs, limits| {
+            aggregate_numeric(xs, "min", Aggregate::Min, limits)
+        });
+        self.add_unprofiled_resource_builtin("max", |xs, limits| {
+            aggregate_numeric(xs, "max", Aggregate::Max, limits)
+        });
         self.add_builtin(
             "error",
             |xs| {
@@ -2524,6 +2993,7 @@ struct Vm {
     instructions: u64,
     max_call_depth: usize,
     resource_limits: ResourceLimits,
+    numeric_limits_active: bool,
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
@@ -2641,6 +3111,7 @@ impl Vm {
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
+            numeric_limits_active: self.numeric_limits_active,
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
@@ -2742,18 +3213,31 @@ impl Vm {
                         .get(*i)
                         .ok_or_else(|| Error::runtime("invalid constant"))?
                     {
-                        Constant::Value(v) => frame.stack.push(v.clone()),
+                        Constant::Value(v) => {
+                            if self.numeric_limits_active {
+                                check_value_numeric_resources(v, self.resource_limits)?;
+                            }
+                            frame.stack.push(v.clone())
+                        }
                         _ => {
                             return Err(Error::runtime("function template used as value constant"));
                         }
                     },
-                    Instruction::Load(n) => frame.stack.push(
-                        lookup_frame(frame, instruction_pc, n)
-                            .ok_or_else(|| Error::runtime(format!("unknown name '{n}'")))?,
-                    ),
-                    Instruction::LoadOrNil(n) => frame
-                        .stack
-                        .push(lookup_frame(frame, instruction_pc, n).unwrap_or(Value::Nil)),
+                    Instruction::Load(n) => {
+                        let value = lookup_frame(frame, instruction_pc, n)
+                            .ok_or_else(|| Error::runtime(format!("unknown name '{n}'")))?;
+                        if self.numeric_limits_active {
+                            check_value_numeric_resources(&value, self.resource_limits)?;
+                        }
+                        frame.stack.push(value);
+                    }
+                    Instruction::LoadOrNil(n) => {
+                        let value = lookup_frame(frame, instruction_pc, n).unwrap_or(Value::Nil);
+                        if self.numeric_limits_active {
+                            check_value_numeric_resources(&value, self.resource_limits)?;
+                        }
+                        frame.stack.push(value);
+                    }
                     Instruction::Store(n) => {
                         let v = pop(frame)?;
                         store_frame(frame, instruction_pc, n, v.clone());
@@ -2818,15 +3302,10 @@ impl Vm {
                     }
                     Instruction::Neg => match pop(frame)? {
                         Value::Number(x) => frame.stack.push(Value::Number(-x)),
-                        Value::Integer(x) => push_integer(frame, -x.inner())?,
-                        Value::Decimal(x) => {
-                            frame
-                                .stack
-                                .push(Value::Decimal(Rc::new(Decimal::from_bigint(
-                                    -x.inner(),
-                                    x.scale,
-                                )?)))
-                        }
+                        Value::Integer(x) => push_integer(frame, -x.inner(), self.resource_limits)?,
+                        Value::Decimal(x) => frame.stack.push(Value::Decimal(Rc::new(
+                            resource_decimal(-x.inner(), x.scale, self.resource_limits)?,
+                        ))),
                         _ => {
                             return Err(Error::runtime(
                                 "unary '-' expects number, integer, or decimal",
@@ -2842,67 +3321,115 @@ impl Vm {
                             let x = bit_integer(Value::Number(x))?;
                             frame.stack.push(Value::Number((!x) as f64));
                         }
-                        Value::Integer(x) => push_integer(frame, !x.inner())?,
+                        Value::Integer(x) => push_integer(frame, !x.inner(), self.resource_limits)?,
                         _ => return Err(Error::runtime("'~' expects number or integer")),
                     },
                     Instruction::Exists => {
                         let value = pop(frame)?;
                         frame.stack.push(Value::Bool(!matches!(value, Value::Nil)))
                     }
-                    Instruction::Increment => numeric_update(frame, true)?,
-                    Instruction::Decrement => numeric_update(frame, false)?,
-                    Instruction::Add => {
-                        numeric_binary(frame, |a, b| a + b, |a, b| Ok(a + b), decimal_add)?
-                    }
-                    Instruction::Sub => {
-                        numeric_binary(frame, |a, b| a - b, |a, b| Ok(a - b), decimal_sub)?
-                    }
-                    Instruction::Mul => {
-                        numeric_binary(frame, |a, b| a * b, |a, b| Ok(a * b), decimal_mul)?
-                    }
-                    Instruction::Div => {
-                        numeric_binary(frame, |a, b| a / b, integer_div, decimal_exact_div)?
-                    }
+                    Instruction::Increment => numeric_update(frame, true, self.resource_limits)?,
+                    Instruction::Decrement => numeric_update(frame, false, self.resource_limits)?,
+                    Instruction::Add => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a + b,
+                        |a, b, _| Ok(a + b),
+                        decimal_add,
+                    )?,
+                    Instruction::Sub => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a - b,
+                        |a, b, _| Ok(a - b),
+                        decimal_sub,
+                    )?,
+                    Instruction::Mul => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a * b,
+                        integer_mul_resource,
+                        decimal_mul,
+                    )?,
+                    Instruction::Div => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a / b,
+                        |a, b, _| integer_div(a, b),
+                        decimal_exact_div,
+                    )?,
                     Instruction::FloorDiv => numeric_binary(
                         frame,
+                        self.resource_limits,
                         |a, b| (a / b).floor(),
-                        integer_floor_div,
+                        |a, b, _| integer_floor_div(a, b),
                         decimal_floor_div,
                     )?,
-                    Instruction::Rem => {
-                        numeric_binary(frame, |a, b| a % b, integer_rem, decimal_rem)?
-                    }
+                    Instruction::Rem => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a % b,
+                        |a, b, _| integer_rem(a, b),
+                        decimal_rem,
+                    )?,
                     Instruction::Modulo => numeric_binary(
                         frame,
+                        self.resource_limits,
                         |a, b| (a % b + b) % b,
-                        integer_modulo,
+                        |a, b, _| integer_modulo(a, b),
                         decimal_modulo,
                     )?,
-                    Instruction::BitAnd => numeric_bit_binary(frame, |a, b| a & b, |a, b| a & b)?,
-                    Instruction::BitOr => numeric_bit_binary(frame, |a, b| a | b, |a, b| a | b)?,
-                    Instruction::BitXor => numeric_bit_binary(frame, |a, b| a ^ b, |a, b| a ^ b)?,
-                    Instruction::ShiftLeft => numeric_shift(frame, false)?,
-                    Instruction::ShiftRight => numeric_shift(frame, true)?,
+                    Instruction::BitAnd => {
+                        numeric_bit_binary(frame, self.resource_limits, |a, b| a & b, |a, b| a & b)?
+                    }
+                    Instruction::BitOr => {
+                        numeric_bit_binary(frame, self.resource_limits, |a, b| a | b, |a, b| a | b)?
+                    }
+                    Instruction::BitXor => {
+                        numeric_bit_binary(frame, self.resource_limits, |a, b| a ^ b, |a, b| a ^ b)?
+                    }
+                    Instruction::ShiftLeft => numeric_shift(frame, false, self.resource_limits)?,
+                    Instruction::ShiftRight => numeric_shift(frame, true, self.resource_limits)?,
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
                     }
-                    Instruction::Pow => {
-                        numeric_binary(frame, |a, b| a.powf(b), integer_pow, decimal_pow)?
-                    }
+                    Instruction::Pow => numeric_binary(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a.powf(b),
+                        integer_pow,
+                        decimal_pow,
+                    )?,
                     Instruction::Eq => compare(frame, equal)?,
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
-                    Instruction::Lt => {
-                        numeric_order(frame, |a, b| a < b, |a, b| a < b, |a, b| a < b)?
-                    }
-                    Instruction::Le => {
-                        numeric_order(frame, |a, b| a <= b, |a, b| a <= b, |a, b| a <= b)?
-                    }
-                    Instruction::Gt => {
-                        numeric_order(frame, |a, b| a > b, |a, b| a > b, |a, b| a > b)?
-                    }
-                    Instruction::Ge => {
-                        numeric_order(frame, |a, b| a >= b, |a, b| a >= b, |a, b| a >= b)?
-                    }
+                    Instruction::Lt => numeric_order(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a < b,
+                        |a, b| a < b,
+                        |ordering| ordering.is_lt(),
+                    )?,
+                    Instruction::Le => numeric_order(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a <= b,
+                        |a, b| a <= b,
+                        |ordering| ordering.is_le(),
+                    )?,
+                    Instruction::Gt => numeric_order(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a > b,
+                        |a, b| a > b,
+                        |ordering| ordering.is_gt(),
+                    )?,
+                    Instruction::Ge => numeric_order(
+                        frame,
+                        self.resource_limits,
+                        |a, b| a >= b,
+                        |a, b| a >= b,
+                        |ordering| ordering.is_ge(),
+                    )?,
                     Instruction::Contains => {
                         let target = pop(frame)?;
                         let needle = pop(frame)?;
@@ -3371,6 +3898,9 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 allocation_profile,
             } => {
                 let value = function(args)?;
+                if vm.numeric_limits_active {
+                    check_value_numeric_resources(&value, vm.resource_limits)?;
+                }
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_value_allocations(allocation_profile(&value));
                 }
@@ -3385,7 +3915,12 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 allocation_profile,
             } => {
                 let value = function(args, vm.resource_limits)?;
-                vm.record_value_allocations(allocation_profile(&value));
+                if vm.numeric_limits_active {
+                    check_value_numeric_resources(&value, vm.resource_limits)?;
+                }
+                if let Some(allocation_profile) = allocation_profile {
+                    vm.record_value_allocations(allocation_profile(&value));
+                }
                 frames
                     .last_mut()
                     .expect("call has a caller frame")
@@ -3549,7 +4084,8 @@ fn number(v: Value) -> Result<f64, Error> {
     v.as_number()
         .ok_or_else(|| Error::runtime("expected number"))
 }
-fn decimal_to_exact_number(value: &Decimal) -> Result<f64, Error> {
+fn decimal_to_exact_number(value: &Decimal, limits: ResourceLimits) -> Result<f64, Error> {
+    check_decimal_power_growth(&BigInt::from(1_u8), value.scale, limits)?;
     let mut numerator = value.inner().clone();
     let mut denominator = decimal_power_of_ten(value.scale);
     let gcd = numerator.gcd(&denominator);
@@ -3573,12 +4109,18 @@ fn decimal_to_exact_number(value: &Decimal) -> Result<f64, Error> {
         Ok(number)
     }
 }
+#[derive(Clone, Copy)]
 enum Aggregate {
     Sum,
     Min,
     Max,
 }
-fn aggregate_numeric(xs: &[Value], name: &str, aggregate: Aggregate) -> Result<Value, Error> {
+fn aggregate_numeric(
+    xs: &[Value],
+    name: &str,
+    aggregate: Aggregate,
+    limits: ResourceLimits,
+) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime(format!("{name} expects one array")));
     }
@@ -3625,13 +4167,18 @@ fn aggregate_numeric(xs: &[Value], name: &str, aggregate: Aggregate) -> Result<V
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let value = match aggregate {
-                Aggregate::Sum => integers
-                    .into_iter()
-                    .fold(BigInt::zero(), |sum, value| sum + value),
+                Aggregate::Sum => integers.into_iter().try_fold(
+                    BigInt::zero(),
+                    |sum, value| -> Result<BigInt, Error> {
+                        let sum = sum + value;
+                        check_integer_resource(&sum, limits)?;
+                        Ok(sum)
+                    },
+                )?,
                 Aggregate::Min => (*integers.into_iter().min().expect("non-empty")).clone(),
                 Aggregate::Max => (*integers.into_iter().max().expect("non-empty")).clone(),
             };
-            Ok(Value::Integer(Rc::new(Integer::from_bigint(value)?)))
+            Ok(Value::Integer(Rc::new(resource_integer(value, limits)?)))
         }
         Value::Decimal(_) => {
             let decimals = values
@@ -3647,9 +4194,22 @@ fn aggregate_numeric(xs: &[Value], name: &str, aggregate: Aggregate) -> Result<V
             let value = match aggregate {
                 Aggregate::Sum => decimals
                     .into_iter()
-                    .try_fold(Decimal::from(0_i64), |sum, value| decimal_add(&sum, value))?,
-                Aggregate::Min => (*decimals.into_iter().min().expect("non-empty")).clone(),
-                Aggregate::Max => (*decimals.into_iter().max().expect("non-empty")).clone(),
+                    .try_fold(Decimal::from(0_i64), |sum, value| {
+                        decimal_add(&sum, value, limits)
+                    })?,
+                Aggregate::Min | Aggregate::Max => {
+                    let mut decimals = decimals.into_iter();
+                    let mut selected = decimals.next().expect("non-empty");
+                    for candidate in decimals {
+                        let ordering = decimal_cmp_resource(candidate, selected, limits)?;
+                        if (matches!(aggregate, Aggregate::Min) && ordering.is_lt())
+                            || (matches!(aggregate, Aggregate::Max) && ordering.is_gt())
+                        {
+                            selected = candidate;
+                        }
+                    }
+                    selected.clone()
+                }
             };
             Ok(Value::Decimal(Rc::new(value)))
         }
@@ -3771,12 +4331,12 @@ fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
         .ok_or_else(|| Error::runtime("condition must be bool"))
 }
-fn push_integer(f: &mut Frame, value: BigInt) -> Result<(), Error> {
+fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<(), Error> {
     f.stack
-        .push(Value::Integer(Rc::new(Integer::from_bigint(value)?)));
+        .push(Value::Integer(Rc::new(resource_integer(value, limits)?)));
     Ok(())
 }
-fn numeric_update(f: &mut Frame, increment: bool) -> Result<(), Error> {
+fn numeric_update(f: &mut Frame, increment: bool, limits: ResourceLimits) -> Result<(), Error> {
     match pop(f)? {
         Value::Number(value) => f.stack.push(Value::Number(if increment {
             value + 1.
@@ -3790,10 +4350,12 @@ fn numeric_update(f: &mut Frame, increment: bool) -> Result<(), Error> {
             } else {
                 value.inner() - 1
             },
+            limits,
         )?,
         Value::Decimal(value) => f.stack.push(Value::Decimal(Rc::new(decimal_add(
             &value,
             &Decimal::from(if increment { 1 } else { -1 }),
+            limits,
         )?))),
         _ => {
             return Err(Error::runtime(
@@ -3805,20 +4367,21 @@ fn numeric_update(f: &mut Frame, increment: bool) -> Result<(), Error> {
 }
 fn numeric_binary(
     f: &mut Frame,
+    limits: ResourceLimits,
     number_op: impl FnOnce(f64, f64) -> f64,
-    integer_op: impl FnOnce(&BigInt, &BigInt) -> Result<BigInt, Error>,
-    decimal_op: impl FnOnce(&Decimal, &Decimal) -> Result<Decimal, Error>,
+    integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
+    decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
 ) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
     match (a, b) {
         (Value::Number(a), Value::Number(b)) => f.stack.push(Value::Number(number_op(a, b))),
         (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner())?)?
+            push_integer(f, integer_op(a.inner(), b.inner(), limits)?, limits)?
         }
-        (Value::Decimal(a), Value::Decimal(b)) => {
-            f.stack.push(Value::Decimal(Rc::new(decimal_op(&a, &b)?)))
-        }
+        (Value::Decimal(a), Value::Decimal(b)) => f
+            .stack
+            .push(Value::Decimal(Rc::new(decimal_op(&a, &b, limits)?))),
         (
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
@@ -3866,16 +4429,34 @@ fn integer_modulo(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
         Ok(remainder)
     }
 }
-fn integer_pow(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+fn integer_pow(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
     let exponent = b
         .to_u32()
         .ok_or_else(|| Error::runtime("integer exponent must be a non-negative 32-bit integer"))?;
-    if a.bits().saturating_mul(u64::from(exponent)) > MAX_INTEGER_BITS {
-        return Err(Error::runtime(
-            "integer power exceeds the implementation size limit",
+    if a.bits().saturating_mul(u64::from(exponent)) > integer_bit_limit(limits) {
+        return Err(Error::resource(
+            ResourceLimit::IntegerBits,
+            format!(
+                "integer magnitude exceeds {} bits",
+                integer_bit_limit(limits)
+            ),
         ));
     }
     Ok(a.pow(exponent))
+}
+
+fn integer_mul_resource(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
+    let minimum_bits = a.bits().saturating_add(b.bits()).saturating_sub(1);
+    if !a.is_zero() && !b.is_zero() && minimum_bits > integer_bit_limit(limits) {
+        return Err(Error::resource(
+            ResourceLimit::IntegerBits,
+            format!(
+                "integer magnitude exceeds {} bits",
+                integer_bit_limit(limits)
+            ),
+        ));
+    }
+    Ok(a * b)
 }
 fn bit_integer(value: Value) -> Result<i32, Error> {
     let value = number(value)?;
@@ -3891,6 +4472,7 @@ fn bit_integer(value: Value) -> Result<i32, Error> {
 }
 fn numeric_bit_binary(
     f: &mut Frame,
+    limits: ResourceLimits,
     number_op: impl FnOnce(i32, i32) -> i32,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
 ) -> Result<(), Error> {
@@ -3903,7 +4485,7 @@ fn numeric_bit_binary(
             f.stack.push(Value::Number(number_op(a, b) as f64));
         }
         (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner()))?
+            push_integer(f, integer_op(a.inner(), b.inner()), limits)?
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
             return Err(Error::runtime("cannot mix number and integer operands"));
@@ -3927,7 +4509,7 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
-fn numeric_shift(f: &mut Frame, right: bool) -> Result<(), Error> {
+fn numeric_shift(f: &mut Frame, right: bool, limits: ResourceLimits) -> Result<(), Error> {
     let shift = pop(f)?;
     let value = pop(f)?;
     match (value, shift) {
@@ -3951,13 +4533,22 @@ fn numeric_shift(f: &mut Frame, right: bool) -> Result<(), Error> {
                 Error::runtime("integer shift count must be a non-negative platform integer")
             })?;
             if shift as u64 > MAX_INTEGER_BITS {
-                return Err(Error::runtime(
-                    "integer shift exceeds the implementation size limit",
+                return Err(Error::resource(
+                    ResourceLimit::IntegerBits,
+                    format!(
+                        "integer shift exceeds the {MAX_INTEGER_BITS}-bit implementation limit"
+                    ),
                 ));
             }
-            if !right && value.inner().bits().saturating_add(shift as u64) > MAX_INTEGER_BITS {
-                return Err(Error::runtime(
-                    "integer shift exceeds the implementation size limit",
+            if !right
+                && value.inner().bits().saturating_add(shift as u64) > integer_bit_limit(limits)
+            {
+                return Err(Error::resource(
+                    ResourceLimit::IntegerBits,
+                    format!(
+                        "integer magnitude exceeds {} bits",
+                        integer_bit_limit(limits)
+                    ),
                 ));
             }
             push_integer(
@@ -3967,6 +4558,7 @@ fn numeric_shift(f: &mut Frame, right: bool) -> Result<(), Error> {
                 } else {
                     value.inner() << shift
                 },
+                limits,
             )?;
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
@@ -3988,16 +4580,17 @@ fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Err
 }
 fn numeric_order(
     f: &mut Frame,
+    limits: ResourceLimits,
     number_op: impl FnOnce(f64, f64) -> bool,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
-    decimal_op: impl FnOnce(&Decimal, &Decimal) -> bool,
+    decimal_op: impl FnOnce(std::cmp::Ordering) -> bool,
 ) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
     let result = match (a, b) {
         (Value::Number(a), Value::Number(b)) => number_op(a, b),
         (Value::Integer(a), Value::Integer(b)) => integer_op(a.inner(), b.inner()),
-        (Value::Decimal(a), Value::Decimal(b)) => decimal_op(&a, &b),
+        (Value::Decimal(a), Value::Decimal(b)) => decimal_op(decimal_cmp_resource(&a, &b, limits)?),
         (
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),

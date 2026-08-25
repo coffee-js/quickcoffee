@@ -644,6 +644,175 @@ fn json_resource_policy_is_replaceable_labeled_and_uncatchable() {
 }
 
 #[test]
+fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() {
+    let defaults = ResourceLimits::default();
+    let constrained = defaults
+        .with_max_integer_bits(3)
+        .with_max_decimal_coefficient_bits(4)
+        .with_max_decimal_scale(2);
+    assert_eq!(constrained.max_integer_bits(), 3);
+    assert_eq!(constrained.max_decimal_coefficient_bits(), 4);
+    assert_eq!(constrained.max_decimal_scale(), 2);
+
+    let engine = Engine::new();
+    let program = engine
+        .compile_program("try 8n catch ignored then 1n")
+        .unwrap();
+    let fingerprint = program.fingerprint();
+
+    let mut constrained_context = Context::new().with_resource_limits(constrained);
+    let error = constrained_context
+        .run_program(&program)
+        .expect_err("numeric resource failures must bypass script catch handlers");
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
+    assert_eq!(program.fingerprint(), fingerprint);
+
+    let mut default_context = Context::new();
+    assert_eq!(
+        default_context
+            .run_program(&program)
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(8)
+    );
+    assert_eq!(program.fingerprint(), fingerprint);
+
+    assert!(constrained_context.eval("7n").is_ok());
+    assert!(constrained_context.eval("9m").is_ok());
+    assert!(constrained_context.eval("0.01m").is_ok());
+    assert_eq!(
+        constrained_context
+            .eval("value = 1n\namount = 4n\nvalue >> amount")
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(0)
+    );
+
+    let zero_limits = defaults
+        .with_max_integer_bits(0)
+        .with_max_decimal_coefficient_bits(0)
+        .with_max_decimal_scale(0);
+    let mut zero_context = Context::new().with_resource_limits(zero_limits);
+    for source in ["0n", "0m", "decimal('0e2')", "parse_json('0e2')"] {
+        assert!(zero_context.eval(source).is_ok(), "{source}");
+    }
+
+    for (source, limit) in [
+        ("x = 7n\nx + 1n", ResourceLimit::IntegerBits),
+        ("x = 7n\n++x", ResourceLimit::IntegerBits),
+        ("x = 3n\nx * 3n", ResourceLimit::IntegerBits),
+        ("x = 1n\nx << 3n", ResourceLimit::IntegerBits),
+        ("x = 2n\nx ** 3n", ResourceLimit::IntegerBits),
+        ("sum([4n, 4n])", ResourceLimit::IntegerBits),
+        ("16m", ResourceLimit::DecimalCoefficientBits),
+        ("0.001m", ResourceLimit::DecimalScale),
+        ("x = 1m\nx + 0.01m", ResourceLimit::DecimalCoefficientBits),
+        ("x = 4m\nx * 4m", ResourceLimit::DecimalCoefficientBits),
+        ("x = 4m\nx ** 2m", ResourceLimit::DecimalCoefficientBits),
+        ("x = 1m\nx / 8m", ResourceLimit::DecimalScale),
+        (
+            "decimal_div(1m, 2m, 3, 'half_even')",
+            ResourceLimit::DecimalScale,
+        ),
+        (
+            "round_decimal(1m, 3, 'half_even')",
+            ResourceLimit::DecimalScale,
+        ),
+        ("integer(8)", ResourceLimit::IntegerBits),
+        ("decimal('16')", ResourceLimit::DecimalCoefficientBits),
+        ("parse_json('8')", ResourceLimit::IntegerBits),
+        ("parse_json('16.0')", ResourceLimit::DecimalCoefficientBits),
+        ("parse_json('0.001')", ResourceLimit::DecimalScale),
+        ("parse_json('1e100001')", ResourceLimit::DecimalScale),
+    ] {
+        let error = constrained_context.eval(source).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Resource, "{source}");
+        assert_eq!(error.resource_limit(), Some(limit), "{source}");
+    }
+
+    let alignment_limits = defaults
+        .with_max_decimal_coefficient_bits(13)
+        .with_max_decimal_scale(4);
+    let mut alignment_context = Context::new().with_resource_limits(alignment_limits);
+    for source in [
+        "left = 0.9m\nright = 0.8001m\nleft < right",
+        "min([0.9m, 0.8001m])",
+    ] {
+        let error = alignment_context.eval(source).unwrap_err();
+        assert_eq!(
+            error.resource_limit(),
+            Some(ResourceLimit::DecimalCoefficientBits),
+            "{source}"
+        );
+    }
+
+    constrained_context.set_global("host_integer", Value::from(8_i64));
+    let error = constrained_context
+        .eval_named("virtual://numeric-limits.qc", "host_integer")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://numeric-limits.qc")
+    );
+    assert_eq!(
+        constrained_context
+            .get_global("host_integer")
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(8)
+    );
+
+    constrained_context.add_native("host_integer_result", |_| Ok(Value::from(8_i64)));
+    let error = constrained_context
+        .eval("host_integer_result()")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
+
+    constrained_context.set_global("stable", Value::from(7_i64));
+    let error = constrained_context
+        .eval("stable = stable + 1n")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
+    assert_eq!(
+        constrained_context
+            .get_global("stable")
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(7),
+        "a failed numeric operation must not reach its following store"
+    );
+
+    let error = constrained_context
+        .eval("fallback = (value = 8n) -> value\nfallback()")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
+
+    assert_eq!(
+        constrained_context
+            .eval("try parse_json('1e') catch problem then problem.code")
+            .unwrap()
+            .as_str(),
+        Some("json.parse")
+    );
+
+    constrained_context.set_resource_limits(defaults);
+    assert_eq!(
+        constrained_context
+            .eval("host_integer + host_integer_result()")
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(16)
+    );
+}
+
+#[test]
 fn cancellation_token_stops_runs_before_execution_and_can_be_replaced() {
     let token = CancellationToken::new();
     let mut context = Context::new()
