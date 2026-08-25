@@ -93,6 +93,8 @@ fn json_value(value: &Value) -> String {
                 cause
             )
         }
+        quickcoffee::ValueKind::Class => "{\"$quickcoffee\":\"class\"}".to_owned(),
+        quickcoffee::ValueKind::Instance => "{\"$quickcoffee\":\"instance\"}".to_owned(),
         quickcoffee::ValueKind::Function => "{\"$quickcoffee\":\"function\"}".to_owned(),
     }
 }

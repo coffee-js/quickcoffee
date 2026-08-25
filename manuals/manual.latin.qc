@@ -37,7 +37,7 @@
 ## Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
 ## Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 ## Argumenta post -- ut series chordarum ordinaria argv praebentur.
-## JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. RFC 0134 receptores intra classes conclusos, constructionem, et hereditatem recipit; exsecutio adhuc deest.
+## JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. Classes indentatae, constructio, receptores conclusi et new iam adsunt; extends, super, atque => receptorem ligans restant.
 ## # commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
 ## Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.
 ## yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.

@@ -34,7 +34,7 @@
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 ## Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 ## Arguments after -- are exposed as the ordinary string array argv.
-## This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. RFC 0134 adopts class-confined receivers, construction, and inheritance; implementation is pending.
+## This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. Indented classes now support constructors, instance/static methods, confined receivers and new; extends/super and receiver-bound => remain later RFC 0134 stages.
 ## # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 ## Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 ## yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
@@ -75,6 +75,12 @@
 ## Arithmetic also has floor division // and dividend-dependent modulo %%: -7 // 5 is -2, while -7 %% 5 is 3.
 ## return expression exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.
 ## Parameters may use strict nested array/map patterns; defaults and rest stay name-only.
+class ManualPoint
+  constructor: (@x, @y = 2) ->
+  sum: -> @x + @y
+  @origin: -> new ManualPoint(0, 0)
+manual_point = new ManualPoint(40)
+manual_point.sum() == 42 and ManualPoint.origin().sum() == 0 and type(manual_point) == 'instance'
 base = 20
 add = (x) ->
   result = x + base

@@ -46,6 +46,25 @@ fn named_static_imports_and_exports_keep_module_globals_private() {
 }
 
 #[test]
+fn modules_export_classes_without_exposing_their_receiver_state() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { Point } from 'geometry'\npoint = new Point(42)\nexport result = point.value()",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert(
+        "geometry",
+        "class Point\n  constructor: (@x) ->\n  value: -> @x\nexport { Point }",
+    );
+
+    let exports = Context::new().run_module(&main, &loader).unwrap();
+    assert_eq!(exports.get("result").and_then(Value::as_number), Some(42.));
+}
+
+#[test]
 fn module_loading_caches_dependencies_and_reports_missing_names() {
     let engine = Engine::new();
     let main = engine

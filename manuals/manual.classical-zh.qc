@@ -3,7 +3,7 @@
 ## 映射可展其项，后书之键胜前书：{...defaults, theme: 'dark'}。
 ## 映射解构末可用 ...metadata 收未列之键，所得映射不变。
 ## 数列与 Unicode 字符负索引，-一取其末。
-## 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无公开原型之链、全局或游离之 this、eval 与内嵌之文；RFC 0134 已纳 class 内受限之接收者、构造与继承，然尚待施行。
+## 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无公开原型之链、全局或游离之 this、eval 与内嵌之文；今已有缩进 class、构造、受限接收者与 new，extends、super 及缚接收者之 => 尚待后续。
 ## # 注一行；### … ### 注一段，弗相嵌，先于布局析法略之。
 ## 名从 Unicode XID 之法，合附之记可续名，而机不正其 Unicode。
 ## yes、on 同 true；no、off 同 false；is、isnt 则严等也。

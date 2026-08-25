@@ -630,6 +630,26 @@ fn qcoffee_json_reports_values_and_structured_errors() {
         "{\"ok\":true,\"value\":{\"$quickcoffee\":\"function\"}}\n"
     );
 
+    let class = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "class Empty\n  value: -> nil\nEmpty"])
+        .output()
+        .unwrap();
+    assert!(class.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&class.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"class\"}}\n"
+    );
+
+    let instance = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "class Empty\n  value: -> nil\nnew Empty()"])
+        .output()
+        .unwrap();
+    assert!(instance.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&instance.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"instance\"}}\n"
+    );
+
     let structured_error = Command::new(bin("qcoffee"))
         .args([
             "--json",
@@ -675,7 +695,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     assert!(!parse_error.status.success());
     assert_eq!(
         String::from_utf8_lossy(&parse_error.stdout),
-        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"unexpected character '@'\",\"line\":1}\n"
+        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"expected receiver member name after @\",\"line\":1}\n"
     );
     assert!(parse_error.stderr.is_empty());
 
@@ -774,6 +794,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "captured-local-loop",
         "map-spread",
         "member-lookup-loop",
+        "class-construction-dispatch",
         "negative-indexing",
         "stepped-string-iteration",
         "signed-by-iteration",
@@ -924,6 +945,24 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(member_stdout.contains("\"name\":\"member-lookup-loop\""));
     assert!(member_stdout.contains("\"expected\":\"1000\",\"compile_ns\":"));
     assert!(member_stdout.contains("\"profile_container_ops\":400,\"profile_iterator_ops\":"));
+    let classes = Command::new(bin("qbench"))
+        .args([
+            "--only",
+            "class-construction-dispatch",
+            "--json",
+            "--iterations",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(classes.status.success());
+    let classes_stdout = String::from_utf8_lossy(&classes.stdout);
+    assert_eq!(classes_stdout.lines().count(), 1);
+    assert!(classes_stdout.contains("\"name\":\"class-construction-dispatch\""));
+    assert!(classes_stdout.contains("\"expected\":\"5050\",\"compile_ns\":"));
+    assert!(classes_stdout.contains("\"profile_calls\":200,\"profile_container_ops\":301"));
+    assert!(classes_stdout.contains("\"profile_value_allocations\":303"));
+    assert!(classes_stdout.contains("\"profile_environment_allocations\":200"));
     let unknown = Command::new(bin("qbench"))
         .args(["--only", "missing-workload"])
         .output()
@@ -1082,7 +1121,7 @@ fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     assert_eq!(String::from_utf8_lossy(&stats_output.stdout), "3\n7\n");
     let stats_stderr = String::from_utf8_lossy(&stats_output.stderr);
     assert_eq!(stats_stderr.matches("qcoffee stats:").count(), 2);
-    assert!(stats_stderr.contains("unexpected character '@'"));
+    assert!(stats_stderr.contains("expected receiver member name after @"));
 
     let conflict = Command::new(bin("qcoffee"))
         .args(["--interactive", "-e", "1 + 1"])

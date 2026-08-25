@@ -529,6 +529,12 @@ impl JsonEncoder {
             Value::Function(_) => Err(JsonFailure::new(
                 "encode_json does not support Function values",
             )),
+            Value::Class(_) => Err(JsonFailure::new(
+                "encode_json does not support Class values",
+            )),
+            Value::Instance(_) => Err(JsonFailure::new(
+                "encode_json does not support Instance values",
+            )),
         }
     }
 

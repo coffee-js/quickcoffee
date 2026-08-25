@@ -35,7 +35,7 @@
 ## Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
 ## Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统计，不暴露 VM 帧。
 ## -- 后的参数以普通字符串数组 argv 暴露给程序。
-## 它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；RFC 0134 已采纳仅限 class 内部的接收者、构造与继承，尚待实现。
+## 它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；缩进 class 已支持构造器、实例/静态方法、受限接收者与 new，extends/super 和接收者绑定 => 仍是 RFC 0134 后续阶段。
 ## # 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
 ## 标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。
 ## yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
@@ -75,6 +75,12 @@
 ## 数组循环可写 by step；步长只求一次，须为非零有限整数，负步从末项起，映射循环不用 by。
 ## 数组循环亦可绑定从零开始的下标：for value, index in items then value + index。
 ## 后置推导沿用严格收集：value * 2 for value in items，亦可写作 [value * 2 for value in items]。
+class 手册点
+  constructor: (@横, @纵 = 2) ->
+  和: -> @横 + @纵
+  @原点: -> new 手册点(0, 0)
+手册实例 = new 手册点(40)
+手册实例.和() == 42 and 手册点.原点().和() == 0 and type(手册实例) == 'instance'
 base = 21
 double = (x) -> x * 2
 shorthand = 'yes'

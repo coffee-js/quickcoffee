@@ -1,6 +1,8 @@
 use crate::{
-    ast::{Binary, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update},
-    bytecode::{Chunk, Constant, Instruction, Pattern},
+    ast::{
+        Binary, ClassMember, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update,
+    },
+    bytecode::{Chunk, Constant, Instruction, Pattern, RECEIVER_NAME},
     lexer::TokenSpan,
     vm::{Decimal, Error, Integer, Value},
 };
@@ -346,6 +348,7 @@ struct Compiler {
     record_source_map: bool,
     loops: Vec<LoopContext>,
     in_function: bool,
+    receiver_context: bool,
     return_cleanups: Vec<ReturnCleanup>,
 }
 struct LoopContext {
@@ -359,6 +362,16 @@ struct ReturnCleanup {
     finalizer: Option<Expr>,
 }
 impl Compiler {
+    fn parse_error(&self, message: impl Into<String>) -> Error {
+        let error = Error::parse(message);
+        if self.current_span == 0 {
+            return error;
+        }
+        self.span_table
+            .get(self.current_span as usize - 1)
+            .copied()
+            .map_or(error.clone(), |span| error.at_span(span.into_source_span()))
+    }
     fn enter_span(&mut self, span: TokenSpan) -> u32 {
         let previous = self.current_span;
         if !self.record_source_map {
@@ -609,9 +622,24 @@ impl Compiler {
             Expr::Name(n) => {
                 self.emit(Instruction::Load(n.clone()));
             }
+            Expr::This => {
+                if !self.receiver_context {
+                    return Err(self.parse_error("this and @ are valid only in class members"));
+                }
+                self.emit(Instruction::Load(RECEIVER_NAME.to_owned()));
+            }
             Expr::Assign(n, value) => {
                 self.expr(value)?;
                 self.emit(Instruction::Store(n.clone()));
+            }
+            Expr::AssignMember(target, name, value) => {
+                if !self.receiver_context || !matches!(target.unspanned(), Expr::This) {
+                    return Err(self.parse_error(
+                        "member assignment is allowed only through this or @ in a class member",
+                    ));
+                }
+                self.expr(value)?;
+                self.emit(Instruction::SetMember(name.clone()));
             }
             Expr::AssignIfNil(name, value) => {
                 self.emit(Instruction::LoadOrNil(name.clone()));
@@ -749,11 +777,48 @@ impl Compiler {
                 self.emit(Instruction::Member(name.clone()));
             }
             Expr::Call(fun, args) => {
-                self.expr(fun)?;
-                if self.items(args, false)? {
-                    self.emit(Instruction::CallSpread);
+                if let Expr::SoakMember(target, name) = fun.unspanned() {
+                    self.expr(target)?;
+                    self.emit(Instruction::Dup);
+                    let nil = self.emit(Instruction::JumpIfNil(0));
+                    self.emit(Instruction::Pop);
+                    if self.items(args, false)? {
+                        self.emit(Instruction::MemberCallSpread(name.clone()));
+                    } else {
+                        self.emit(Instruction::MemberCall {
+                            name: name.clone(),
+                            count: args.len(),
+                        });
+                    }
+                    let end = self.emit(Instruction::Jump(0));
+                    self.patch_jump(nil);
+                    self.emit(Instruction::Pop);
+                    self.patch_jump(end);
+                } else if let Expr::Member(target, name) = fun.unspanned() {
+                    self.expr(target)?;
+                    if self.items(args, false)? {
+                        self.emit(Instruction::MemberCallSpread(name.clone()));
+                    } else {
+                        self.emit(Instruction::MemberCall {
+                            name: name.clone(),
+                            count: args.len(),
+                        });
+                    }
                 } else {
-                    self.emit(Instruction::Call(args.len()));
+                    self.expr(fun)?;
+                    if self.items(args, false)? {
+                        self.emit(Instruction::CallSpread);
+                    } else {
+                        self.emit(Instruction::Call(args.len()));
+                    }
+                }
+            }
+            Expr::New(class, args) => {
+                self.expr(class)?;
+                if self.items(args, false)? {
+                    self.emit(Instruction::ConstructSpread);
+                } else {
+                    self.emit(Instruction::Construct(args.len()));
                 }
             }
             Expr::SoakIndex(target, key) => {
@@ -954,8 +1019,8 @@ impl Compiler {
             Expr::Function(params, rest, body) => {
                 self.function(params, rest.as_ref(), body)?;
             }
-            Expr::Class(name, params, body) => {
-                self.function(params, None, body)?;
+            Expr::Class(name, members) => {
+                self.class(name, members)?;
                 self.emit(Instruction::Store(name.clone()));
             }
             Expr::Block(statements) => {
@@ -1104,8 +1169,56 @@ impl Compiler {
         rest: Option<&String>,
         body: &Expr,
     ) -> Result<(), Error> {
+        self.function_inner(params, rest, body, false)
+    }
+    fn class(&mut self, name: &str, members: &[ClassMember]) -> Result<(), Error> {
+        let constructor = members
+            .iter()
+            .find(|member| !member.is_static && member.name == "constructor");
+        let instance_methods: Vec<_> = members
+            .iter()
+            .filter(|member| !member.is_static && member.name != "constructor")
+            .collect();
+        let static_methods: Vec<_> = members.iter().filter(|member| member.is_static).collect();
+        if let Some(constructor) = constructor {
+            let previous = self.enter_span(constructor.span);
+            self.function_inner(
+                &constructor.params,
+                constructor.rest.as_ref(),
+                &constructor.body,
+                true,
+            )?;
+            self.current_span = previous;
+        }
+        for member in instance_methods.iter().chain(static_methods.iter()) {
+            let previous = self.enter_span(member.span);
+            self.function_inner(&member.params, member.rest.as_ref(), &member.body, true)?;
+            self.current_span = previous;
+        }
+        self.emit(Instruction::MakeClass {
+            name: name.to_owned(),
+            constructor: constructor.is_some(),
+            instance_methods: instance_methods
+                .iter()
+                .map(|member| member.name.clone())
+                .collect(),
+            static_methods: static_methods
+                .iter()
+                .map(|member| member.name.clone())
+                .collect(),
+        });
+        Ok(())
+    }
+    fn function_inner(
+        &mut self,
+        params: &[Param],
+        rest: Option<&String>,
+        body: &Expr,
+        receiver: bool,
+    ) -> Result<(), Error> {
         let mut inner = Compiler {
             in_function: true,
+            receiver_context: receiver,
             record_source_map: self.record_source_map,
             ..Default::default()
         };
@@ -1122,18 +1235,40 @@ impl Compiler {
             let done = inner.emit(Instruction::Jump(0));
             inner.patch_jump(use_default);
             inner.emit(Instruction::Pop);
-            inner.expr(default)?;
+            let receiver_context = inner.receiver_context;
+            inner.receiver_context = false;
+            let result = inner.expr(default);
+            inner.receiver_context = receiver_context;
+            result?;
             inner.emit(Instruction::Store(name.clone()));
             inner.emit(Instruction::Pop);
             inner.patch_jump(done);
         }
+        if receiver {
+            for param in params.iter().filter(|param| param.receiver) {
+                let AstPattern::Bind(name) = &param.pattern else {
+                    return Err(Error::parse(
+                        "receiver parameter shorthand requires a plain name",
+                    ));
+                };
+                inner.emit(Instruction::Load(name.clone()));
+                inner.emit(Instruction::SetMember(name.clone()));
+                inner.emit(Instruction::Pop);
+            }
+        }
         inner.expr(body)?;
         inner.emit(Instruction::Return);
         let idx = self.chunk.constants.len();
-        let compiled_params = params
-            .iter()
-            .map(|param| inner.compile_pattern(&param.pattern))
-            .collect::<Result<_, _>>()?;
+        let mut compiled_params = Vec::with_capacity(params.len() + usize::from(receiver));
+        if receiver {
+            compiled_params.push(Pattern::Bind(RECEIVER_NAME.to_owned()));
+        }
+        compiled_params.extend(
+            params
+                .iter()
+                .map(|param| inner.compile_pattern(&param.pattern))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
         let function_chunk = Rc::new(inner.chunk);
         if self.record_source_map {
             self.nested_source_maps.extend(inner.nested_source_maps);
@@ -1147,11 +1282,13 @@ impl Compiler {
         }
         self.chunk.constants.push(Constant::Function {
             params: compiled_params,
-            required: params
-                .iter()
-                .take_while(|param| param.default.is_none())
-                .count(),
+            required: usize::from(receiver)
+                + params
+                    .iter()
+                    .take_while(|param| param.default.is_none())
+                    .count(),
             rest: rest.cloned(),
+            receiver,
             chunk: function_chunk,
         });
         self.emit(Instruction::MakeFunction(idx));

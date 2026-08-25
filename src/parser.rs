@@ -1,5 +1,7 @@
 use crate::{
-    ast::{Binary, Expr, Item, MapItem, ModuleSyntax, Param, Pattern, Stmt, Unary, Update},
+    ast::{
+        Binary, ClassMember, Expr, Item, MapItem, ModuleSyntax, Param, Pattern, Stmt, Unary, Update,
+    },
     lexer::{Token, TokenSpan, lex_spanned},
     vm::Error,
 };
@@ -485,6 +487,146 @@ impl Parser {
         }
         Ok(Expr::Block(statements))
     }
+    fn class_body(&mut self) -> Result<Vec<ClassMember>, Error> {
+        let separator = self.at;
+        if !self.eat(&Token::Semi) {
+            return Err(self.parse_error("class body must start on the next indented line"));
+        }
+        while self.eat(&Token::Semi) {}
+        if !self.eat(&Token::Indent) {
+            self.at = separator;
+            return Ok(vec![]);
+        }
+        let mut members: Vec<ClassMember> = vec![];
+        loop {
+            while self.eat(&Token::Semi) {}
+            if self.eat(&Token::Dedent) {
+                break;
+            }
+            if matches!(self.peek(), Token::Eof) {
+                return Err(self.parse_error("unterminated class body"));
+            }
+            let span = self.spans[self.at];
+            let is_static = self.eat(&Token::At);
+            let Token::Ident(name) = self.next() else {
+                return Err(self.previous_error("class body expects a named method"));
+            };
+            if is_static && name == "constructor" {
+                return Err(self.previous_error("constructor cannot be static"));
+            }
+            self.expect(&Token::Colon)?;
+            let (params, rest) = if self.eat(&Token::LParen) {
+                self.class_parameters()?
+            } else {
+                (vec![], None)
+            };
+            if self.eat(&Token::FatArrow) {
+                return Err(self.previous_error(
+                    "receiver-capturing => methods are reserved for a later RFC 0134 slice",
+                ));
+            }
+            self.expect(&Token::Arrow)?;
+            if name != "constructor" && params.iter().any(|param| param.receiver) {
+                return Err(self.previous_error(
+                    "receiver parameter shorthand is allowed only in constructors",
+                ));
+            }
+            if members
+                .iter()
+                .any(|member| member.name == name && member.is_static == is_static)
+            {
+                return Err(self.previous_error(format!(
+                    "duplicate {}class method '{name}'",
+                    if is_static { "static " } else { "" }
+                )));
+            }
+            let body = if matches!(self.peek(), Token::Semi) {
+                let mut next = self.at;
+                while matches!(self.tokens.get(next), Some(Token::Semi)) {
+                    next += 1;
+                }
+                if matches!(self.tokens.get(next), Some(Token::Indent)) {
+                    self.body_after_arrow()?
+                } else {
+                    Expr::Nil
+                }
+            } else {
+                self.body_after_arrow()?
+            };
+            members.push(ClassMember {
+                name,
+                is_static,
+                params,
+                rest,
+                body,
+                span,
+            });
+            if !matches!(self.peek(), Token::Semi | Token::Dedent) {
+                return Err(self.parse_error("expected class method separator"));
+            }
+        }
+        Ok(members)
+    }
+
+    fn class_parameters(&mut self) -> Result<(Vec<Param>, Option<String>), Error> {
+        let mut params = vec![];
+        let mut saw_default = false;
+        if self.eat(&Token::RParen) {
+            return Ok((params, None));
+        }
+        loop {
+            let receiver = self.eat(&Token::At);
+            let pattern = if receiver {
+                match self.next() {
+                    Token::Ident(name) => Pattern::Bind(name),
+                    _ => {
+                        return Err(self
+                            .previous_error("receiver parameter shorthand expects a plain name"));
+                    }
+                }
+            } else {
+                self.pattern()
+                    .ok_or_else(|| self.parse_error("expected class method parameter"))?
+            };
+            let default = if self.eat(&Token::Assign) {
+                if !matches!(pattern, Pattern::Bind(_)) {
+                    return Err(self.parse_error("default parameter must be a name"));
+                }
+                saw_default = true;
+                Some(self.expr(0)?)
+            } else {
+                if saw_default {
+                    return Err(
+                        self.parse_error("required parameters must precede default parameters")
+                    );
+                }
+                None
+            };
+            if self.eat(&Token::Ellipsis) {
+                if receiver || default.is_some() {
+                    return Err(self.previous_error(
+                        "class method rest parameter must be a plain name without a default",
+                    ));
+                }
+                let Pattern::Bind(rest) = pattern else {
+                    return Err(
+                        self.previous_error("class method rest parameter must be a plain name")
+                    );
+                };
+                self.expect(&Token::RParen)?;
+                return Ok((params, Some(rest)));
+            }
+            params.push(Param {
+                pattern,
+                default,
+                receiver,
+            });
+            if self.eat(&Token::RParen) {
+                return Ok((params, None));
+            }
+            self.expect(&Token::Comma)?;
+        }
+    }
     fn switch_cases(&mut self) -> Result<SwitchCases, Error> {
         self.expect(&Token::Semi)?;
         while self.eat(&Token::Semi) {}
@@ -561,6 +703,13 @@ impl Parser {
                     }
                 };
                 left = Expr::Member(Box::new(left), name);
+                continue;
+            }
+            if min == 0 && self.eat(&Token::Assign) {
+                let Expr::Member(target, name) = left else {
+                    return Err(self.previous_error("member assignment requires a member target"));
+                };
+                left = Expr::AssignMember(target, name, Box::new(self.expr(0)?));
                 continue;
             }
             if let Some(update) = postfix_update(self.peek()) {
@@ -757,6 +906,9 @@ impl Parser {
                     | Token::Continue
                     | Token::Return
                     | Token::Class
+                    | Token::New
+                    | Token::This
+                    | Token::At
                     | Token::Switch
                     | Token::Try
                     | Token::Throw
@@ -825,7 +977,7 @@ impl Parser {
                 | Expr::SoakCall(_, _)
                 | Expr::SoakMember(_, _)
                 | Expr::Function(_, _, _)
-                | Expr::Class(_, _, _)
+                | Expr::Class(_, _)
                 | Expr::Do(_)
         )
     }
@@ -870,12 +1022,21 @@ impl Parser {
             Token::True => Ok(Expr::Bool(true)),
             Token::False => Ok(Expr::Bool(false)),
             Token::Nil => Ok(Expr::Nil),
+            Token::This => Ok(Expr::This),
+            Token::At => {
+                let Token::Ident(name) = self.next() else {
+                    return Err(Error::parse("expected receiver member name after @")
+                        .at_span(span.into_source_span()));
+                };
+                Ok(Expr::Member(Box::new(Expr::This), name))
+            }
             Token::Ident(n) => {
                 if self.eat(&Token::Arrow) || self.eat(&Token::FatArrow) {
                     return Ok(Expr::Function(
                         vec![Param {
                             pattern: Pattern::Bind(n),
                             default: None,
+                            receiver: false,
                         }],
                         None,
                         Box::new(self.body_after_arrow()?),
@@ -899,6 +1060,7 @@ impl Parser {
                             .map(|name| Param {
                                 pattern: Pattern::Bind(name),
                                 default: None,
+                                receiver: false,
                             })
                             .collect(),
                         None,
@@ -993,18 +1155,38 @@ impl Parser {
                         );
                     }
                 };
-                let params = if self.eat(&Token::LParen) {
-                    self.parameters()?
+                if matches!(self.peek(), Token::LParen | Token::Arrow | Token::FatArrow) {
+                    return Err(self.parse_error(
+                        "legacy class factory syntax is no longer supported; use an indented class body and new",
+                    ));
+                }
+                if self.eat(&Token::Extends) {
+                    return Err(self.previous_error(
+                        "extends is reserved by RFC 0134 and will be implemented after class construction",
+                    ));
+                }
+                Ok(Expr::Class(name, self.class_body()?))
+            }
+            Token::New => {
+                let target = match self.next() {
+                    Token::Ident(name) => Expr::Name(name),
+                    got => {
+                        return Err(
+                            self.previous_error(format!("new expects a class name, found {got:?}"))
+                        );
+                    }
+                };
+                let args = if self.eat(&Token::LParen) {
+                    self.arguments(Token::RParen)?
                 } else {
                     vec![]
                 };
-                self.expect(&Token::Arrow)?;
-                Ok(Expr::Class(
-                    name,
-                    params,
-                    Box::new(self.body_after_arrow()?),
-                ))
+                Ok(Expr::New(Box::new(target), args))
             }
+            Token::Extends => Err(self.previous_error("extends is valid only in a class header")),
+            Token::Super => Err(self.previous_error(
+                "super is reserved by RFC 0134 and is not implemented in this class slice",
+            )),
             Token::Switch => {
                 let subject = self.expr(0)?;
                 let (cases, fallback) = self.switch_cases()?;
@@ -1294,7 +1476,11 @@ impl Parser {
                 }
                 None
             };
-            p.push(Param { pattern, default });
+            p.push(Param {
+                pattern,
+                default,
+                receiver: false,
+            });
             if self.eat(&Token::RParen) {
                 break;
             }
@@ -1319,37 +1505,6 @@ impl Parser {
             Ok(())
         } else {
             Err(self.parse_error(format!("expected function arrow, found {:?}", self.peek())))
-        }
-    }
-    fn parameters(&mut self) -> Result<Vec<Param>, Error> {
-        let mut params = vec![];
-        let mut saw_default = false;
-        if self.eat(&Token::RParen) {
-            return Ok(params);
-        }
-        loop {
-            let pattern = self
-                .pattern()
-                .ok_or_else(|| self.parse_error("expected parameter pattern"))?;
-            let default = if self.eat(&Token::Assign) {
-                if !matches!(pattern, Pattern::Bind(_)) {
-                    return Err(self.parse_error("default parameter must be a name"));
-                }
-                saw_default = true;
-                Some(self.expr(0)?)
-            } else {
-                if saw_default {
-                    return Err(
-                        self.parse_error("required parameters must precede default parameters")
-                    );
-                }
-                None
-            };
-            params.push(Param { pattern, default });
-            if self.eat(&Token::RParen) {
-                return Ok(params);
-            }
-            self.expect(&Token::Comma)?;
         }
     }
     fn interpolated_string(&self, source: String) -> Result<Expr, Error> {

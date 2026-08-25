@@ -184,6 +184,44 @@ fn public_values_and_native_errors_are_structured() {
 }
 
 #[test]
+fn classes_cross_the_embedding_boundary_as_opaque_values_with_named_diagnostics() {
+    let mut context = Context::new();
+    let values = context
+        .eval("class Point\n  constructor: (@x) ->\n  value: -> @x\np = new Point(42)\n[Point, p, p.value()]")
+        .unwrap();
+    let values = values.as_array().unwrap();
+    assert_eq!(values[0].kind(), ValueKind::Class);
+    assert_eq!(values[1].kind(), ValueKind::Instance);
+    assert_eq!(values[2].as_number(), Some(42.));
+    assert!(values[0].as_map().is_none());
+    assert!(values[1].as_map().is_none());
+    let stats = context.last_execution();
+    assert!(stats.calls >= 2);
+    assert!(stats.container_ops >= 4);
+    assert!(stats.value_allocations >= 4);
+    assert!(stats.environment_allocations >= 2);
+
+    let program = Engine::new()
+        .compile_program_named(
+            "virtual://broken-class.qc",
+            "class Broken\n  fail: -> missing\nnew Broken().fail()",
+        )
+        .unwrap();
+    let error = Context::new().run_program(&program).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://broken-class.qc")
+    );
+    assert_eq!(error.labels()[0].span.start.line, 2);
+    assert!(error.labels().iter().any(|label| {
+        label.kind == DiagnosticLabelKind::Secondary
+            && label.span.source_name.as_deref() == Some("virtual://broken-class.qc")
+            && label.span.start.line == 3
+    }));
+}
+
+#[test]
 fn host_domain_errors_cross_catch_and_embedding_boundaries() {
     let mut context = Context::new();
     context.add_native("charge", |_| {
