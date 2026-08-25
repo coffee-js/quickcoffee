@@ -19,14 +19,20 @@ pub enum ResourceLimit {
     JsonValueCount,
     /// A JSON array or object exceeded its configured nesting boundary.
     JsonNestingDepth,
+    /// An exact Integer exceeded its configured magnitude bit boundary.
+    IntegerBits,
+    /// A Decimal coefficient exceeded its configured magnitude bit boundary.
+    DecimalCoefficientBits,
+    /// A Decimal exceeded its configured normalized base-10 scale boundary.
+    DecimalScale,
 }
 
 /// Deterministic data-size boundaries applied by an execution [`crate::Context`].
 ///
-/// The defaults preserve RFC 0138's original fixed JSON guards. A policy is
+/// The defaults preserve RFC 0135/0137/0138's original fixed numeric and JSON guards. A policy is
 /// copied into a context with [`crate::Context::with_resource_limits`] or
 /// [`crate::Context::set_resource_limits`]; lowering a boundary to zero is
-/// valid and rejects every non-empty operation covered by that boundary.
+/// valid; zero-bit numeric limits still permit exact zero, whose magnitude uses no bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceLimits {
     max_json_input_bytes: usize,
@@ -35,6 +41,9 @@ pub struct ResourceLimits {
     max_json_container_items: usize,
     max_json_values: usize,
     max_json_nesting_depth: usize,
+    max_integer_bits: u64,
+    max_decimal_coefficient_bits: u64,
+    max_decimal_scale: u32,
 }
 
 impl Default for ResourceLimits {
@@ -46,6 +55,9 @@ impl Default for ResourceLimits {
             max_json_container_items: 100_000,
             max_json_values: 100_000,
             max_json_nesting_depth: 128,
+            max_integer_bits: 1_000_000,
+            max_decimal_coefficient_bits: 1_000_000,
+            max_decimal_scale: 100_000,
         }
     }
 }
@@ -114,6 +126,48 @@ impl ResourceLimits {
     /// Returns a policy with the maximum JSON nesting depth replaced.
     pub fn with_max_json_nesting_depth(mut self, limit: usize) -> Self {
         self.max_json_nesting_depth = limit;
+        self
+    }
+
+    /// Returns the maximum magnitude bits in one script-observable Integer.
+    pub fn max_integer_bits(&self) -> u64 {
+        self.max_integer_bits
+    }
+
+    /// Returns a policy with the maximum Integer magnitude bit count replaced.
+    ///
+    /// Values above the implementation ceiling do not raise that independent
+    /// compile-time and host-construction safety boundary.
+    pub fn with_max_integer_bits(mut self, limit: u64) -> Self {
+        self.max_integer_bits = limit;
+        self
+    }
+
+    /// Returns the maximum magnitude bits in one normalized Decimal coefficient.
+    pub fn max_decimal_coefficient_bits(&self) -> u64 {
+        self.max_decimal_coefficient_bits
+    }
+
+    /// Returns a policy with the maximum Decimal coefficient bit count replaced.
+    ///
+    /// Values above the implementation ceiling do not raise that independent
+    /// compile-time and host-construction safety boundary.
+    pub fn with_max_decimal_coefficient_bits(mut self, limit: u64) -> Self {
+        self.max_decimal_coefficient_bits = limit;
+        self
+    }
+
+    /// Returns the maximum normalized fractional base-10 digits in one Decimal.
+    pub fn max_decimal_scale(&self) -> u32 {
+        self.max_decimal_scale
+    }
+
+    /// Returns a policy with the maximum normalized Decimal scale replaced.
+    ///
+    /// Values above the implementation ceiling do not raise that independent
+    /// compile-time and host-construction safety boundary.
+    pub fn with_max_decimal_scale(mut self, limit: u32) -> Self {
+        self.max_decimal_scale = limit;
         self
     }
 }

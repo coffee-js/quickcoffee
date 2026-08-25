@@ -8,7 +8,10 @@ fn main() -> Result<(), Error> {
         .with_resource_limits(
             ResourceLimits::default()
                 .with_max_json_input_bytes(256_000)
-                .with_max_json_output_bytes(256_000),
+                .with_max_json_output_bytes(256_000)
+                .with_max_integer_bits(4_096)
+                .with_max_decimal_coefficient_bits(4_096)
+                .with_max_decimal_scale(256),
         )
         .with_cancellation_token(cancellation.clone())
         .with_global("factor", Value::from(2_f64))
