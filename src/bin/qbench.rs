@@ -129,6 +129,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "4200",
     },
     Workload {
+        name: "class-bound-callback",
+        source: "class Counter\n  constructor: (@value) ->\n  callback: ->\n    =>\n      @value = @value + 1\n      @value\ncallback = new Counter(0).callback()\nsum = 0\ni = 0\nwhile i < 100\n  sum += callback()\n  i++\nsum",
+        expected: "5050",
+    },
+    Workload {
         name: "negative-indexing",
         source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
         expected: "31",

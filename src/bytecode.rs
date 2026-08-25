@@ -44,6 +44,7 @@ pub enum Constant {
         required: usize,
         rest: Option<String>,
         receiver: bool,
+        receiver_bound: bool,
         chunk: Rc<Chunk>,
     },
 }
@@ -138,6 +139,7 @@ pub enum Instruction {
     LoadReceiver,
     SuperCall(usize),
     SuperCallSpread,
+    MakeBoundFunction(usize),
 }
 
 impl Chunk {
@@ -190,12 +192,16 @@ impl Chunk {
                         .at_instruction(pc));
                     }
                 },
-                Instruction::MakeFunction(i) => match self.constants.get(*i) {
+                Instruction::MakeFunction(i) | Instruction::MakeBoundFunction(i) => match self
+                    .constants
+                    .get(*i)
+                {
                     Some(Constant::Function {
                         chunk,
                         params,
                         required,
                         receiver,
+                        receiver_bound,
                         ..
                     }) => {
                         params
@@ -205,6 +211,13 @@ impl Chunk {
                         chunk.verify_inner(*receiver).map_err(|error| {
                             error.with_verification_chunk(Rc::as_ptr(chunk) as usize)
                         })?;
+                        let captures_receiver = matches!(op, Instruction::MakeBoundFunction(_));
+                        if captures_receiver && !receiver_context {
+                            return Err(Error::verify(format!(
+                                "bound function creation outside class receiver context at instruction {pc}"
+                            ))
+                            .at_instruction(pc));
+                        }
                         if *receiver {
                             if *required == 0
                                 || !matches!(
@@ -217,34 +230,62 @@ impl Chunk {
                                 ))
                                 .at_instruction(pc));
                             }
-                            let mut start = pc;
-                            while start > 0
-                                && matches!(self.code[start - 1], Instruction::MakeFunction(_))
-                            {
-                                start -= 1;
+                            if captures_receiver {
+                                if !receiver_bound {
+                                    return Err(Error::verify(format!(
+                                        "bound function at instruction {pc} is not marked receiver-bound"
+                                    ))
+                                    .at_instruction(pc));
+                                }
+                                if chunk.code.iter().any(|instruction| {
+                                    matches!(
+                                        instruction,
+                                        Instruction::SuperCall(_) | Instruction::SuperCallSpread
+                                    )
+                                }) {
+                                    return Err(Error::verify(format!(
+                                        "bound function at instruction {pc} cannot capture super context"
+                                    ))
+                                    .at_instruction(pc));
+                                }
+                            } else {
+                                let mut start = pc;
+                                while start > 0
+                                    && matches!(self.code[start - 1], Instruction::MakeFunction(_))
+                                {
+                                    start -= 1;
+                                }
+                                let mut end = pc + 1;
+                                while matches!(
+                                    self.code.get(end),
+                                    Some(Instruction::MakeFunction(_))
+                                ) {
+                                    end += 1;
+                                }
+                                let valid = matches!(
+                                    self.code.get(end),
+                                    Some(Instruction::MakeClass {
+                                        constructor,
+                                        instance_methods,
+                                        static_methods,
+                                        ..
+                                    }) if end - start
+                                        == usize::from(*constructor)
+                                            + instance_methods.len()
+                                            + static_methods.len()
+                                );
+                                if !valid {
+                                    return Err(Error::verify(format!(
+                                        "receiver function at instruction {pc} is not confined to a class template"
+                                    ))
+                                    .at_instruction(pc));
+                                }
                             }
-                            let mut end = pc + 1;
-                            while matches!(self.code.get(end), Some(Instruction::MakeFunction(_))) {
-                                end += 1;
-                            }
-                            let valid = matches!(
-                                self.code.get(end),
-                                Some(Instruction::MakeClass {
-                                    constructor,
-                                    instance_methods,
-                                    static_methods,
-                                    ..
-                                }) if end - start
-                                    == usize::from(*constructor)
-                                        + instance_methods.len()
-                                        + static_methods.len()
-                            );
-                            if !valid {
-                                return Err(Error::verify(format!(
-                                    "receiver function at instruction {pc} is not confined to a class template"
-                                ))
-                                .at_instruction(pc));
-                            }
+                        } else if *receiver_bound || captures_receiver {
+                            return Err(Error::verify(format!(
+                                "bound function at instruction {pc} has no hidden receiver"
+                            ))
+                            .at_instruction(pc));
                         }
                     }
                     Some(_) => {
@@ -417,7 +458,8 @@ impl Chunk {
                 | Instruction::Load(_)
                 | Instruction::LoadOrNil(_)
                 | Instruction::LoadReceiver
-                | Instruction::MakeFunction(_) => {
+                | Instruction::MakeFunction(_)
+                | Instruction::MakeBoundFunction(_) => {
                     next(fallthrough, (state.0 + 1, state.1, state.2))?;
                 }
                 Instruction::Dup => {
@@ -671,6 +713,7 @@ impl FingerprintEncoder {
                 required,
                 rest,
                 receiver,
+                receiver_bound,
                 chunk,
             } => {
                 self.tag(0x11);
@@ -681,6 +724,9 @@ impl FingerprintEncoder {
                 self.u64(*required as u64);
                 self.option_string(rest.as_deref());
                 self.bool(*receiver);
+                if *receiver_bound {
+                    self.tag(0x12);
+                }
                 self.chunk(chunk);
             }
         }
@@ -960,6 +1006,10 @@ impl FingerprintEncoder {
             Instruction::ConstructSpread => simple!(0x83),
             Instruction::MakeFunction(index) => {
                 self.tag(0x7a);
+                self.u64(*index as u64);
+            }
+            Instruction::MakeBoundFunction(index) => {
+                self.tag(0x87);
                 self.u64(*index as u64);
             }
             Instruction::Return => simple!(0x7b),

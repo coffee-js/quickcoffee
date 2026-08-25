@@ -47,7 +47,7 @@ pub(crate) enum Expr {
     Break(TokenSpan),
     Continue(TokenSpan),
     Return(Option<Box<Expr>>, TokenSpan),
-    Function(Vec<Param>, Option<String>, Box<Expr>),
+    Function(Vec<Param>, Option<String>, Box<Expr>, bool, TokenSpan),
     Class(String, Option<Box<Expr>>, Vec<ClassMember>),
     Block(Vec<Stmt>),
     Switch(Box<Expr>, Vec<(Vec<Expr>, Expr)>, Option<Box<Expr>>),
@@ -99,6 +99,7 @@ pub(crate) struct Param {
 pub(crate) struct ClassMember {
     pub name: String,
     pub is_static: bool,
+    pub receiver_bound: bool,
     pub params: Vec<Param>,
     pub rest: Option<String>,
     pub body: Expr,

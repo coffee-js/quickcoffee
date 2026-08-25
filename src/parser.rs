@@ -520,12 +520,12 @@ impl Parser {
             } else {
                 (vec![], None)
             };
-            if self.eat(&Token::FatArrow) {
-                return Err(self.previous_error(
-                    "receiver-capturing => methods are reserved for a later RFC 0134 slice",
-                ));
-            }
-            self.expect(&Token::Arrow)?;
+            let receiver_bound = if self.eat(&Token::FatArrow) {
+                true
+            } else {
+                self.expect(&Token::Arrow)?;
+                false
+            };
             if name != "constructor" && params.iter().any(|param| param.receiver) {
                 return Err(self.previous_error(
                     "receiver parameter shorthand is allowed only in constructors",
@@ -556,6 +556,7 @@ impl Parser {
             members.push(ClassMember {
                 name,
                 is_static,
+                receiver_bound,
                 params,
                 rest,
                 body,
@@ -976,7 +977,7 @@ impl Parser {
                 | Expr::Call(_, _)
                 | Expr::SoakCall(_, _)
                 | Expr::SoakMember(_, _)
-                | Expr::Function(_, _, _)
+                | Expr::Function(_, _, _, _, _)
                 | Expr::Class(_, _, _)
                 | Expr::Do(_)
         )
@@ -1031,7 +1032,7 @@ impl Parser {
                 Ok(Expr::Member(Box::new(Expr::This), name))
             }
             Token::Ident(n) => {
-                if self.eat(&Token::Arrow) || self.eat(&Token::FatArrow) {
+                if let Some((receiver_bound, arrow_span)) = self.function_arrow() {
                     return Ok(Expr::Function(
                         vec![Param {
                             pattern: Pattern::Bind(n),
@@ -1040,6 +1041,8 @@ impl Parser {
                         }],
                         None,
                         Box::new(self.body_after_arrow()?),
+                        receiver_bound,
+                        arrow_span,
                     ));
                 }
                 let after_name = self.at;
@@ -1053,7 +1056,7 @@ impl Parser {
                         }
                     }
                 }
-                if self.eat(&Token::Arrow) || self.eat(&Token::FatArrow) {
+                if let Some((receiver_bound, arrow_span)) = self.function_arrow() {
                     return Ok(Expr::Function(
                         names
                             .into_iter()
@@ -1065,6 +1068,8 @@ impl Parser {
                             .collect(),
                         None,
                         Box::new(self.body_after_arrow()?),
+                        receiver_bound,
+                        arrow_span,
                     ));
                 }
                 self.at = after_name;
@@ -1228,7 +1233,7 @@ impl Parser {
             Token::Throw => Ok(Expr::Throw(Box::new(self.expr(0)?))),
             Token::Do => {
                 let function = self.expr(0)?;
-                if let Expr::Function(params, rest, _) = function.unspanned() {
+                if let Expr::Function(params, rest, _, _, _) = function.unspanned() {
                     let valid = rest.is_none()
                         && params.iter().all(|param| {
                             param.default.is_none() && matches!(param.pattern, Pattern::Bind(_))
@@ -1243,11 +1248,13 @@ impl Parser {
             }
             Token::LParen => {
                 if let Some(params) = self.lambda_params()? {
-                    self.expect_arrow()?;
+                    let (receiver_bound, arrow_span) = self.expect_arrow()?;
                     return Ok(Expr::Function(
                         params.0,
                         params.1,
                         Box::new(self.body_after_arrow()?),
+                        receiver_bound,
+                        arrow_span,
                     ));
                 }
                 let x = self.expr(0)?;
@@ -1258,11 +1265,15 @@ impl Parser {
                 vec![],
                 None,
                 Box::new(self.body_after_arrow()?),
+                false,
+                span,
             )),
             Token::FatArrow => Ok(Expr::Function(
                 vec![],
                 None,
                 Box::new(self.body_after_arrow()?),
+                true,
+                span,
             )),
             Token::LBracket => {
                 self.eat_collection_separator();
@@ -1507,13 +1518,20 @@ impl Parser {
             Ok(None)
         }
     }
-    fn expect_arrow(&mut self) -> Result<(), Error> {
-        if matches!(self.peek(), Token::Arrow | Token::FatArrow) {
-            self.at += 1;
-            Ok(())
-        } else {
-            Err(self.parse_error(format!("expected function arrow, found {:?}", self.peek())))
-        }
+    fn function_arrow(&mut self) -> Option<(bool, TokenSpan)> {
+        let receiver_bound = match self.peek() {
+            Token::Arrow => false,
+            Token::FatArrow => true,
+            _ => return None,
+        };
+        let span = self.spans[self.at];
+        self.at += 1;
+        Some((receiver_bound, span))
+    }
+    fn expect_arrow(&mut self) -> Result<(bool, TokenSpan), Error> {
+        self.function_arrow().ok_or_else(|| {
+            self.parse_error(format!("expected function arrow, found {:?}", self.peek()))
+        })
     }
     fn interpolated_string(&self, source: String) -> Result<Expr, Error> {
         let mut pieces = vec![];

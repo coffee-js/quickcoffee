@@ -36,7 +36,7 @@
 <p>Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.</p>
 <p>Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.</p>
 <p>Argumenta post -- ut series chordarum ordinaria argv praebentur.</p>
-<p>JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. Classes indentatae, constructio, receptores conclusi, new, catena privata extends et super statice resolutum iam adsunt; =&gt; receptorem ligans restat.</p>
+<p>JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. Classes indentatae, constructio, receptores conclusi, new, catena privata extends, super statice resolutum atque =&gt; receptorem ligans et tuto effugiens iam adsunt.</p>
 <p># commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.</p>
 <p>Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.</p>
 <p>yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.</p>
@@ -70,6 +70,15 @@
 <p>Iteratio seriei etiam indicem a zero numeratum ligare potest: for value, index in items then value + index.</p>
 <p>Comprehensio postfix eandem collectionem strictam servat: value * 2 for value in items, vel [value * 2 for value in items].</p>
 </main><main><h1>Code</h1><pre><code>
+class BoundCounter
+  constructor: (@value) -&gt;
+  callback: -&gt;
+    =&gt;
+      @value = @value + 1
+      @value
+
+bound_callback = new BoundCounter(40).callback()
+bound_callback()
 numerus = 7
 quadratum = (x) -&gt; x * x
 shorthand = 'yes'

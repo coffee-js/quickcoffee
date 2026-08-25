@@ -38,7 +38,7 @@ cargo run --example embed 可编译最小 Rust 宿主：设置全局、注册原
 Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。
 Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统计，不暴露 VM 帧。
 -- 后的参数以普通字符串数组 argv 暴露给程序。
-它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；缩进 class 已支持构造器、实例/静态方法、受限接收者、new、私有 extends 链与静态解析的 super，接收者绑定 => 仍是 RFC 0134 后续阶段。
+它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；缩进 class 已支持构造器、实例/静态方法、受限接收者、new、私有 extends 链、静态解析的 super，以及可安全逸出的 receiver-bound => 方法或嵌套闭包。
 # 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。
 标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。
 yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
@@ -83,6 +83,15 @@ for 绑定可用严格模式：for [left, right] in pairs 会原子地绑定每�
 
 ````quickcoffee
 
+class BoundCounter
+  constructor: (@value) ->
+  callback: ->
+    =>
+      @value = @value + 1
+      @value
+
+bound_callback = new BoundCounter(40).callback()
+bound_callback()
 class 手册点
   constructor: (@横, @纵 = 2) ->
   和: -> @横 + @纵

@@ -84,6 +84,25 @@ fn modules_can_privately_extend_imported_classes() {
 }
 
 #[test]
+fn modules_can_export_receiver_bound_callbacks_without_exporting_receivers() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { callback } from 'counter'\nexport result = [callback(), callback()]",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert(
+        "counter",
+        "class Counter\n  constructor: (@value) ->\n  callback: ->\n    =>\n      @value = @value + 1\n      @value\nexport callback = new Counter(40).callback()",
+    );
+
+    let exports = Context::new().run_module(&main, &loader).unwrap();
+    assert_eq!(exports.get("result").unwrap().to_string(), "[41, 42]");
+}
+
+#[test]
 fn module_loading_caches_dependencies_and_reports_missing_names() {
     let engine = Engine::new();
     let main = engine
