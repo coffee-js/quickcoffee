@@ -5,6 +5,7 @@
 ## qcoffee --quit initializes one Context and exits silently; it cannot be combined with source or execution options.
 ## qcoffee --stats writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
+## Embedders may set Context ResourceLimits for JSON input, output, strings, containers, value count, and nesting; boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
@@ -18,7 +19,7 @@
 ## qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.
 
 ## qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.
-## Rust embedding errors expose ErrorKind::Parse, Verify, or Runtime plus a display-independent message; host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
+## Rust embedding errors expose ErrorKind::Parse, Verify, Runtime, or Resource plus a display-independent message; error.resource_limit() distinguishes fuel, call depth, cancellation, and JSON boundaries, host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
 ## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 ## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
@@ -27,7 +28,7 @@
 ## qbench --compare-qjs PATH separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use --repeat 11; each phase has a median and *_mad_ns.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 ## qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
-## Embedders may call Context::set_fuel between runs; Context::fuel reports the current per-run budget without clearing globals, while with_global and with_native provide chainable setup.
+## Embedders may call Context::set_fuel or set_resource_limits between runs without clearing globals; with_resource_limits, with_global, and with_native provide chainable setup.
 ## cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 ## A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
 ## Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.

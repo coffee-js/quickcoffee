@@ -1,6 +1,6 @@
 use quickcoffee::{
     CancellationToken, Context, DiagnosticLabelKind, Engine, Error, ErrorKind, ResourceLimit,
-    Value, ValueKind,
+    ResourceLimits, Value, ValueKind,
 };
 
 #[test]
@@ -590,6 +590,57 @@ fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
     assert_eq!(context.max_call_depth(), 0);
     let error = context.eval("(-> 1)()").unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::CallDepth));
+}
+
+#[test]
+fn json_resource_policy_is_replaceable_labeled_and_uncatchable() {
+    let defaults = ResourceLimits::default();
+    let constrained = defaults
+        .with_max_json_input_bytes(32)
+        .with_max_json_output_bytes(32)
+        .with_max_json_string_bytes(16)
+        .with_max_json_container_items(4)
+        .with_max_json_values(1)
+        .with_max_json_nesting_depth(2);
+    let mut context = Context::new().with_resource_limits(constrained);
+    assert_eq!(context.resource_limits(), constrained);
+    assert_eq!(context.resource_limits().max_json_input_bytes(), 32);
+    assert_eq!(context.resource_limits().max_json_output_bytes(), 32);
+    assert_eq!(context.resource_limits().max_json_string_bytes(), 16);
+    assert_eq!(context.resource_limits().max_json_container_items(), 4);
+    assert_eq!(context.resource_limits().max_json_values(), 1);
+    assert_eq!(context.resource_limits().max_json_nesting_depth(), 2);
+
+    let error = context
+        .eval_named(
+            "virtual://limits.qc",
+            "try parse_json('[0]') catch ignored then 42",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::JsonValueCount));
+    assert!(error.message().contains("value count exceeds 1"));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://limits.qc")
+    );
+    assert_eq!(error.labels()[0].span.start.line, 1);
+
+    context.set_resource_limits(defaults);
+    assert_eq!(context.resource_limits(), defaults);
+    assert_eq!(
+        context
+            .eval("parse_json('[0]')[0]")
+            .unwrap()
+            .as_integer()
+            .and_then(|value| value.as_i64()),
+        Some(0)
+    );
+
+    let caught = context
+        .eval("try parse_json('[0,]') catch problem then problem.code")
+        .unwrap();
+    assert_eq!(caught.as_str(), Some("json.parse"));
 }
 
 #[test]

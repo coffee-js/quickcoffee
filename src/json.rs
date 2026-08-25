@@ -1,24 +1,30 @@
-use crate::{Decimal, Integer, Value};
+use crate::{Decimal, Integer, ResourceLimit, ResourceLimits, Value};
 use num_bigint::BigInt;
 use std::{collections::BTreeMap, fmt, rc::Rc};
-
-pub(crate) const MAX_JSON_INPUT_BYTES: usize = 1_000_000;
-pub(crate) const MAX_JSON_OUTPUT_BYTES: usize = 1_000_000;
-pub(crate) const MAX_JSON_STRING_BYTES: usize = 1_000_000;
-pub(crate) const MAX_JSON_CONTAINER_ITEMS: usize = 100_000;
-pub(crate) const MAX_JSON_VALUES: usize = 100_000;
-pub(crate) const MAX_JSON_DEPTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JsonFailure {
     message: String,
+    resource_limit: Option<ResourceLimit>,
 }
 
 impl JsonFailure {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            resource_limit: None,
         }
+    }
+
+    fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            resource_limit: Some(limit),
+        }
+    }
+
+    pub(crate) fn resource_limit(&self) -> Option<ResourceLimit> {
+        self.resource_limit
     }
 }
 
@@ -28,17 +34,19 @@ impl fmt::Display for JsonFailure {
     }
 }
 
-pub(crate) fn parse_json(source: &str) -> Result<Value, JsonFailure> {
-    if source.len() > MAX_JSON_INPUT_BYTES {
-        return Err(JsonFailure::new(format!(
-            "JSON input exceeds {MAX_JSON_INPUT_BYTES} bytes"
-        )));
+pub(crate) fn parse_json(source: &str, limits: ResourceLimits) -> Result<Value, JsonFailure> {
+    if source.len() > limits.max_json_input_bytes() {
+        return Err(JsonFailure::resource(
+            ResourceLimit::JsonInputBytes,
+            format!("JSON input exceeds {} bytes", limits.max_json_input_bytes()),
+        ));
     }
     let mut parser = JsonParser {
         source,
         bytes: source.as_bytes(),
         cursor: 0,
         values: 0,
+        limits,
     };
     parser.skip_whitespace();
     let value = parser.parse_value(0)?;
@@ -49,10 +57,11 @@ pub(crate) fn parse_json(source: &str) -> Result<Value, JsonFailure> {
     Ok(value)
 }
 
-pub(crate) fn encode_json(value: &Value) -> Result<String, JsonFailure> {
+pub(crate) fn encode_json(value: &Value, limits: ResourceLimits) -> Result<String, JsonFailure> {
     let mut encoder = JsonEncoder {
         output: String::new(),
         values: 0,
+        limits,
     };
     encoder.encode_value(value, 0)?;
     Ok(encoder.output)
@@ -63,15 +72,17 @@ struct JsonParser<'a> {
     bytes: &'a [u8],
     cursor: usize,
     values: usize,
+    limits: ResourceLimits,
 }
 
 impl JsonParser<'_> {
     fn parse_value(&mut self, depth: usize) -> Result<Value, JsonFailure> {
         self.values += 1;
-        if self.values > MAX_JSON_VALUES {
-            return Err(JsonFailure::new(format!(
-                "JSON value count exceeds {MAX_JSON_VALUES}"
-            )));
+        if self.values > self.limits.max_json_values() {
+            return Err(JsonFailure::resource(
+                ResourceLimit::JsonValueCount,
+                format!("JSON value count exceeds {}", self.limits.max_json_values()),
+            ));
         }
         match self.peek() {
             Some(b'n') => {
@@ -104,10 +115,14 @@ impl JsonParser<'_> {
             return Ok(Value::Array(Rc::new(values)));
         }
         loop {
-            if values.len() >= MAX_JSON_CONTAINER_ITEMS {
-                return Err(JsonFailure::new(format!(
-                    "JSON array exceeds {MAX_JSON_CONTAINER_ITEMS} items"
-                )));
+            if values.len() >= self.limits.max_json_container_items() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::JsonContainerItems,
+                    format!(
+                        "JSON array exceeds {} items",
+                        self.limits.max_json_container_items()
+                    ),
+                ));
             }
             values.push(self.parse_value(depth + 1)?);
             self.skip_whitespace();
@@ -129,10 +144,14 @@ impl JsonParser<'_> {
             return Ok(Value::Map(Rc::new(values)));
         }
         loop {
-            if values.len() >= MAX_JSON_CONTAINER_ITEMS {
-                return Err(JsonFailure::new(format!(
-                    "JSON object exceeds {MAX_JSON_CONTAINER_ITEMS} members"
-                )));
+            if values.len() >= self.limits.max_json_container_items() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::JsonContainerItems,
+                    format!(
+                        "JSON object exceeds {} members",
+                        self.limits.max_json_container_items()
+                    ),
+                ));
             }
             if self.peek() != Some(b'"') {
                 return Err(self.syntax("JSON object key must be a string"));
@@ -187,10 +206,14 @@ impl JsonParser<'_> {
                     self.cursor += character.len_utf8();
                 }
             }
-            if output.len() > MAX_JSON_STRING_BYTES {
-                return Err(JsonFailure::new(format!(
-                    "JSON string exceeds {MAX_JSON_STRING_BYTES} bytes"
-                )));
+            if output.len() > self.limits.max_json_string_bytes() {
+                return Err(JsonFailure::resource(
+                    ResourceLimit::JsonStringBytes,
+                    format!(
+                        "JSON string exceeds {} bytes",
+                        self.limits.max_json_string_bytes()
+                    ),
+                ));
             }
         }
     }
@@ -328,10 +351,14 @@ impl JsonParser<'_> {
     }
 
     fn check_depth(&self, depth: usize) -> Result<(), JsonFailure> {
-        if depth >= MAX_JSON_DEPTH {
-            Err(JsonFailure::new(format!(
-                "JSON nesting exceeds {MAX_JSON_DEPTH}"
-            )))
+        if depth >= self.limits.max_json_nesting_depth() {
+            Err(JsonFailure::resource(
+                ResourceLimit::JsonNestingDepth,
+                format!(
+                    "JSON nesting exceeds {}",
+                    self.limits.max_json_nesting_depth()
+                ),
+            ))
         } else {
             Ok(())
         }
@@ -372,15 +399,17 @@ impl JsonParser<'_> {
 struct JsonEncoder {
     output: String,
     values: usize,
+    limits: ResourceLimits,
 }
 
 impl JsonEncoder {
     fn encode_value(&mut self, value: &Value, depth: usize) -> Result<(), JsonFailure> {
         self.values += 1;
-        if self.values > MAX_JSON_VALUES {
-            return Err(JsonFailure::new(format!(
-                "JSON value count exceeds {MAX_JSON_VALUES}"
-            )));
+        if self.values > self.limits.max_json_values() {
+            return Err(JsonFailure::resource(
+                ResourceLimit::JsonValueCount,
+                format!("JSON value count exceeds {}", self.limits.max_json_values()),
+            ));
         }
         match value {
             Value::Nil => self.push("null"),
@@ -402,10 +431,14 @@ impl JsonEncoder {
             Value::String(value) => self.encode_string(value),
             Value::Array(values) => {
                 self.check_depth(depth)?;
-                if values.len() > MAX_JSON_CONTAINER_ITEMS {
-                    return Err(JsonFailure::new(format!(
-                        "JSON array exceeds {MAX_JSON_CONTAINER_ITEMS} items"
-                    )));
+                if values.len() > self.limits.max_json_container_items() {
+                    return Err(JsonFailure::resource(
+                        ResourceLimit::JsonContainerItems,
+                        format!(
+                            "JSON array exceeds {} items",
+                            self.limits.max_json_container_items()
+                        ),
+                    ));
                 }
                 self.push("[")?;
                 for (index, value) in values.iter().enumerate() {
@@ -418,10 +451,14 @@ impl JsonEncoder {
             }
             Value::Map(values) => {
                 self.check_depth(depth)?;
-                if values.len() > MAX_JSON_CONTAINER_ITEMS {
-                    return Err(JsonFailure::new(format!(
-                        "JSON object exceeds {MAX_JSON_CONTAINER_ITEMS} members"
-                    )));
+                if values.len() > self.limits.max_json_container_items() {
+                    return Err(JsonFailure::resource(
+                        ResourceLimit::JsonContainerItems,
+                        format!(
+                            "JSON object exceeds {} members",
+                            self.limits.max_json_container_items()
+                        ),
+                    ));
                 }
                 self.push("{")?;
                 for (index, (key, value)) in values.iter().enumerate() {
@@ -444,10 +481,14 @@ impl JsonEncoder {
     }
 
     fn encode_string(&mut self, value: &str) -> Result<(), JsonFailure> {
-        if value.len() > MAX_JSON_STRING_BYTES {
-            return Err(JsonFailure::new(format!(
-                "JSON string exceeds {MAX_JSON_STRING_BYTES} bytes"
-            )));
+        if value.len() > self.limits.max_json_string_bytes() {
+            return Err(JsonFailure::resource(
+                ResourceLimit::JsonStringBytes,
+                format!(
+                    "JSON string exceeds {} bytes",
+                    self.limits.max_json_string_bytes()
+                ),
+            ));
         }
         self.push("\"")?;
         for character in value.chars() {
@@ -472,20 +513,28 @@ impl JsonEncoder {
     }
 
     fn push(&mut self, value: &str) -> Result<(), JsonFailure> {
-        if self.output.len().saturating_add(value.len()) > MAX_JSON_OUTPUT_BYTES {
-            return Err(JsonFailure::new(format!(
-                "JSON output exceeds {MAX_JSON_OUTPUT_BYTES} bytes"
-            )));
+        if self.output.len().saturating_add(value.len()) > self.limits.max_json_output_bytes() {
+            return Err(JsonFailure::resource(
+                ResourceLimit::JsonOutputBytes,
+                format!(
+                    "JSON output exceeds {} bytes",
+                    self.limits.max_json_output_bytes()
+                ),
+            ));
         }
         self.output.push_str(value);
         Ok(())
     }
 
     fn check_depth(&self, depth: usize) -> Result<(), JsonFailure> {
-        if depth >= MAX_JSON_DEPTH {
-            Err(JsonFailure::new(format!(
-                "JSON nesting exceeds {MAX_JSON_DEPTH}"
-            )))
+        if depth >= self.limits.max_json_nesting_depth() {
+            Err(JsonFailure::resource(
+                ResourceLimit::JsonNestingDepth,
+                format!(
+                    "JSON nesting exceeds {}",
+                    self.limits.max_json_nesting_depth()
+                ),
+            ))
         } else {
             Ok(())
         }
@@ -494,10 +543,16 @@ impl JsonEncoder {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        MAX_JSON_DEPTH, MAX_JSON_INPUT_BYTES, MAX_JSON_OUTPUT_BYTES, encode_json, parse_json,
-    };
-    use crate::Value;
+    use super::{encode_json as encode_with_limits, parse_json as parse_with_limits};
+    use crate::{ResourceLimit, ResourceLimits, Value};
+
+    fn parse_json(source: &str) -> Result<Value, super::JsonFailure> {
+        parse_with_limits(source, ResourceLimits::default())
+    }
+
+    fn encode_json(value: &Value) -> Result<String, super::JsonFailure> {
+        encode_with_limits(value, ResourceLimits::default())
+    }
 
     #[test]
     fn exact_numbers_and_canonical_objects_round_trip() {
@@ -545,6 +600,7 @@ mod tests {
 
     #[test]
     fn malformed_numbers_nesting_and_size_limits_fail_atomically() {
+        let defaults = ResourceLimits::default();
         for source in [
             "",
             "-",
@@ -566,8 +622,8 @@ mod tests {
         }
         let nested = format!(
             "{}null{}",
-            "[".repeat(MAX_JSON_DEPTH + 1),
-            "]".repeat(MAX_JSON_DEPTH + 1)
+            "[".repeat(defaults.max_json_nesting_depth() + 1),
+            "]".repeat(defaults.max_json_nesting_depth() + 1)
         );
         assert!(
             parse_json(&nested)
@@ -575,7 +631,7 @@ mod tests {
                 .to_string()
                 .contains("nesting")
         );
-        let oversized = " ".repeat(MAX_JSON_INPUT_BYTES + 1);
+        let oversized = " ".repeat(defaults.max_json_input_bytes() + 1);
         assert!(
             parse_json(&oversized)
                 .unwrap_err()
@@ -583,7 +639,7 @@ mod tests {
                 .contains("input exceeds")
         );
         assert!(
-            encode_json(&Value::from("x".repeat(MAX_JSON_OUTPUT_BYTES)))
+            encode_json(&Value::from("x".repeat(defaults.max_json_output_bytes())))
                 .unwrap_err()
                 .to_string()
                 .contains("output exceeds")
@@ -591,7 +647,7 @@ mod tests {
         assert!(encode_json(&Value::Number(f64::NAN)).is_err());
 
         let mut nested_value = Value::Nil;
-        for _ in 0..=MAX_JSON_DEPTH {
+        for _ in 0..=defaults.max_json_nesting_depth() {
             nested_value = Value::Array(std::rc::Rc::new(vec![nested_value]));
         }
         assert!(
@@ -599,6 +655,77 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("nesting")
+        );
+    }
+
+    #[test]
+    fn configurable_limits_accept_boundaries_and_report_stable_categories() {
+        let defaults = ResourceLimits::default();
+
+        let input_boundary = defaults.with_max_json_input_bytes(4);
+        assert!(parse_with_limits("null", input_boundary).is_ok());
+        assert_eq!(
+            parse_with_limits("null", input_boundary.with_max_json_input_bytes(3))
+                .unwrap_err()
+                .resource_limit(),
+            Some(ResourceLimit::JsonInputBytes)
+        );
+
+        let output_boundary = defaults.with_max_json_output_bytes(4);
+        assert_eq!(
+            encode_with_limits(&Value::Bool(true), output_boundary).unwrap(),
+            "true"
+        );
+        assert_eq!(
+            encode_with_limits(
+                &Value::Bool(true),
+                output_boundary.with_max_json_output_bytes(3)
+            )
+            .unwrap_err()
+            .resource_limit(),
+            Some(ResourceLimit::JsonOutputBytes)
+        );
+
+        let string_boundary = defaults.with_max_json_string_bytes(3);
+        assert_eq!(
+            parse_with_limits(r#""中""#, string_boundary)
+                .unwrap()
+                .as_str(),
+            Some("中")
+        );
+        assert_eq!(
+            parse_with_limits(r#""中""#, string_boundary.with_max_json_string_bytes(2))
+                .unwrap_err()
+                .resource_limit(),
+            Some(ResourceLimit::JsonStringBytes)
+        );
+
+        let container_boundary = defaults.with_max_json_container_items(1);
+        assert!(parse_with_limits("[0]", container_boundary).is_ok());
+        assert_eq!(
+            parse_with_limits("[0]", container_boundary.with_max_json_container_items(0))
+                .unwrap_err()
+                .resource_limit(),
+            Some(ResourceLimit::JsonContainerItems)
+        );
+
+        let value_boundary = defaults.with_max_json_values(2);
+        let one_item = Value::array([Value::from(0_i64)]);
+        assert!(encode_with_limits(&one_item, value_boundary).is_ok());
+        assert_eq!(
+            encode_with_limits(&one_item, value_boundary.with_max_json_values(1))
+                .unwrap_err()
+                .resource_limit(),
+            Some(ResourceLimit::JsonValueCount)
+        );
+
+        let depth_boundary = defaults.with_max_json_nesting_depth(1);
+        assert!(parse_with_limits("[0]", depth_boundary).is_ok());
+        assert_eq!(
+            parse_with_limits("[[0]]", depth_boundary)
+                .unwrap_err()
+                .resource_limit(),
+            Some(ResourceLimit::JsonNestingDepth)
         );
     }
 }

@@ -1,5 +1,5 @@
 use quickcoffee::{
-    Context, Engine, ErrorKind, MemoryModuleLoader, ModuleLoader, ResourceLimit,
+    Context, Engine, ErrorKind, MemoryModuleLoader, ModuleLoader, ResourceLimit, ResourceLimits,
     RestrictedFileModuleLoader, Value,
 };
 use std::{
@@ -158,6 +158,30 @@ fn module_cycles_are_rejected_and_resources_cover_dependencies() {
         .run_module(&main, &loader)
         .unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::Fuel));
+}
+
+#[test]
+fn module_children_inherit_json_resource_policy() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { payload } from 'dependency'\nexport payload = payload",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export payload = parse_json('[0]')");
+    let limits = ResourceLimits::default().with_max_json_values(1);
+    let error = Context::new()
+        .with_resource_limits(limits)
+        .run_module(&main, &loader)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::JsonValueCount));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("dependency")
+    );
 }
 
 #[test]
