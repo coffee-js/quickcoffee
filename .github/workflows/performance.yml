@@ -8,6 +8,10 @@ on:
         description: Git ref to use as the same-runner baseline
         required: false
         default: main
+      candidate_ref:
+        description: Git ref to use as the candidate (defaults to the dispatched ref)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -24,8 +28,8 @@ jobs:
     continue-on-error: true
     env:
       BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
-      CANDIDATE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-      BENCHMARK_COMMAND: alternating base/head qbench --only BASELINE_NAME --json --iterations 2000 --repeat 11; candidate-only workloads measured separately
+      CANDIDATE_REF: ${{ github.event.pull_request.head.sha || inputs.candidate_ref || github.sha }}
+      BENCHMARK_COMMAND: paired AB/BA qbench --only BASELINE_NAME --json --iterations 2000 --repeat 11; candidate-only workloads measured separately
     steps:
       - name: Check out candidate
         uses: actions/checkout@v5
@@ -86,21 +90,52 @@ jobs:
             sed 's/^/  - /' "${artifact_dir}/removed-workloads.txt" >&2
             exit 1
           fi
-          : >"${artifact_dir}/baseline.jsonl"
-          : >"${artifact_dir}/candidate.jsonl"
+          : >"${artifact_dir}/baseline-runs.jsonl"
+          : >"${artifact_dir}/candidate-runs.jsonl"
+          : >"${artifact_dir}/ordered.jsonl"
           : >"${artifact_dir}/candidate-only.jsonl"
+
+          sequence=0
+          run_ordered() {
+            local side="$1"
+            local pair_id="$2"
+            local workload="$3"
+            local binary="$4"
+            local record
+            record="$(
+              "${binary}" --only "${workload}" \
+                --json --iterations 2000 --repeat 11
+            )"
+            printf '%s\n' "${record}" \
+              >>"${artifact_dir}/${side}-runs.jsonl"
+            printf '%s\n' "${record}" \
+              | jq -c \
+                --arg pair_id "${pair_id}" \
+                --arg side "${side}" \
+                --argjson sequence "${sequence}" \
+                '{
+                  schema: "quickcoffee.qbench-ordered.v1",
+                  pair_id: $pair_id,
+                  sequence: $sequence,
+                  side: $side,
+                  record: .
+                }' >>"${artifact_dir}/ordered.jsonl"
+            sequence=$((sequence + 1))
+          }
+
           index=0
           while IFS= read -r workload; do
+            pair_prefix="$(printf '%03d' "${index}")"
             if (( index % 2 == 0 )); then
-              "${baseline_qbench}" --only "${workload}" \
-                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/baseline.jsonl"
-              "${candidate_qbench}" --only "${workload}" \
-                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/candidate.jsonl"
+              run_ordered baseline "${pair_prefix}-0" "${workload}" "${baseline_qbench}"
+              run_ordered candidate "${pair_prefix}-0" "${workload}" "${candidate_qbench}"
+              run_ordered candidate "${pair_prefix}-1" "${workload}" "${candidate_qbench}"
+              run_ordered baseline "${pair_prefix}-1" "${workload}" "${baseline_qbench}"
             else
-              "${candidate_qbench}" --only "${workload}" \
-                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/candidate.jsonl"
-              "${baseline_qbench}" --only "${workload}" \
-                --json --iterations 2000 --repeat 11 >>"${artifact_dir}/baseline.jsonl"
+              run_ordered candidate "${pair_prefix}-0" "${workload}" "${candidate_qbench}"
+              run_ordered baseline "${pair_prefix}-0" "${workload}" "${baseline_qbench}"
+              run_ordered baseline "${pair_prefix}-1" "${workload}" "${baseline_qbench}"
+              run_ordered candidate "${pair_prefix}-1" "${workload}" "${candidate_qbench}"
             fi
             index=$((index + 1))
           done <"${artifact_dir}/baseline-workloads.txt"
@@ -117,8 +152,7 @@ jobs:
           set -euo pipefail
           artifact_dir="${RUNNER_TEMP}/quickcoffee-performance"
           python3 scripts/qbench_compare.py \
-            --baseline "${artifact_dir}/baseline.jsonl" \
-            --candidate "${artifact_dir}/candidate.jsonl" \
+            --ordered "${artifact_dir}/ordered.jsonl" \
             --summary "${GITHUB_STEP_SUMMARY}" \
             --report "${artifact_dir}/comparison.json" \
             --metadata "${artifact_dir}/metadata.json" \
