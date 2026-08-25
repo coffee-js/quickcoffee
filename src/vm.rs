@@ -2719,21 +2719,27 @@ impl Vm {
                     }
                     Instruction::Destructure(pattern) => {
                         let value = pop(frame)?;
-                        let mut bindings = vec![];
                         let env = frame.env.clone();
-                        let snapshot = env.borrow().snapshot();
-                        if let Err(error) = bind_pattern(
-                            self,
-                            pattern,
-                            Some(&value),
-                            &mut bindings,
-                            &env,
-                            frame.debug_info.as_ref(),
-                            frame.execution_plan.as_ref(),
-                        ) {
-                            env.borrow_mut().restore(snapshot);
-                            return Err(error);
-                        }
+                        let (bindings, allocations) = if static_pattern_matches(pattern, &value) {
+                            collect_static_pattern_bindings(pattern, &value)
+                        } else {
+                            let mut bindings = vec![];
+                            let snapshot = env.borrow().snapshot();
+                            if let Err(error) = bind_pattern(
+                                self,
+                                pattern,
+                                Some(&value),
+                                &mut bindings,
+                                &env,
+                                frame.debug_info.as_ref(),
+                                frame.execution_plan.as_ref(),
+                            ) {
+                                env.borrow_mut().restore(snapshot);
+                                return Err(error);
+                            }
+                            (bindings, 0)
+                        };
+                        self.record_value_allocations(allocations);
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -3043,6 +3049,24 @@ impl Vm {
                                     if let Pattern::Bind(name) = pattern {
                                         environment.set_local(name, value);
                                     }
+                                }
+                            } else if patterns
+                                .iter()
+                                .zip(values.iter())
+                                .all(|(pattern, value)| static_pattern_matches(pattern, value))
+                            {
+                                let mut bindings = vec![];
+                                let mut allocations = 0;
+                                for (pattern, value) in patterns.iter().zip(values.iter()) {
+                                    let (mut pattern_bindings, pattern_allocations) =
+                                        collect_static_pattern_bindings(pattern, value);
+                                    bindings.append(&mut pattern_bindings);
+                                    allocations += pattern_allocations;
+                                }
+                                self.record_value_allocations(allocations);
+                                let mut environment = frame.env.borrow_mut();
+                                for (name, value) in bindings {
+                                    environment.set_local(&name, value);
                                 }
                             } else {
                                 let mut bindings = vec![];
@@ -3970,6 +3994,135 @@ fn jump(f: &mut Frame, delta: i32) -> Result<(), Error> {
         .map_err(|_| Error::runtime("invalid jump"))?;
     Ok(())
 }
+
+// Patterns without defaults can be checked without changing the environment.
+// Once this predicate succeeds, collecting their bindings is infallible and
+// callers can commit once without cloning the complete environment for rollback.
+fn static_pattern_matches(pattern: &Pattern, value: &Value) -> bool {
+    match pattern {
+        Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => true,
+        Pattern::Default { .. } => false,
+        Pattern::Array(patterns) => {
+            let Value::Array(values) = value else {
+                return false;
+            };
+            let rest_index = patterns
+                .iter()
+                .position(|pattern| matches!(pattern, Pattern::Rest(_)));
+            let required_len = patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, pattern)| {
+                    !matches!(pattern, Pattern::Default { .. } | Pattern::Rest(_))
+                })
+                .map(|(index, _)| index + 1)
+                .max()
+                .unwrap_or(0);
+            let fixed_len = rest_index.unwrap_or(required_len);
+            if values.len() < fixed_len || (rest_index.is_none() && values.len() > patterns.len()) {
+                return false;
+            }
+            patterns.iter().enumerate().all(|(index, pattern)| {
+                matches!(pattern, Pattern::Rest(_))
+                    || values
+                        .get(index)
+                        .is_some_and(|value| static_pattern_matches(pattern, value))
+            })
+        }
+        Pattern::Map(fields) => {
+            let Value::Map(map) = value else {
+                return false;
+            };
+            fields.iter().all(|(key, pattern)| {
+                map.get(key)
+                    .is_some_and(|value| static_pattern_matches(pattern, value))
+            })
+        }
+        Pattern::MapRest { fields, .. } => {
+            let Value::Map(map) = value else {
+                return false;
+            };
+            fields.iter().all(|(key, pattern)| {
+                map.get(key)
+                    .is_some_and(|value| static_pattern_matches(pattern, value))
+            })
+        }
+    }
+}
+
+fn collect_static_pattern_bindings(
+    pattern: &Pattern,
+    value: &Value,
+) -> (Vec<(String, Value)>, u64) {
+    let mut bindings = vec![];
+    let mut allocations = 0;
+    collect_static_pattern_bindings_into(pattern, value, &mut bindings, &mut allocations);
+    (bindings, allocations)
+}
+
+fn collect_static_pattern_bindings_into(
+    pattern: &Pattern,
+    value: &Value,
+    bindings: &mut Vec<(String, Value)>,
+    allocations: &mut u64,
+) {
+    match pattern {
+        Pattern::Ignore => {}
+        Pattern::Bind(name) | Pattern::Rest(name) => {
+            bindings.push((name.clone(), value.clone()));
+        }
+        Pattern::Default { .. } => {
+            unreachable!("static pattern matching excludes defaults");
+        }
+        Pattern::Array(patterns) => {
+            let Value::Array(values) = value else {
+                unreachable!("static array pattern was prevalidated");
+            };
+            for (index, pattern) in patterns.iter().enumerate() {
+                if let Pattern::Rest(name) = pattern {
+                    bindings.push((
+                        name.clone(),
+                        Value::Array(Rc::new(values[index..].to_vec())),
+                    ));
+                    *allocations = allocations.saturating_add(1);
+                    break;
+                }
+                collect_static_pattern_bindings_into(
+                    pattern,
+                    &values[index],
+                    bindings,
+                    allocations,
+                );
+            }
+        }
+        Pattern::Map(fields) => {
+            let Value::Map(map) = value else {
+                unreachable!("static map pattern was prevalidated");
+            };
+            for (key, pattern) in fields {
+                collect_static_pattern_bindings_into(pattern, &map[key], bindings, allocations);
+            }
+        }
+        Pattern::MapRest { fields, rest } => {
+            let Value::Map(map) = value else {
+                unreachable!("static map-rest pattern was prevalidated");
+            };
+            for (key, pattern) in fields {
+                collect_static_pattern_bindings_into(pattern, &map[key], bindings, allocations);
+            }
+            let explicit_fields: BTreeSet<&str> =
+                fields.iter().map(|(field, _)| field.as_str()).collect();
+            let remaining = map
+                .iter()
+                .filter(|(key, _)| !explicit_fields.contains(key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            bindings.push((rest.clone(), Value::Map(Rc::new(remaining))));
+            *allocations = allocations.saturating_add(1);
+        }
+    }
+}
+
 fn bind_pattern(
     vm: &mut Vm,
     pattern: &Pattern,
@@ -4254,6 +4407,59 @@ fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_pattern_fast_path_prevalidates_and_counts_rest_backings() {
+        let pattern = Pattern::MapRest {
+            fields: vec![
+                ("id".to_owned(), Pattern::Bind("id".to_owned())),
+                (
+                    "items".to_owned(),
+                    Pattern::Array(vec![
+                        Pattern::Bind("head".to_owned()),
+                        Pattern::Rest("tail".to_owned()),
+                    ]),
+                ),
+            ],
+            rest: "metadata".to_owned(),
+        };
+        let value = Value::map([
+            ("extra", Value::from(5_f64)),
+            ("id", Value::from(1_f64)),
+            (
+                "items",
+                Value::array(vec![
+                    Value::from(2_f64),
+                    Value::from(3_f64),
+                    Value::from(4_f64),
+                ]),
+            ),
+        ]);
+
+        assert!(static_pattern_matches(&pattern, &value));
+        let (bindings, allocations) = collect_static_pattern_bindings(&pattern, &value);
+        let bindings = bindings.into_iter().collect::<BTreeMap<_, _>>();
+        assert_eq!(allocations, 2);
+        assert_eq!(bindings["id"].as_number(), Some(1_f64));
+        assert_eq!(bindings["head"].as_number(), Some(2_f64));
+        assert_eq!(bindings["tail"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            bindings["metadata"].as_map().unwrap()["extra"].as_number(),
+            Some(5_f64)
+        );
+
+        assert!(!static_pattern_matches(
+            &pattern,
+            &Value::map([("items", Value::array(vec![Value::from(2_f64)]))])
+        ));
+        assert!(!static_pattern_matches(
+            &Pattern::Default {
+                pattern: Box::new(Pattern::Bind("value".to_owned())),
+                default: Rc::new(Chunk::default()),
+            },
+            &Value::Nil
+        ));
+    }
 
     fn assert_result_equal(left: Result<Value, Error>, right: Result<Value, Error>) {
         match (left, right) {
