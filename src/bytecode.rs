@@ -129,11 +129,15 @@ pub enum Instruction {
     MakeFunction(usize),
     MakeClass {
         name: String,
+        extends: bool,
         constructor: bool,
         instance_methods: Vec<String>,
         static_methods: Vec<String>,
     },
     Return,
+    LoadReceiver,
+    SuperCall(usize),
+    SuperCallSpread,
 }
 
 impl Chunk {
@@ -265,7 +269,20 @@ impl Chunk {
                     ))
                     .at_instruction(pc));
                 }
+                Instruction::LoadReceiver if !receiver_context => {
+                    return Err(Error::verify(format!(
+                        "receiver load outside class member at instruction {pc}"
+                    ))
+                    .at_instruction(pc));
+                }
+                Instruction::SuperCall(_) | Instruction::SuperCallSpread if !receiver_context => {
+                    return Err(Error::verify(format!(
+                        "super call outside class member at instruction {pc}"
+                    ))
+                    .at_instruction(pc));
+                }
                 Instruction::MakeClass {
+                    extends,
                     constructor,
                     instance_methods,
                     static_methods,
@@ -300,14 +317,33 @@ impl Chunk {
                             ))
                             .at_instruction(pc));
                         };
-                        if !matches!(
-                            self.constants.get(*index),
-                            Some(Constant::Function { receiver: true, .. })
-                        ) {
-                            return Err(Error::verify(format!(
-                                "class template at instruction {pc} uses a non-receiver function"
-                            ))
-                            .at_instruction(pc));
+                        match self.constants.get(*index) {
+                            Some(Constant::Function {
+                                receiver: true,
+                                chunk,
+                                ..
+                            }) => {
+                                if !extends
+                                    && chunk.code.iter().any(|instruction| {
+                                        matches!(
+                                            instruction,
+                                            Instruction::SuperCall(_)
+                                                | Instruction::SuperCallSpread
+                                        )
+                                    })
+                                {
+                                    return Err(Error::verify(format!(
+                                        "base class template at instruction {pc} contains a super call"
+                                    ))
+                                    .at_instruction(pc));
+                                }
+                            }
+                            _ => {
+                                return Err(Error::verify(format!(
+                                    "class template at instruction {pc} uses a non-receiver function"
+                                ))
+                                .at_instruction(pc));
+                            }
                         }
                     }
                 }
@@ -380,6 +416,7 @@ impl Chunk {
                 Instruction::Constant(_)
                 | Instruction::Load(_)
                 | Instruction::LoadOrNil(_)
+                | Instruction::LoadReceiver
                 | Instruction::MakeFunction(_) => {
                     next(fallthrough, (state.0 + 1, state.1, state.2))?;
                 }
@@ -469,6 +506,11 @@ impl Chunk {
                     require(count + 1)?;
                     next(fallthrough, (state.0 - count, state.1, state.2))?;
                 }
+                Instruction::SuperCall(count) => {
+                    let count = *count as i32;
+                    require(count)?;
+                    next(fallthrough, (state.0 - count + 1, state.1, state.2))?;
+                }
                 Instruction::MemberCall { count, .. } | Instruction::Construct(count) => {
                     let count = *count as i32;
                     require(count + 1)?;
@@ -482,13 +524,19 @@ impl Chunk {
                     require(2)?;
                     next(fallthrough, (state.0 - 1, state.1, state.2))?;
                 }
+                Instruction::SuperCallSpread => {
+                    require(1)?;
+                    next(fallthrough, state)?;
+                }
                 Instruction::MakeClass {
+                    extends,
                     constructor,
                     instance_methods,
                     static_methods,
                     ..
                 } => {
-                    let count = i32::from(*constructor)
+                    let count = i32::from(*extends)
+                        + i32::from(*constructor)
                         + instance_methods.len() as i32
                         + static_methods.len() as i32;
                     require(count)?;
@@ -885,6 +933,7 @@ impl FingerprintEncoder {
                 self.tag(0x7e);
                 self.string(name);
             }
+            Instruction::LoadReceiver => simple!(0x84),
             Instruction::MemberCall { name, count } => {
                 self.tag(0x7f);
                 self.string(name);
@@ -894,6 +943,11 @@ impl FingerprintEncoder {
                 self.tag(0x82);
                 self.string(name);
             }
+            Instruction::SuperCall(count) => {
+                self.tag(0x85);
+                self.u64(*count as u64);
+            }
+            Instruction::SuperCallSpread => simple!(0x86),
             Instruction::Call(count) => {
                 self.tag(0x78);
                 self.u64(*count as u64);
@@ -913,12 +967,14 @@ impl FingerprintEncoder {
             Instruction::Decrement => simple!(0x7d),
             Instruction::MakeClass {
                 name,
+                extends,
                 constructor,
                 instance_methods,
                 static_methods,
             } => {
                 self.tag(0x81);
                 self.string(name);
+                self.bool(*extends);
                 self.bool(*constructor);
                 self.u64(instance_methods.len() as u64);
                 for method in instance_methods {

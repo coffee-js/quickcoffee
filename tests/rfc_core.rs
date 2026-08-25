@@ -567,11 +567,22 @@ fn lowering_errors_preserve_control_flow_keyword_spans() {
         ("value = 1\nbreak", "break outside of loop", 2, 1, 6),
         ("continue", "continue outside of loop", 1, 1, 9),
         ("return 1", "return outside of function", 1, 1, 7),
+        (
+            "super()",
+            "super is valid only in members of a derived class",
+            1,
+            1,
+            6,
+        ),
         ("if 状态 then break", "break outside of loop", 1, 12, 17),
     ] {
         let error = quickcoffee::compile_named("virtual://lowering.qc", source).unwrap_err();
         assert_eq!(error.message(), message);
-        let span = &error.labels()[0].span;
+        let span = &error
+            .labels()
+            .first()
+            .unwrap_or_else(|| panic!("missing lowering diagnostic label for {source}"))
+            .span;
         assert_eq!(span.source_name.as_deref(), Some("virtual://lowering.qc"));
         assert_eq!(span.start.line, line);
         assert_eq!(span.start.column, Some(start));
@@ -1692,6 +1703,69 @@ fn classes_construct_dedicated_instances_with_confined_receivers() {
     assert!(format!("{chunk:?}").contains("SetMember"));
 }
 #[test]
+fn classes_inherit_privately_and_resolve_super_from_the_defining_class() {
+    assert_eq!(
+        eval("class Base\n  constructor: (@value) ->\n  score: -> 1\n  inherited: -> @value\n  @score: -> 10\nclass Middle extends Base\n  constructor: (value) ->\n    super(value + 1)\n  score: -> super() + 1\n  @score: -> super() + 1\nclass Leaf extends Middle\nleaf = new Leaf(40)\n[leaf.inherited(), leaf.score(), Leaf.score()]")
+            .to_string(),
+        "[41, 2, 11]"
+    );
+    assert_eq!(
+        eval("class Base\n  constructor: (@value) ->\nclass Middle extends Base\nclass Leaf extends Middle\nnew Leaf(42).value")
+            .as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("class Base\n  constructor: (@value = 42) ->\nclass Child extends Base\nnew Child().value")
+            .as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("class Base\n  constructor: (@value) ->\nclass Child extends Base\n  constructor: (args...) -> super(args...)\nnew Child(42).value")
+            .as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("class Base\n  @set: (value) -> @stored = value\n  @get: -> @stored\nclass Child extends Base\nBase.set(1)\nfirst = Child.get()\nChild.set(2)\n[first, Base.get(), Child.get()]")
+            .to_string(),
+        "[1, 1, 2]"
+    );
+
+    for source in [
+        "class Child extends 1",
+        "class Base\n  value: -> super()",
+        "super()",
+        "class Base\nclass Child extends Base\n  constructor: -> @value = 1\nnew Child()",
+        "class Base\nclass Child extends Base\n  constructor: (@value) -> super()\nnew Child(1)",
+        "class Base\nclass Child extends Base\n  constructor: -> nil\nnew Child()",
+        "class Base\nclass Child extends Base\n  constructor: ->\n    super()\n    super()\nnew Child()",
+        "class Base\n  constructor: -> throw 'parent failed'\nclass Child extends Base\n  constructor: ->\n    try super() catch ignored then nil\n    super()\nnew Child()",
+        "class Base\nclass Child extends Base\n  value: -> super()",
+        "class Base\n  value: -> 1\nclass Child extends Base\n  value: ->\n    nested = -> super()\n    nested()\nnew Child().value()",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+
+    let chunk = compile(
+        "class Base\n  value: -> 1\nclass Child extends Base\n  value: -> super()\nnew Child().value()",
+    )
+    .unwrap();
+    chunk.verify().unwrap();
+    let bytecode = format!("{chunk:?}");
+    assert!(bytecode.contains("extends: true"));
+    assert!(bytecode.contains("SuperCall"));
+
+    for instruction in [Instruction::LoadReceiver, Instruction::SuperCall(0)] {
+        let forged = Chunk {
+            constants: vec![],
+            code: vec![instruction, Instruction::Return],
+        };
+        assert!(forged.verify().is_err());
+    }
+}
+#[test]
 fn double_quoted_strings_interpolate_quickcoffee_expressions() {
     assert_eq!(
         eval("name = 'Coffee'\n\"Hello #{name}, #{2 + 3}!\"").as_str(),
@@ -2010,6 +2084,31 @@ fn verifier_rejects_untrusted_bad_bytecode() {
     };
     assert!(unconfined_receiver_function.verify().is_err());
 
+    let forged_base_super = Chunk {
+        constants: vec![Constant::Function {
+            params: vec![Pattern::Bind("\0quickcoffee.receiver".into())],
+            required: 1,
+            rest: None,
+            receiver: true,
+            chunk: Rc::new(Chunk {
+                constants: vec![],
+                code: vec![Instruction::SuperCall(0), Instruction::Return],
+            }),
+        }],
+        code: vec![
+            Instruction::MakeFunction(0),
+            Instruction::MakeClass {
+                name: "ForgedBase".into(),
+                extends: false,
+                constructor: false,
+                instance_methods: vec!["method".into()],
+                static_methods: vec![],
+            },
+            Instruction::Return,
+        ],
+    };
+    assert!(forged_base_super.verify().is_err());
+
     let non_receiver_class_member = Chunk {
         constants: vec![Constant::Function {
             params: vec![],
@@ -2022,6 +2121,7 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             Instruction::MakeFunction(0),
             Instruction::MakeClass {
                 name: "Forged".into(),
+                extends: false,
                 constructor: false,
                 instance_methods: vec!["method".into()],
                 static_methods: vec![],

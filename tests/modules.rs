@@ -65,6 +65,25 @@ fn modules_export_classes_without_exposing_their_receiver_state() {
 }
 
 #[test]
+fn modules_can_privately_extend_imported_classes() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { Base } from 'model'\nclass Child extends Base\n  constructor: (value) -> super(value + 1)\n  score: -> super() + 1\nexport result = new Child(40).score()",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert(
+        "model",
+        "class Base\n  constructor: (@value) ->\n  score: -> @value\nexport { Base }",
+    );
+
+    let exports = Context::new().run_module(&main, &loader).unwrap();
+    assert_eq!(exports.get("result").and_then(Value::as_number), Some(42.));
+}
+
+#[test]
 fn module_loading_caches_dependencies_and_reports_missing_names() {
     let engine = Engine::new();
     let main = engine
