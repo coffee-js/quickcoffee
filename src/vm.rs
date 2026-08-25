@@ -46,6 +46,10 @@ pub enum ValueKind {
     Map,
     /// A sealed structured script error.
     Error,
+    /// An opaque QuickCoffee class.
+    Class,
+    /// An opaque QuickCoffee class instance.
+    Instance,
     /// An opaque bytecode or native function.
     Function,
 }
@@ -964,6 +968,10 @@ pub enum Value {
     Map(Rc<BTreeMap<String, Value>>),
     /// A sealed structured error.
     Error(Rc<ScriptError>),
+    /// An opaque QuickCoffee class value.
+    Class(Rc<Class>),
+    /// An opaque QuickCoffee class instance.
+    Instance(Rc<Instance>),
     /// An opaque bytecode or native function.
     Function(Rc<Function>),
 }
@@ -979,6 +987,8 @@ impl fmt::Debug for Value {
             Self::Array(x) => f.debug_list().entries(x.iter()).finish(),
             Self::Map(x) => f.debug_map().entries(x.iter()).finish(),
             Self::Error(error) => write!(f, "error({}): {}", error.code, error.message),
+            Self::Class(class) => write!(f, "<class {}>", class.name),
+            Self::Instance(instance) => write!(f, "<{} instance>", instance.class.name),
             Self::Function(_) => write!(f, "<function>"),
         }
     }
@@ -1013,6 +1023,8 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Self::Error(error) => write!(f, "error({}): {}", error.code, error.message),
+            Self::Class(class) => write!(f, "<class {}>", class.name),
+            Self::Instance(instance) => write!(f, "<{} instance>", instance.class.name),
             Self::Function(_) => write!(f, "<function>"),
         }
     }
@@ -1030,6 +1042,8 @@ impl Value {
             Self::Array(_) => ValueKind::Array,
             Self::Map(_) => ValueKind::Map,
             Self::Error(_) => ValueKind::Error,
+            Self::Class(_) => ValueKind::Class,
+            Self::Instance(_) => ValueKind::Instance,
             Self::Function(_) => ValueKind::Function,
         }
     }
@@ -1187,6 +1201,8 @@ fn check_value_numeric_resources(value: &Value, limits: ResourceLimits) -> Resul
             | Value::Bool(_)
             | Value::Number(_)
             | Value::String(_)
+            | Value::Class(_)
+            | Value::Instance(_)
             | Value::Function(_) => {}
         }
     }
@@ -1516,6 +1532,19 @@ impl CancellationToken {
 
 /// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
+/// Opaque class metadata created only by verified QuickCoffee bytecode.
+pub struct Class {
+    name: Rc<str>,
+    constructor: Option<Rc<Function>>,
+    instance_methods: BTreeMap<String, Rc<Function>>,
+    static_methods: BTreeMap<String, Rc<Function>>,
+    static_fields: RefCell<BTreeMap<String, Value>>,
+}
+/// Opaque instance state owned by one QuickCoffee class.
+pub struct Instance {
+    class: Rc<Class>,
+    fields: RefCell<BTreeMap<String, Value>>,
+}
 /// Opaque callable values are constructed by QuickCoffee or `Context::add_native`.
 pub struct Function {
     inner: FunctionKind,
@@ -1525,6 +1554,7 @@ enum FunctionKind {
         params: Vec<Pattern>,
         required: usize,
         rest: Option<String>,
+        receiver: bool,
         chunk: Rc<Chunk>,
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
@@ -1538,6 +1568,14 @@ enum FunctionKind {
     ResourceBuiltin {
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
         allocation_profile: Option<fn(&Value) -> u64>,
+    },
+    BoundMethod {
+        function: Rc<Function>,
+        receiver: Value,
+    },
+    UnboundMethod {
+        owner: Rc<str>,
+        name: Rc<str>,
     },
 }
 type Env = Rc<RefCell<Environment>>;
@@ -2182,7 +2220,13 @@ fn json_value_allocations(value: &Value) -> u64 {
             .values()
             .map(json_value_allocations)
             .fold(values.len() as u64 + 1, u64::saturating_add),
-        Value::Nil | Value::Bool(_) | Value::Number(_) | Value::Error(_) | Value::Function(_) => 0,
+        Value::Nil
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::Error(_)
+        | Value::Class(_)
+        | Value::Instance(_)
+        | Value::Function(_) => 0,
     }
 }
 
@@ -2240,7 +2284,7 @@ fn valid_error_data(value: &Value, depth: usize) -> bool {
         Value::Map(values) => values
             .values()
             .all(|value| valid_error_data(value, depth + 1)),
-        Value::Error(_) | Value::Function(_) => false,
+        Value::Error(_) | Value::Class(_) | Value::Instance(_) | Value::Function(_) => false,
     }
 }
 
@@ -2525,6 +2569,8 @@ impl Context {
                     Value::Array(_) => "array",
                     Value::Map(_) => "map",
                     Value::Error(_) => "error",
+                    Value::Class(_) => "class",
+                    Value::Instance(_) => "instance",
                     Value::Function(_) => "function",
                 };
                 Ok(Value::String(Rc::from(n)))
@@ -2839,6 +2885,8 @@ struct Frame {
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
     env: Env,
     bindings: FrameBindings,
+    receiver: Option<Value>,
+    return_override: Option<Value>,
 }
 enum FrameBindings {
     Raw,
@@ -3011,7 +3059,11 @@ struct Vm {
 enum Step {
     Continue,
     Return(Value),
-    Call { callee: Value, args: Vec<Value> },
+    Call {
+        callee: Value,
+        args: Vec<Value>,
+        return_override: Option<Value>,
+    },
 }
 impl Vm {
     fn source_span(frame: &Frame, pc: usize) -> Option<SourceSpan> {
@@ -3056,7 +3108,79 @@ impl Vm {
                 return Err(error);
             }
         };
-        Ok(Step::Call { callee, args })
+        Ok(Step::Call {
+            callee,
+            args,
+            return_override: None,
+        })
+    }
+
+    #[inline(never)]
+    fn direct_member_call(
+        frame: &mut Frame,
+        argument_count: usize,
+        name: &str,
+    ) -> Result<Step, Error> {
+        if frame.stack.len() < argument_count + 1 {
+            return Err(Error::runtime("stack underflow"));
+        }
+        let mut args =
+            REUSABLE_CALL_ARGUMENTS.with(|reusable| std::mem::take(&mut *reusable.borrow_mut()));
+        args.clear();
+        let argument_start = frame.stack.len() - argument_count;
+        args.extend(frame.stack.drain(argument_start..));
+        let target = match pop(frame) {
+            Ok(target) => target,
+            Err(error) => {
+                Self::recycle_call_arguments(args);
+                return Err(error);
+            }
+        };
+        let callee = match member_value(target, name, true) {
+            Ok(callee) => callee,
+            Err(error) => {
+                Self::recycle_call_arguments(args);
+                return Err(error);
+            }
+        };
+        Ok(Step::Call {
+            callee,
+            args,
+            return_override: None,
+        })
+    }
+
+    fn construct(
+        &mut self,
+        frame: &mut Frame,
+        class: Value,
+        args: Vec<Value>,
+    ) -> Result<Step, Error> {
+        let Value::Class(class) = class else {
+            return Err(Error::runtime("new expects a QuickCoffee class"));
+        };
+        let instance = Value::Instance(Rc::new(Instance {
+            class: class.clone(),
+            fields: RefCell::new(BTreeMap::new()),
+        }));
+        self.record_value_allocations(1);
+        if let Some(constructor) = &class.constructor {
+            let callee = bound_method(constructor.clone(), instance.clone());
+            self.record_value_allocations(1);
+            return Ok(Step::Call {
+                callee,
+                args,
+                return_override: Some(instance),
+            });
+        }
+        if !args.is_empty() {
+            return Err(Error::runtime(format!(
+                "class {} has no constructor and expects no arguments",
+                class.name
+            )));
+        }
+        frame.stack.push(instance);
+        Ok(Step::Continue)
     }
 
     fn recycle_call_arguments(mut args: Vec<Value>) {
@@ -3077,7 +3201,12 @@ impl Vm {
         match instruction {
             Instruction::Load(_) | Instruction::LoadOrNil(_) => self.name_loads += 1,
             Instruction::Store(_) => self.name_stores += 1,
-            Instruction::Call(_) | Instruction::CallSpread => self.calls += 1,
+            Instruction::Call(_)
+            | Instruction::CallSpread
+            | Instruction::MemberCall { .. }
+            | Instruction::MemberCallSpread(_)
+            | Instruction::Construct(_)
+            | Instruction::ConstructSpread => self.calls += 1,
             Instruction::MakeArray(_)
             | Instruction::Append
             | Instruction::MergeArrays(_)
@@ -3087,6 +3216,8 @@ impl Vm {
             | Instruction::Index
             | Instruction::Slice(_)
             | Instruction::Member(_)
+            | Instruction::SetMember(_)
+            | Instruction::MakeClass { .. }
             | Instruction::Contains
             | Instruction::HasKey => self.container_ops += 1,
             Instruction::IterStartEnumerable
@@ -3171,6 +3302,8 @@ impl Vm {
             bindings: binding_slots
                 .map(FrameBindings::Guarded)
                 .unwrap_or(FrameBindings::Raw),
+            receiver: None,
+            return_override: None,
         }];
         loop {
             if self
@@ -3771,28 +3904,38 @@ impl Vm {
                             .push(slice(self, target, start, end, *inclusive)?)
                     }
                     Instruction::Member(name) => {
-                        match pop(frame)? {
-                            Value::Map(map) => {
-                                frame.stack.push(map.get(name.as_str()).cloned().ok_or_else(
-                                    || Error::runtime(format!("map key '{name}' not found")),
-                                )?)
-                            }
-                            Value::Error(error) => frame.stack.push(match name.as_str() {
-                                "code" => Value::String(error.code.clone()),
-                                "message" => Value::String(error.message.clone()),
-                                "data" => error.data.clone(),
-                                "cause" => error
-                                    .cause
-                                    .as_ref()
-                                    .map_or(Value::Nil, |cause| Value::Error(cause.clone())),
-                                _ => {
-                                    return Err(Error::runtime(format!(
-                                        "error field '{name}' not found"
-                                    )));
-                                }
-                            }),
-                            _ => return Err(Error::runtime("member access expects a map")),
+                        let target = pop(frame)?;
+                        let value = member_value(target, name, false)?;
+                        if matches!(value, Value::Function(_)) {
+                            self.record_value_allocations(1);
                         }
+                        frame.stack.push(value);
+                    }
+                    Instruction::SetMember(name) => {
+                        let value = pop(frame)?;
+                        let target = frame.receiver.clone().ok_or_else(|| {
+                            Error::runtime("receiver field write outside class member")
+                        })?;
+                        set_receiver_member(target, name, value.clone())?;
+                        frame.stack.push(value);
+                    }
+                    Instruction::MemberCall { name, count } => {
+                        self.record_value_allocations(1);
+                        return Self::direct_member_call(frame, *count, name);
+                    }
+                    Instruction::MemberCallSpread(name) => {
+                        let args = pop(frame)?;
+                        let Value::Array(args) = args else {
+                            return Err(Error::runtime("splat call expects an array"));
+                        };
+                        let target = pop(frame)?;
+                        let callee = member_value(target, name, true)?;
+                        self.record_value_allocations(1);
+                        return Ok(Step::Call {
+                            callee,
+                            args: args.as_ref().clone(),
+                            return_override: None,
+                        });
                     }
                     Instruction::MakeFunction(i) => match frame
                         .chunk
@@ -3804,6 +3947,7 @@ impl Vm {
                             params,
                             required,
                             rest,
+                            receiver,
                             chunk,
                         } => {
                             let debug_info = frame.debug_info.clone();
@@ -3819,6 +3963,7 @@ impl Vm {
                                     params: params.clone(),
                                     required: *required,
                                     rest: rest.clone(),
+                                    receiver: *receiver,
                                     chunk: chunk.clone(),
                                     debug_info,
                                     execution_plan: frame.execution_plan.clone(),
@@ -3830,6 +3975,53 @@ impl Vm {
                         }
                         _ => return Err(Error::runtime("value used as function template")),
                     },
+                    Instruction::MakeClass {
+                        name,
+                        constructor,
+                        instance_methods,
+                        static_methods,
+                    } => {
+                        let count = usize::from(*constructor)
+                            + instance_methods.len()
+                            + static_methods.len();
+                        let mut functions = take(frame, count)?.into_iter();
+                        let constructor = if *constructor {
+                            Some(value_function(
+                                functions.next().expect("verified constructor count"),
+                                "constructor",
+                            )?)
+                        } else {
+                            None
+                        };
+                        let mut instance_table = BTreeMap::new();
+                        for method in instance_methods {
+                            instance_table.insert(
+                                method.clone(),
+                                value_function(
+                                    functions.next().expect("verified instance method count"),
+                                    method,
+                                )?,
+                            );
+                        }
+                        let mut static_table = BTreeMap::new();
+                        for method in static_methods {
+                            static_table.insert(
+                                method.clone(),
+                                value_function(
+                                    functions.next().expect("verified static method count"),
+                                    method,
+                                )?,
+                            );
+                        }
+                        frame.stack.push(Value::Class(Rc::new(Class {
+                            name: Rc::from(name.as_str()),
+                            constructor,
+                            instance_methods: instance_table,
+                            static_methods: static_table,
+                            static_fields: RefCell::new(BTreeMap::new()),
+                        })));
+                        self.record_value_allocations(1);
+                    }
                     Instruction::Call(n) => {
                         return Self::direct_call(frame, *n);
                     }
@@ -3842,7 +4034,21 @@ impl Vm {
                         return Ok(Step::Call {
                             callee,
                             args: args.as_ref().clone(),
+                            return_override: None,
                         });
+                    }
+                    Instruction::Construct(count) => {
+                        let args = take(frame, *count)?;
+                        let class = pop(frame)?;
+                        return self.construct(frame, class, args);
+                    }
+                    Instruction::ConstructSpread => {
+                        let args = pop(frame)?;
+                        let Value::Array(args) = args else {
+                            return Err(Error::runtime("construction splat expects an array"));
+                        };
+                        let class = pop(frame)?;
+                        return self.construct(frame, class, args.as_ref().clone());
                     }
                     Instruction::Return => {
                         if !frame.handlers.is_empty() {
@@ -3857,6 +4063,10 @@ impl Vm {
             match step {
                 Ok(Step::Continue) => {}
                 Ok(Step::Return(value)) => {
+                    let value = frames
+                        .last_mut()
+                        .and_then(|frame| frame.return_override.take())
+                        .unwrap_or(value);
                     if frames.len() > 1 {
                         self.call_depth = self.call_depth.saturating_sub(1);
                     }
@@ -3867,11 +4077,30 @@ impl Vm {
                         return Ok(value);
                     }
                 }
-                Ok(Step::Call { callee, args }) => {
+                Ok(Step::Call {
+                    callee,
+                    args,
+                    return_override,
+                }) => {
+                    let frame_count = frames.len();
                     let result = call(self, &mut frames, callee, &args);
                     Self::recycle_call_arguments(args);
                     match result {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            if let Some(value) = return_override {
+                                if frames.len() > frame_count {
+                                    frames
+                                        .last_mut()
+                                        .expect("constructor call has a frame")
+                                        .return_override = Some(value);
+                                } else {
+                                    let caller =
+                                        frames.last_mut().expect("constructor call has a caller");
+                                    caller.stack.pop();
+                                    caller.stack.push(value);
+                                }
+                            }
+                        }
                         Err(error) => {
                             let include_current_call = !error.labels().is_empty();
                             let span = frames.last().and_then(|frame| {
@@ -3899,6 +4128,108 @@ impl Vm {
         }
     }
 }
+fn value_function(value: Value, name: &str) -> Result<Rc<Function>, Error> {
+    let Value::Function(function) = value else {
+        return Err(Error::runtime(format!(
+            "class member '{name}' is not a function"
+        )));
+    };
+    Ok(function)
+}
+
+fn bound_method(function: Rc<Function>, receiver: Value) -> Value {
+    Value::Function(Rc::new(Function {
+        inner: FunctionKind::BoundMethod { function, receiver },
+    }))
+}
+
+fn unbound_method(owner: &str, name: &str) -> Value {
+    Value::Function(Rc::new(Function {
+        inner: FunctionKind::UnboundMethod {
+            owner: Rc::from(owner),
+            name: Rc::from(name),
+        },
+    }))
+}
+
+fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, Error> {
+    match target {
+        Value::Map(map) => map
+            .get(name)
+            .cloned()
+            .ok_or_else(|| Error::runtime(format!("map key '{name}' not found"))),
+        Value::Error(error) => match name {
+            "code" => Ok(Value::String(error.code.clone())),
+            "message" => Ok(Value::String(error.message.clone())),
+            "data" => Ok(error.data.clone()),
+            "cause" => Ok(error
+                .cause
+                .as_ref()
+                .map_or(Value::Nil, |cause| Value::Error(cause.clone()))),
+            _ => Err(Error::runtime(format!("error field '{name}' not found"))),
+        },
+        Value::Instance(instance) => {
+            if let Some(value) = instance.fields.borrow().get(name).cloned() {
+                return Ok(value);
+            }
+            let function = instance
+                .class
+                .instance_methods
+                .get(name)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::runtime(format!(
+                        "instance of {} has no member '{name}'",
+                        instance.class.name
+                    ))
+                })?;
+            if bind_method {
+                Ok(bound_method(function, Value::Instance(instance)))
+            } else {
+                Ok(unbound_method(&instance.class.name, name))
+            }
+        }
+        Value::Class(class) => {
+            if let Some(value) = class.static_fields.borrow().get(name).cloned() {
+                return Ok(value);
+            }
+            let function = class.static_methods.get(name).cloned().ok_or_else(|| {
+                Error::runtime(format!(
+                    "class {} has no static member '{name}'",
+                    class.name
+                ))
+            })?;
+            if bind_method {
+                Ok(bound_method(function, Value::Class(class)))
+            } else {
+                Ok(unbound_method(&class.name, name))
+            }
+        }
+        _ => Err(Error::runtime(
+            "member access expects a map, error, class, or instance",
+        )),
+    }
+}
+
+fn set_receiver_member(target: Value, name: &str, value: Value) -> Result<(), Error> {
+    match target {
+        Value::Instance(instance) => {
+            instance.fields.borrow_mut().insert(name.to_owned(), value);
+            Ok(())
+        }
+        Value::Class(class) => {
+            class
+                .static_fields
+                .borrow_mut()
+                .insert(name.to_owned(), value);
+            Ok(())
+        }
+        _ => Err(Error::runtime(
+            "receiver field writes require a class or instance receiver",
+        )),
+    }
+}
+
 fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> Result<(), Error> {
     match callee {
         Value::Function(function) => match &function.inner {
@@ -3936,10 +4267,25 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     .stack
                     .push(value);
             }
+            FunctionKind::BoundMethod {
+                function: method,
+                receiver,
+            } => {
+                let mut bound_args = Vec::with_capacity(args.len() + 1);
+                bound_args.push(receiver.clone());
+                bound_args.extend_from_slice(args);
+                call(vm, frames, Value::Function(method.clone()), &bound_args)?;
+            }
+            FunctionKind::UnboundMethod { owner, name } => {
+                return Err(Error::runtime(format!(
+                    "method {owner}.{name} requires a receiver; call it through member syntax"
+                )));
+            }
             FunctionKind::Bytecode {
                 params,
                 required,
                 rest,
+                receiver,
                 chunk,
                 debug_info,
                 execution_plan,
@@ -3956,11 +4302,12 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     ));
                 }
                 if args.len() < *required || (rest.is_none() && args.len() > params.len()) {
+                    let hidden = usize::from(*receiver);
                     return Err(Error::runtime(format!(
                         "expected {}{} arguments, got {}",
-                        required,
+                        required.saturating_sub(hidden),
                         if rest.is_some() { " or more" } else { "" },
-                        args.len()
+                        args.len().saturating_sub(hidden)
                     )));
                 }
                 let binding_slots = execution_plan.as_ref().and_then(|plan| plan.slots(chunk));
@@ -4044,6 +4391,8 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                     execution_plan: execution_plan.clone(),
                     env: local,
                     bindings,
+                    receiver: receiver.then(|| args[0].clone()),
+                    return_override: None,
                 });
                 vm.call_depth += 1;
                 vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
@@ -4645,6 +4994,8 @@ fn equal(a: &Value, b: &Value) -> bool {
                     _ => false,
                 }
         }
+        (Value::Class(x), Value::Class(y)) => Rc::ptr_eq(x, y),
+        (Value::Instance(x), Value::Instance(y)) => Rc::ptr_eq(x, y),
         _ => false,
     }
 }
@@ -5537,6 +5888,7 @@ mod tests {
             required,
             rest,
             chunk,
+            ..
         } = &leaf.0.chunk.constants[0]
         else {
             panic!("first constant is the leaf function template");
@@ -5563,6 +5915,7 @@ mod tests {
             required,
             rest,
             chunk,
+            ..
         } = caller
             .0
             .chunk

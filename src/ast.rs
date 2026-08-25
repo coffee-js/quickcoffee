@@ -11,7 +11,9 @@ pub(crate) enum Expr {
     Bool(bool),
     Nil,
     Name(String),
+    This,
     Assign(String, Box<Expr>),
+    AssignMember(Box<Expr>, String, Box<Expr>),
     AssignIfNil(String, Box<Expr>),
     Update(String, Update, bool),
     Destructure(Pattern, Box<Expr>),
@@ -26,6 +28,7 @@ pub(crate) enum Expr {
     Slice(Box<Expr>, Box<Expr>, Box<Expr>, bool),
     Member(Box<Expr>, String),
     Call(Box<Expr>, Vec<Item>),
+    New(Box<Expr>, Vec<Item>),
     SoakIndex(Box<Expr>, Box<Expr>),
     SoakSlice(Box<Expr>, Box<Expr>, Box<Expr>, bool),
     SoakMember(Box<Expr>, String),
@@ -44,7 +47,7 @@ pub(crate) enum Expr {
     Continue(TokenSpan),
     Return(Option<Box<Expr>>, TokenSpan),
     Function(Vec<Param>, Option<String>, Box<Expr>),
-    Class(String, Vec<Param>, Box<Expr>),
+    Class(String, Vec<ClassMember>),
     Block(Vec<Stmt>),
     Switch(Box<Expr>, Vec<(Vec<Expr>, Expr)>, Option<Box<Expr>>),
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
@@ -89,6 +92,16 @@ pub(crate) enum Item {
 pub(crate) struct Param {
     pub pattern: Pattern,
     pub default: Option<Expr>,
+    pub receiver: bool,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct ClassMember {
+    pub name: String,
+    pub is_static: bool,
+    pub params: Vec<Param>,
+    pub rest: Option<String>,
+    pub body: Expr,
+    pub span: TokenSpan,
 }
 #[derive(Clone, Debug)]
 pub(crate) enum Stmt {

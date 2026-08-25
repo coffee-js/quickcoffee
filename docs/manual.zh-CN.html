@@ -34,7 +34,7 @@
 <p>Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌入方发现项目。</p>
 <p>Context::last_execution() 提供指令数、剩余燃料与调用深度峰值统计，不暴露 VM 帧。</p>
 <p>-- 后的参数以普通字符串数组 argv 暴露给程序。</p>
-<p>它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；RFC 0134 已采纳仅限 class 内部的接收者、构造与继承，尚待实现。</p>
+<p>它不是 JavaScript：没有公开原型链、全局/自由 this、eval 或内嵌 JavaScript；缩进 class 已支持构造器、实例/静态方法、受限接收者与 new，extends/super 和接收者绑定 =&gt; 仍是 RFC 0134 后续阶段。</p>
 <p># 是行注释；### … ### 是不嵌套块注释，内容在布局和解析前忽略。</p>
 <p>标识符遵循 Unicode XID：组合附标可作续字符，且引擎不做 Unicode 规范化。</p>
 <p>yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。</p>
@@ -75,6 +75,12 @@
 <p>数组循环亦可绑定从零开始的下标：for value, index in items then value + index。</p>
 <p>后置推导沿用严格收集：value * 2 for value in items，亦可写作 [value * 2 for value in items]。</p>
 </main><main><h1>Code</h1><pre><code>
+class 手册点
+  constructor: (@横, @纵 = 2) -&gt;
+  和: -&gt; @横 + @纵
+  @原点: -&gt; new 手册点(0, 0)
+手册实例 = new 手册点(40)
+手册实例.和() == 42 and 手册点.原点().和() == 0 and type(手册实例) == 'instance'
 base = 21
 double = (x) -&gt; x * 2
 shorthand = 'yes'

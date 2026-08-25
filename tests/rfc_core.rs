@@ -512,15 +512,15 @@ fn parse_errors_expose_source_lines_and_display_them() {
 }
 #[test]
 fn lexical_errors_expose_source_lines() {
-    let error = compile("value = 1\n@").unwrap_err();
+    let error = compile("value = 1\n$").unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Parse);
-    assert_eq!(error.message(), "unexpected character '@'");
+    assert_eq!(error.message(), "unexpected character '$'");
     assert_eq!(error.position().map(|position| position.line), Some(2));
     assert!(error.to_string().contains("parse error (line 2):"));
 }
 #[test]
 fn lexer_and_parser_errors_expose_unicode_scalar_spans_when_known() {
-    let lexical = compile("value = 1\n  café @").unwrap_err();
+    let lexical = compile("value = 1\n  café $").unwrap_err();
     let lexical_span = &lexical.labels()[0].span;
     assert_eq!(lexical_span.start.line, 2);
     assert_eq!(lexical_span.start.column, Some(8));
@@ -945,7 +945,7 @@ fn functions_and_factories_accept_strict_destructuring_parameters() {
         Some(42.)
     );
     assert_eq!(
-        eval("class Point([x, y]) -> {x: x, y: y}\np = Point([20, 22])\np.x + p.y").as_number(),
+        eval("class Point\n  constructor: ([x, y]) ->\n    @x = x\n    @y = y\np = new Point([20, 22])\np.x + p.y").as_number(),
         Some(42.)
     );
     assert_eq!(
@@ -1203,7 +1203,7 @@ fn frontend_pipeline_keeps_representative_bytecode_and_value_golden() {
             "0008 Return\n",
         )
     );
-    assert_eq!(chunk.fingerprint(), 0xc998_76f3_db64_1959);
+    assert_eq!(chunk.fingerprint(), 0x58e7_9824_db02_ee4b);
     assert_eq!(Context::new().run(chunk).unwrap().as_number(), Some(42.));
 }
 #[test]
@@ -1608,25 +1608,88 @@ fn negated_membership_uses_the_same_strict_array_and_map_rules() {
     assert!(chunk.disassemble().contains("Not"));
 }
 #[test]
-fn classes_are_prototype_free_map_factories() {
+fn classes_construct_dedicated_instances_with_confined_receivers() {
     assert_eq!(
-        eval("class Point(x, y) -> {x: x, y: y}\np = Point(3, 4)\np.x + p.y").as_number(),
-        Some(7.)
+        eval("class Point\n  constructor: (@x, @y = 2) ->\n  sum: -> @x + @y\n  @origin: -> new Point(0, 0)\np = new Point(40)\n[p.sum(), Point.origin().sum(), type(Point), type(p), str(p)]")
+            .to_string(),
+        "[42, 0, class, instance, <Point instance>]"
     );
     assert_eq!(
-        eval("class Empty() -> {}\ntype(Empty)").as_str(),
-        Some("function")
+        eval("class Counter\n  constructor: (start) -> this.value = start\n  increment: -> @value = @value + 1\n  @make: (start) -> new Counter(start)\nc = Counter.make(4)\n[c.increment(), c.increment(), c.value]")
+            .to_string(),
+        "[5, 6, 6]"
     );
     assert_eq!(
-        eval("class Point(x, y = 2) -> {x: x, y: y}\nPoint(40).x + Point(40).y").as_number(),
+        eval("class Empty\na = new Empty()\n[a == a, a == new Empty()]").to_string(),
+        "[true, false]"
+    );
+    assert_eq!(
+        eval("class Maybe\n  value: -> 42\np = new Maybe()\n[p?.value(), nil?.value()]")
+            .to_string(),
+        "[42, nil]"
+    );
+    assert_eq!(
+        eval("class Config\n  @set: (value) -> @current = value\n  @get: -> @current\nConfig.set(42)\n[Config.get(), Config == Config]")
+            .to_string(),
+        "[42, true]"
+    );
+    assert_eq!(
+        eval("class Collector\n  collect: (head, tail...) -> [head, tail]\nnew Collector().collect(1, 2, 3)")
+            .to_string(),
+        "[1, [2, 3]]"
+    );
+    assert_eq!(
+        eval("class Pair\n  constructor: (@left, @right) ->\n  sum: -> @left + @right\nargs = [20, 22]\nnew Pair(args...).sum()")
+            .as_number(),
         Some(42.)
+    );
+    assert_eq!(
+        eval("class Returned\n  constructor: (@value) -> return 999\nnew Returned(42).value")
+            .as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("class Guarded\n  constructor: (@value) ->\n  fail: -> @value = missing\ng = new Guarded(42)\ntry g.fail() catch ignored then nil\ng.value")
+            .as_number(),
+        Some(42.)
+    );
+    let legacy = Context::new().eval("class Point(x) -> {x: x}").unwrap_err();
+    assert!(legacy.message().contains("legacy class factory syntax"));
+    assert!(Context::new().eval("this.value").is_err());
+    assert!(
+        Context::new()
+            .eval("class Point\n  constructor: (@x) ->\np = new Point(1)\np.x = 2")
+            .is_err()
     );
     assert!(
         Context::new()
-            .eval("class Point(x, y) -> {x: x, y: y}\nPoint(1)")
+            .eval("class Point\n  value: -> 1\np = new Point()\nf = p.value\nf()")
+            .unwrap_err()
+            .message()
+            .contains("requires a receiver")
+    );
+    assert!(Context::new().eval("new number(1)").is_err());
+    assert!(Context::new().eval("class Empty\nnew Empty(1)").is_err());
+    assert!(
+        Context::new()
+            .eval("class Bad\n  constructor: (x = this.value) ->")
             .is_err()
     );
-    assert!(Context::new().eval("class Bad(x = 1, y) -> x").is_err());
+    assert!(
+        Context::new()
+            .eval("class Empty\nencode_json(new Empty())")
+            .is_err()
+    );
+
+    let chunk =
+        compile("class Point\n  constructor: (@x) ->\n  value: -> @x\nnew Point(42).value()")
+            .unwrap();
+    chunk.verify().unwrap();
+    let bytecode = chunk.disassemble();
+    assert!(bytecode.contains("MakeClass"));
+    assert!(bytecode.contains("Construct"));
+    assert!(bytecode.contains("MemberCall"));
+    assert!(format!("{chunk:?}").contains("SetMember"));
 }
 #[test]
 fn double_quoted_strings_interpolate_quickcoffee_expressions() {
@@ -1876,6 +1939,15 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         code: vec![Instruction::CallSpread, Instruction::Return],
     };
     assert!(bad_splat_call.verify().is_err());
+    let bad_splat_construction = Chunk {
+        constants: vec![Constant::Value(Value::Nil)],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::ConstructSpread,
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_splat_construction.verify().is_err());
     let bad_handler = Chunk {
         constants: vec![Constant::Value(Value::Nil)],
         code: vec![
@@ -1905,11 +1977,59 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             params: vec![],
             required: 0,
             rest: None,
+            receiver: false,
             chunk: Rc::new(invalid_inner),
         }],
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
     };
     assert!(bad_nested_function.verify().is_err());
+
+    let bad_receiver_write = Chunk {
+        constants: vec![Constant::Value(Value::Nil)],
+        code: vec![
+            Instruction::Constant(0),
+            Instruction::SetMember("field".into()),
+            Instruction::Return,
+        ],
+    };
+    assert!(bad_receiver_write.verify().is_err());
+
+    let valid_function_body = Rc::new(Chunk {
+        constants: vec![Constant::Value(Value::Nil)],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    });
+    let unconfined_receiver_function = Chunk {
+        constants: vec![Constant::Function {
+            params: vec![Pattern::Bind("\0quickcoffee.receiver".into())],
+            required: 1,
+            rest: None,
+            receiver: true,
+            chunk: valid_function_body.clone(),
+        }],
+        code: vec![Instruction::MakeFunction(0), Instruction::Return],
+    };
+    assert!(unconfined_receiver_function.verify().is_err());
+
+    let non_receiver_class_member = Chunk {
+        constants: vec![Constant::Function {
+            params: vec![],
+            required: 0,
+            rest: None,
+            receiver: false,
+            chunk: valid_function_body,
+        }],
+        code: vec![
+            Instruction::MakeFunction(0),
+            Instruction::MakeClass {
+                name: "Forged".into(),
+                constructor: false,
+                instance_methods: vec!["method".into()],
+                static_methods: vec![],
+            },
+            Instruction::Return,
+        ],
+    };
+    assert!(non_receiver_class_member.verify().is_err());
 
     let mut deeply_nested = Pattern::Ignore;
     for _ in 0..300 {

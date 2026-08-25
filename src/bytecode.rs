@@ -1,5 +1,11 @@
 use crate::vm::{Error, Value};
-use std::{collections::VecDeque, fmt::Write, rc::Rc};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    fmt::Write,
+    rc::Rc,
+};
+
+pub(crate) const RECEIVER_NAME: &str = "\0quickcoffee.receiver";
 
 /// A strict, recursively shaped binding pattern used by destructuring assignment.
 #[allow(missing_docs)]
@@ -37,6 +43,7 @@ pub enum Constant {
         params: Vec<Pattern>,
         required: usize,
         rest: Option<String>,
+        receiver: bool,
         chunk: Rc<Chunk>,
     },
 }
@@ -109,9 +116,23 @@ pub enum Instruction {
     Index,
     Slice(bool),
     Member(String),
+    SetMember(String),
+    MemberCall {
+        name: String,
+        count: usize,
+    },
+    MemberCallSpread(String),
     Call(usize),
     CallSpread,
+    Construct(usize),
+    ConstructSpread,
     MakeFunction(usize),
+    MakeClass {
+        name: String,
+        constructor: bool,
+        instance_methods: Vec<String>,
+        static_methods: Vec<String>,
+    },
     Return,
 }
 
@@ -136,10 +157,10 @@ impl Chunk {
     }
     /// Verifies stack/control-flow safety before execution.
     pub fn verify(&self) -> Result<(), Error> {
-        self.verify_inner()
+        self.verify_inner(false)
             .map_err(|error| error.with_verification_chunk(self as *const Self as usize))
     }
-    fn verify_inner(&self) -> Result<(), Error> {
+    fn verify_inner(&self, receiver_context: bool) -> Result<(), Error> {
         if self.code.is_empty() {
             return Err(Error::verify("chunk is empty"));
         }
@@ -166,12 +187,61 @@ impl Chunk {
                     }
                 },
                 Instruction::MakeFunction(i) => match self.constants.get(*i) {
-                    Some(Constant::Function { chunk, params, .. }) => {
+                    Some(Constant::Function {
+                        chunk,
+                        params,
+                        required,
+                        receiver,
+                        ..
+                    }) => {
                         params
                             .iter()
                             .try_for_each(validate_pattern)
                             .map_err(|error| error.at_instruction(pc))?;
-                        chunk.verify()?
+                        chunk.verify_inner(*receiver).map_err(|error| {
+                            error.with_verification_chunk(Rc::as_ptr(chunk) as usize)
+                        })?;
+                        if *receiver {
+                            if *required == 0
+                                || !matches!(
+                                    params.first(),
+                                    Some(Pattern::Bind(name)) if name == RECEIVER_NAME
+                                )
+                            {
+                                return Err(Error::verify(format!(
+                                    "receiver function at instruction {pc} has an invalid hidden receiver parameter"
+                                ))
+                                .at_instruction(pc));
+                            }
+                            let mut start = pc;
+                            while start > 0
+                                && matches!(self.code[start - 1], Instruction::MakeFunction(_))
+                            {
+                                start -= 1;
+                            }
+                            let mut end = pc + 1;
+                            while matches!(self.code.get(end), Some(Instruction::MakeFunction(_))) {
+                                end += 1;
+                            }
+                            let valid = matches!(
+                                self.code.get(end),
+                                Some(Instruction::MakeClass {
+                                    constructor,
+                                    instance_methods,
+                                    static_methods,
+                                    ..
+                                }) if end - start
+                                    == usize::from(*constructor)
+                                        + instance_methods.len()
+                                        + static_methods.len()
+                            );
+                            if !valid {
+                                return Err(Error::verify(format!(
+                                    "receiver function at instruction {pc} is not confined to a class template"
+                                ))
+                                .at_instruction(pc));
+                            }
+                        }
                     }
                     Some(_) => {
                         return Err(Error::verify(format!(
@@ -188,6 +258,58 @@ impl Chunk {
                 },
                 Instruction::Destructure(pattern) => {
                     validate_pattern(pattern).map_err(|error| error.at_instruction(pc))?
+                }
+                Instruction::SetMember(_) if !receiver_context => {
+                    return Err(Error::verify(format!(
+                        "receiver field write outside class member at instruction {pc}"
+                    ))
+                    .at_instruction(pc));
+                }
+                Instruction::MakeClass {
+                    constructor,
+                    instance_methods,
+                    static_methods,
+                    ..
+                } => {
+                    let count =
+                        usize::from(*constructor) + instance_methods.len() + static_methods.len();
+                    if pc < count {
+                        return Err(Error::verify(format!(
+                            "class template at instruction {pc} is missing member functions"
+                        ))
+                        .at_instruction(pc));
+                    }
+                    let mut instance_names = BTreeSet::new();
+                    let mut static_names = BTreeSet::new();
+                    if instance_methods
+                        .iter()
+                        .any(|name| name.is_empty() || !instance_names.insert(name))
+                        || static_methods
+                            .iter()
+                            .any(|name| name.is_empty() || !static_names.insert(name))
+                    {
+                        return Err(Error::verify(format!(
+                            "class template at instruction {pc} has invalid or duplicate members"
+                        ))
+                        .at_instruction(pc));
+                    }
+                    for instruction in &self.code[pc - count..pc] {
+                        let Instruction::MakeFunction(index) = instruction else {
+                            return Err(Error::verify(format!(
+                                "class template at instruction {pc} is not preceded by member functions"
+                            ))
+                            .at_instruction(pc));
+                        };
+                        if !matches!(
+                            self.constants.get(*index),
+                            Some(Constant::Function { receiver: true, .. })
+                        ) {
+                            return Err(Error::verify(format!(
+                                "class template at instruction {pc} uses a non-receiver function"
+                            ))
+                            .at_instruction(pc));
+                        }
+                    }
                 }
                 Instruction::Jump(offset)
                 | Instruction::JumpIfFalse(offset)
@@ -286,6 +408,10 @@ impl Chunk {
                     require(1)?;
                     next(fallthrough, state)?;
                 }
+                Instruction::SetMember(_) => {
+                    require(1)?;
+                    next(fallthrough, state)?;
+                }
                 Instruction::Pop => {
                     require(1)?;
                     next(fallthrough, (state.0 - 1, state.1, state.2))?;
@@ -343,9 +469,30 @@ impl Chunk {
                     require(count + 1)?;
                     next(fallthrough, (state.0 - count, state.1, state.2))?;
                 }
+                Instruction::MemberCall { count, .. } | Instruction::Construct(count) => {
+                    let count = *count as i32;
+                    require(count + 1)?;
+                    next(fallthrough, (state.0 - count, state.1, state.2))?;
+                }
+                Instruction::MemberCallSpread(_) | Instruction::ConstructSpread => {
+                    require(2)?;
+                    next(fallthrough, (state.0 - 1, state.1, state.2))?;
+                }
                 Instruction::CallSpread => {
                     require(2)?;
                     next(fallthrough, (state.0 - 1, state.1, state.2))?;
+                }
+                Instruction::MakeClass {
+                    constructor,
+                    instance_methods,
+                    static_methods,
+                    ..
+                } => {
+                    let count = i32::from(*constructor)
+                        + instance_methods.len() as i32
+                        + static_methods.len() as i32;
+                    require(count)?;
+                    next(fallthrough, (state.0 - count + 1, state.1, state.2))?;
                 }
                 Instruction::Jump(offset) => next(jump_target(pc, *offset), state)?,
                 Instruction::JumpIfFalse(offset) | Instruction::JumpIfNil(offset) => {
@@ -475,6 +622,7 @@ impl FingerprintEncoder {
                 params,
                 required,
                 rest,
+                receiver,
                 chunk,
             } => {
                 self.tag(0x11);
@@ -484,6 +632,7 @@ impl FingerprintEncoder {
                 }
                 self.u64(*required as u64);
                 self.option_string(rest.as_deref());
+                self.bool(*receiver);
                 self.chunk(chunk);
             }
         }
@@ -561,6 +710,8 @@ impl FingerprintEncoder {
             // their fingerprint representation deterministic if a host builds a
             // custom Chunk containing one.
             Value::Function(_) => self.tag(0x26),
+            Value::Class(_) => self.tag(0x2a),
+            Value::Instance(_) => self.tag(0x2b),
         }
     }
     fn pattern(&mut self, pattern: &Pattern) {
@@ -730,11 +881,29 @@ impl FingerprintEncoder {
                 self.tag(0x77);
                 self.string(name);
             }
+            Instruction::SetMember(name) => {
+                self.tag(0x7e);
+                self.string(name);
+            }
+            Instruction::MemberCall { name, count } => {
+                self.tag(0x7f);
+                self.string(name);
+                self.u64(*count as u64);
+            }
+            Instruction::MemberCallSpread(name) => {
+                self.tag(0x82);
+                self.string(name);
+            }
             Instruction::Call(count) => {
                 self.tag(0x78);
                 self.u64(*count as u64);
             }
             Instruction::CallSpread => simple!(0x79),
+            Instruction::Construct(count) => {
+                self.tag(0x80);
+                self.u64(*count as u64);
+            }
+            Instruction::ConstructSpread => simple!(0x83),
             Instruction::MakeFunction(index) => {
                 self.tag(0x7a);
                 self.u64(*index as u64);
@@ -742,6 +911,24 @@ impl FingerprintEncoder {
             Instruction::Return => simple!(0x7b),
             Instruction::Increment => simple!(0x7c),
             Instruction::Decrement => simple!(0x7d),
+            Instruction::MakeClass {
+                name,
+                constructor,
+                instance_methods,
+                static_methods,
+            } => {
+                self.tag(0x81);
+                self.string(name);
+                self.bool(*constructor);
+                self.u64(instance_methods.len() as u64);
+                for method in instance_methods {
+                    self.string(method);
+                }
+                self.u64(static_methods.len() as u64);
+                for method in static_methods {
+                    self.string(method);
+                }
+            }
         }
     }
 }

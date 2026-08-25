@@ -138,6 +138,12 @@ fn main() {
             expected: "1000",
         },
         Workload {
+            name: "class-construction-dispatch",
+            source: "class Counter\n  constructor: (@value) ->\n  increment: -> @value = @value + 1\nsum = 0\ni = 0\nwhile i < 100\n  counter = new Counter(i)\n  sum += counter.increment()\n  i++\nsum",
+            iterations: 1_000,
+            expected: "5050",
+        },
+        Workload {
             name: "negative-indexing",
             source: "text = 'a☕中'\nitems = [10, 20, 30]\nitems[-1] + len(text[-2])",
             iterations: 20_000,

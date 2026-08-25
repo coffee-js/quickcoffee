@@ -55,6 +55,10 @@ pub(crate) enum Token {
     Continue,
     Return,
     Class,
+    New,
+    Extends,
+    This,
+    Super,
     Switch,
     When,
     Own,
@@ -119,6 +123,7 @@ pub(crate) enum Token {
     RBrace,
     Comma,
     Colon,
+    At,
     Dot,
     Question,
     RangeInclusive,
@@ -736,6 +741,10 @@ fn lex_line(
                     "continue" => Token::Continue,
                     "return" => Token::Return,
                     "class" => Token::Class,
+                    "new" => Token::New,
+                    "extends" => Token::Extends,
+                    "this" => Token::This,
+                    "super" => Token::Super,
                     "switch" => Token::Switch,
                     "when" => Token::When,
                     "own" => Token::Own,
@@ -881,6 +890,7 @@ fn lex_line(
             }
             ',' => out.push(Token::Comma),
             ':' => out.push(Token::Colon),
+            '@' => out.push(Token::At),
             '?' => out.push(Token::Question),
             '.' => {
                 if chars.peek() == Some(&'.') {
