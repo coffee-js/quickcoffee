@@ -3328,74 +3328,83 @@ impl Vm {
                         let value = pop(frame)?;
                         frame.stack.push(Value::Bool(!matches!(value, Value::Nil)))
                     }
-                    Instruction::Increment => numeric_update(frame, true, self.resource_limits)?,
-                    Instruction::Decrement => numeric_update(frame, false, self.resource_limits)?,
+                    Instruction::Increment => numeric_update(frame, true, &self.resource_limits)?,
+                    Instruction::Decrement => numeric_update(frame, false, &self.resource_limits)?,
                     Instruction::Add => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a + b,
                         |a, b, _| Ok(a + b),
                         decimal_add,
                     )?,
                     Instruction::Sub => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a - b,
                         |a, b, _| Ok(a - b),
                         decimal_sub,
                     )?,
                     Instruction::Mul => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a * b,
                         integer_mul_resource,
                         decimal_mul,
                     )?,
                     Instruction::Div => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a / b,
                         |a, b, _| integer_div(a, b),
                         decimal_exact_div,
                     )?,
                     Instruction::FloorDiv => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| (a / b).floor(),
                         |a, b, _| integer_floor_div(a, b),
                         decimal_floor_div,
                     )?,
                     Instruction::Rem => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a % b,
                         |a, b, _| integer_rem(a, b),
                         decimal_rem,
                     )?,
                     Instruction::Modulo => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| (a % b + b) % b,
                         |a, b, _| integer_modulo(a, b),
                         decimal_modulo,
                     )?,
-                    Instruction::BitAnd => {
-                        numeric_bit_binary(frame, self.resource_limits, |a, b| a & b, |a, b| a & b)?
-                    }
-                    Instruction::BitOr => {
-                        numeric_bit_binary(frame, self.resource_limits, |a, b| a | b, |a, b| a | b)?
-                    }
-                    Instruction::BitXor => {
-                        numeric_bit_binary(frame, self.resource_limits, |a, b| a ^ b, |a, b| a ^ b)?
-                    }
-                    Instruction::ShiftLeft => numeric_shift(frame, false, self.resource_limits)?,
-                    Instruction::ShiftRight => numeric_shift(frame, true, self.resource_limits)?,
+                    Instruction::BitAnd => numeric_bit_binary(
+                        frame,
+                        &self.resource_limits,
+                        |a, b| a & b,
+                        |a, b| a & b,
+                    )?,
+                    Instruction::BitOr => numeric_bit_binary(
+                        frame,
+                        &self.resource_limits,
+                        |a, b| a | b,
+                        |a, b| a | b,
+                    )?,
+                    Instruction::BitXor => numeric_bit_binary(
+                        frame,
+                        &self.resource_limits,
+                        |a, b| a ^ b,
+                        |a, b| a ^ b,
+                    )?,
+                    Instruction::ShiftLeft => numeric_shift(frame, false, &self.resource_limits)?,
+                    Instruction::ShiftRight => numeric_shift(frame, true, &self.resource_limits)?,
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
                     }
                     Instruction::Pow => numeric_binary(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a.powf(b),
                         integer_pow,
                         decimal_pow,
@@ -3404,28 +3413,28 @@ impl Vm {
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
                     Instruction::Lt => numeric_order(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a < b,
                         |a, b| a < b,
                         |ordering| ordering.is_lt(),
                     )?,
                     Instruction::Le => numeric_order(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a <= b,
                         |a, b| a <= b,
                         |ordering| ordering.is_le(),
                     )?,
                     Instruction::Gt => numeric_order(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a > b,
                         |a, b| a > b,
                         |ordering| ordering.is_gt(),
                     )?,
                     Instruction::Ge => numeric_order(
                         frame,
-                        self.resource_limits,
+                        &self.resource_limits,
                         |a, b| a >= b,
                         |a, b| a >= b,
                         |ordering| ordering.is_ge(),
@@ -4336,7 +4345,9 @@ fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<
         .push(Value::Integer(Rc::new(resource_integer(value, limits)?)));
     Ok(())
 }
-fn numeric_update(f: &mut Frame, increment: bool, limits: ResourceLimits) -> Result<(), Error> {
+// Keep the full host policy borrowed across generic Number operations. Copying
+// ResourceLimits here penalizes the scalar hot path even when no exact value is involved.
+fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<(), Error> {
     match pop(f)? {
         Value::Number(value) => f.stack.push(Value::Number(if increment {
             value + 1.
@@ -4350,12 +4361,12 @@ fn numeric_update(f: &mut Frame, increment: bool, limits: ResourceLimits) -> Res
             } else {
                 value.inner() - 1
             },
-            limits,
+            *limits,
         )?,
         Value::Decimal(value) => f.stack.push(Value::Decimal(Rc::new(decimal_add(
             &value,
             &Decimal::from(if increment { 1 } else { -1 }),
-            limits,
+            *limits,
         )?))),
         _ => {
             return Err(Error::runtime(
@@ -4367,7 +4378,7 @@ fn numeric_update(f: &mut Frame, increment: bool, limits: ResourceLimits) -> Res
 }
 fn numeric_binary(
     f: &mut Frame,
-    limits: ResourceLimits,
+    limits: &ResourceLimits,
     number_op: impl FnOnce(f64, f64) -> f64,
     integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
     decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
@@ -4377,11 +4388,11 @@ fn numeric_binary(
     match (a, b) {
         (Value::Number(a), Value::Number(b)) => f.stack.push(Value::Number(number_op(a, b))),
         (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner(), limits)?, limits)?
+            push_integer(f, integer_op(a.inner(), b.inner(), *limits)?, *limits)?
         }
         (Value::Decimal(a), Value::Decimal(b)) => f
             .stack
-            .push(Value::Decimal(Rc::new(decimal_op(&a, &b, limits)?))),
+            .push(Value::Decimal(Rc::new(decimal_op(&a, &b, *limits)?))),
         (
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
@@ -4472,7 +4483,7 @@ fn bit_integer(value: Value) -> Result<i32, Error> {
 }
 fn numeric_bit_binary(
     f: &mut Frame,
-    limits: ResourceLimits,
+    limits: &ResourceLimits,
     number_op: impl FnOnce(i32, i32) -> i32,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
 ) -> Result<(), Error> {
@@ -4485,7 +4496,7 @@ fn numeric_bit_binary(
             f.stack.push(Value::Number(number_op(a, b) as f64));
         }
         (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner()), limits)?
+            push_integer(f, integer_op(a.inner(), b.inner()), *limits)?
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
             return Err(Error::runtime("cannot mix number and integer operands"));
@@ -4509,7 +4520,7 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
-fn numeric_shift(f: &mut Frame, right: bool, limits: ResourceLimits) -> Result<(), Error> {
+fn numeric_shift(f: &mut Frame, right: bool, limits: &ResourceLimits) -> Result<(), Error> {
     let shift = pop(f)?;
     let value = pop(f)?;
     match (value, shift) {
@@ -4541,13 +4552,13 @@ fn numeric_shift(f: &mut Frame, right: bool, limits: ResourceLimits) -> Result<(
                 ));
             }
             if !right
-                && value.inner().bits().saturating_add(shift as u64) > integer_bit_limit(limits)
+                && value.inner().bits().saturating_add(shift as u64) > integer_bit_limit(*limits)
             {
                 return Err(Error::resource(
                     ResourceLimit::IntegerBits,
                     format!(
                         "integer magnitude exceeds {} bits",
-                        integer_bit_limit(limits)
+                        integer_bit_limit(*limits)
                     ),
                 ));
             }
@@ -4558,7 +4569,7 @@ fn numeric_shift(f: &mut Frame, right: bool, limits: ResourceLimits) -> Result<(
                 } else {
                     value.inner() << shift
                 },
-                limits,
+                *limits,
             )?;
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
@@ -4580,7 +4591,7 @@ fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Err
 }
 fn numeric_order(
     f: &mut Frame,
-    limits: ResourceLimits,
+    limits: &ResourceLimits,
     number_op: impl FnOnce(f64, f64) -> bool,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
     decimal_op: impl FnOnce(std::cmp::Ordering) -> bool,
@@ -4590,7 +4601,9 @@ fn numeric_order(
     let result = match (a, b) {
         (Value::Number(a), Value::Number(b)) => number_op(a, b),
         (Value::Integer(a), Value::Integer(b)) => integer_op(a.inner(), b.inner()),
-        (Value::Decimal(a), Value::Decimal(b)) => decimal_op(decimal_cmp_resource(&a, &b, limits)?),
+        (Value::Decimal(a), Value::Decimal(b)) => {
+            decimal_op(decimal_cmp_resource(&a, &b, *limits)?)
+        }
         (
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
