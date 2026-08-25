@@ -741,6 +741,7 @@ impl Parser {
             Some(
                 Token::Number(_)
                     | Token::Integer(_, _)
+                    | Token::Decimal(_)
                     | Token::String(_, _)
                     | Token::Ident(_)
                     | Token::True
@@ -799,6 +800,7 @@ impl Parser {
             Some(
                 Token::Number(_)
                     | Token::Integer(_, _)
+                    | Token::Decimal(_)
                     | Token::String(_, _)
                     | Token::Ident(_)
                     | Token::True
@@ -857,6 +859,7 @@ impl Parser {
         match self.next() {
             Token::Number(n) => Ok(Expr::Number(n)),
             Token::Integer(digits, radix) => Ok(Expr::Integer(digits, radix)),
+            Token::Decimal(source) => Ok(Expr::Decimal(source)),
             Token::String(s, interpolate) => {
                 if interpolate && s.contains("#{") {
                     self.interpolated_string(s)

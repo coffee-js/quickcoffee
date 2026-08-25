@@ -157,6 +157,7 @@ version = "0.1.0"
 dependencies = [
  "cap-std",
  "num-bigint",
+ "num-integer",
  "num-traits",
  "unicode-ident",
 ]

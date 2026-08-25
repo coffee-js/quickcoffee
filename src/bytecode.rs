@@ -516,6 +516,15 @@ impl FingerprintEncoder {
                     self.byte(byte);
                 }
             }
+            Value::Decimal(value) => {
+                self.tag(0x29);
+                let bytes = value.inner().to_signed_bytes_le();
+                self.u64(bytes.len() as u64);
+                for byte in bytes {
+                    self.byte(byte);
+                }
+                self.u64(u64::from(value.scale()));
+            }
             Value::String(value) => {
                 self.tag(0x23);
                 self.string(value);

@@ -5,6 +5,7 @@ use crate::{
     parser,
 };
 use num_bigint::BigInt;
+use num_integer::Integer as NumInteger;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 use std::{
     cell::{Cell, RefCell},
@@ -19,6 +20,8 @@ use std::{
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
 const MAX_INTEGER_BITS: u64 = 1_000_000;
+const MAX_DECIMAL_BITS: u64 = 1_000_000;
+const MAX_DECIMAL_SCALE: u32 = 100_000;
 const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
 
 /// Stable type tag for values crossing the embedding boundary.
@@ -32,6 +35,8 @@ pub enum ValueKind {
     Number,
     /// An arbitrary-precision signed integer.
     Integer,
+    /// An exact normalized base-10 fixed-point value.
+    Decimal,
     /// An immutable UTF-8 string.
     String,
     /// An immutable array.
@@ -83,6 +88,411 @@ impl From<i64> for Integer {
     }
 }
 
+/// An opaque exact normalized base-10 fixed-point value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decimal {
+    coefficient: BigInt,
+    scale: u32,
+}
+impl Decimal {
+    /// Parses a signed decimal string with an optional fraction and base-10 exponent.
+    pub fn parse(source: &str) -> Option<Self> {
+        if source.is_empty() || source.trim() != source {
+            return None;
+        }
+        let (negative, source) = match source.as_bytes().first() {
+            Some(b'+') => (false, &source[1..]),
+            Some(b'-') => (true, &source[1..]),
+            _ => (false, source),
+        };
+        let mut exponent_parts = source.split(['e', 'E']);
+        let mantissa = exponent_parts.next()?;
+        let exponent = exponent_parts
+            .next()
+            .map_or(Some(0_i64), |value| value.parse().ok())?;
+        if exponent_parts.next().is_some() || exponent.unsigned_abs() > u64::from(MAX_DECIMAL_SCALE)
+        {
+            return None;
+        }
+        let mut point_parts = mantissa.split('.');
+        let whole = point_parts.next()?;
+        let fraction = point_parts.next().unwrap_or("");
+        if point_parts.next().is_some()
+            || whole.is_empty()
+            || !whole.bytes().all(|byte| byte.is_ascii_digit())
+            || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        let mut digits = String::with_capacity(whole.len() + fraction.len());
+        digits.push_str(whole);
+        digits.push_str(fraction);
+        let mut scale = i64::try_from(fraction.len()).ok()?.checked_sub(exponent)?;
+        if scale < 0 {
+            let zeros = usize::try_from(-scale).ok()?;
+            if zeros > MAX_DECIMAL_SCALE as usize {
+                return None;
+            }
+            digits.extend(std::iter::repeat_n('0', zeros));
+            scale = 0;
+        }
+        let scale = u32::try_from(scale).ok()?;
+        if scale > MAX_DECIMAL_SCALE {
+            return None;
+        }
+        let mut coefficient = BigInt::parse_bytes(digits.as_bytes(), 10)?;
+        if negative {
+            coefficient = -coefficient;
+        }
+        Self::from_bigint(coefficient, scale).ok()
+    }
+    /// Constructs a Decimal from a signed coefficient and a non-negative scale.
+    pub fn from_parts(coefficient: Integer, scale: u32) -> Option<Self> {
+        Self::from_bigint(coefficient.0, scale).ok()
+    }
+    /// Returns the normalized signed coefficient.
+    pub fn coefficient(&self) -> Integer {
+        Integer(self.coefficient.clone())
+    }
+    /// Returns the normalized number of fractional decimal digits.
+    pub fn scale(&self) -> u32 {
+        self.scale
+    }
+    /// Returns the canonical plain decimal representation without a type suffix.
+    pub fn to_plain_string(&self) -> String {
+        let negative = self.coefficient.is_negative();
+        let digits = self.coefficient.abs().to_string();
+        let mut output = String::new();
+        if negative {
+            output.push('-');
+        }
+        if self.scale == 0 {
+            output.push_str(&digits);
+        } else if digits.len() <= self.scale as usize {
+            output.push_str("0.");
+            output.extend(std::iter::repeat_n('0', self.scale as usize - digits.len()));
+            output.push_str(&digits);
+        } else {
+            let point = digits.len() - self.scale as usize;
+            output.push_str(&digits[..point]);
+            output.push('.');
+            output.push_str(&digits[point..]);
+        }
+        output
+    }
+    pub(crate) fn inner(&self) -> &BigInt {
+        &self.coefficient
+    }
+    pub(crate) fn from_bigint(mut coefficient: BigInt, mut scale: u32) -> Result<Self, Error> {
+        if scale > MAX_DECIMAL_SCALE {
+            return Err(Error::runtime(
+                "decimal exceeds the implementation scale limit",
+            ));
+        }
+        if coefficient.is_zero() {
+            return Ok(Self {
+                coefficient,
+                scale: 0,
+            });
+        }
+        if scale > 0 && (&coefficient % BigInt::from(10_u8)).is_zero() {
+            let trailing_zeros = coefficient
+                .to_string()
+                .bytes()
+                .rev()
+                .take_while(|byte| *byte == b'0')
+                .count();
+            let removable = scale.min(trailing_zeros as u32);
+            coefficient /= decimal_power_of_ten(removable);
+            scale -= removable;
+        }
+        if coefficient.bits() > MAX_DECIMAL_BITS {
+            Err(Error::runtime(
+                "decimal exceeds the implementation size limit",
+            ))
+        } else {
+            Ok(Self { coefficient, scale })
+        }
+    }
+}
+impl From<i64> for Decimal {
+    fn from(value: i64) -> Self {
+        Self {
+            coefficient: BigInt::from(value),
+            scale: 0,
+        }
+    }
+}
+impl Ord for Decimal {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let scale = self.scale.max(other.scale);
+        let left = &self.coefficient * decimal_power_of_ten(scale - self.scale);
+        let right = &other.coefficient * decimal_power_of_ten(scale - other.scale);
+        left.cmp(&right)
+    }
+}
+impl PartialOrd for Decimal {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn decimal_power_of_ten(exponent: u32) -> BigInt {
+    BigInt::from(10_u8).pow(exponent)
+}
+
+fn decimal_add(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    let scale = left.scale.max(right.scale);
+    Decimal::from_bigint(
+        left.inner() * decimal_power_of_ten(scale - left.scale)
+            + right.inner() * decimal_power_of_ten(scale - right.scale),
+        scale,
+    )
+}
+
+fn decimal_sub(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    let scale = left.scale.max(right.scale);
+    Decimal::from_bigint(
+        left.inner() * decimal_power_of_ten(scale - left.scale)
+            - right.inner() * decimal_power_of_ten(scale - right.scale),
+        scale,
+    )
+}
+
+fn decimal_mul(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    let scale = left
+        .scale
+        .checked_add(right.scale)
+        .ok_or_else(|| Error::runtime("decimal multiplication exceeds the scale limit"))?;
+    Decimal::from_bigint(left.inner() * right.inner(), scale)
+}
+
+fn bounded_factor_exponent(value: &BigInt, factor: u8) -> u32 {
+    let factor = BigInt::from(factor);
+    let mut low = 0_u32;
+    let mut high = MAX_DECIMAL_SCALE + 1;
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if (value % factor.pow(middle)).is_zero() {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    low
+}
+
+fn decimal_exact_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    if right.inner().is_zero() {
+        return Err(Error::runtime("decimal division by zero"));
+    }
+    let mut numerator = left.inner() * decimal_power_of_ten(right.scale);
+    let mut denominator = right.inner() * decimal_power_of_ten(left.scale);
+    let gcd = numerator.gcd(&denominator);
+    numerator /= &gcd;
+    denominator /= gcd;
+    if denominator.is_negative() {
+        numerator = -numerator;
+        denominator = -denominator;
+    }
+    let two = BigInt::from(2_u8);
+    let five = BigInt::from(5_u8);
+    let twos = bounded_factor_exponent(&denominator, 2);
+    let fives = bounded_factor_exponent(&denominator, 5);
+    if twos > MAX_DECIMAL_SCALE || fives > MAX_DECIMAL_SCALE {
+        return Err(Error::runtime(
+            "decimal division exceeds the implementation scale limit",
+        ));
+    }
+    denominator /= two.pow(twos) * five.pow(fives);
+    if denominator != BigInt::from(1_u8) {
+        return Err(Error::runtime(
+            "decimal division is non-terminating; use decimal_div with an explicit scale and rounding mode",
+        ));
+    }
+    let scale = twos.max(fives);
+    if scale > MAX_DECIMAL_SCALE {
+        return Err(Error::runtime(
+            "decimal division exceeds the implementation scale limit",
+        ));
+    }
+    numerator *= two.pow(scale - twos) * five.pow(scale - fives);
+    Decimal::from_bigint(numerator, scale)
+}
+
+fn aligned_decimal_coefficients(left: &Decimal, right: &Decimal) -> (BigInt, BigInt, u32) {
+    let scale = left.scale.max(right.scale);
+    (
+        left.inner() * decimal_power_of_ten(scale - left.scale),
+        right.inner() * decimal_power_of_ten(scale - right.scale),
+        scale,
+    )
+}
+
+fn decimal_floor_div(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    if right.inner().is_zero() {
+        return Err(Error::runtime("decimal floor division by zero"));
+    }
+    let (left, right, _) = aligned_decimal_coefficients(left, right);
+    Decimal::from_bigint(integer_floor_div(&left, &right)?, 0)
+}
+
+fn decimal_rem(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    if right.inner().is_zero() {
+        return Err(Error::runtime("decimal remainder by zero"));
+    }
+    let (left, right, scale) = aligned_decimal_coefficients(left, right);
+    Decimal::from_bigint(integer_rem(&left, &right)?, scale)
+}
+
+fn decimal_modulo(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    if right.inner().is_zero() {
+        return Err(Error::runtime("decimal modulo by zero"));
+    }
+    let (left, right, scale) = aligned_decimal_coefficients(left, right);
+    Decimal::from_bigint(integer_modulo(&left, &right)?, scale)
+}
+
+fn decimal_pow(left: &Decimal, right: &Decimal) -> Result<Decimal, Error> {
+    if right.scale != 0 {
+        return Err(Error::runtime(
+            "decimal exponent must be a non-negative whole Decimal",
+        ));
+    }
+    let exponent = right.inner().to_u32().ok_or_else(|| {
+        Error::runtime("decimal exponent must be a non-negative 32-bit whole Decimal")
+    })?;
+    let scale = left
+        .scale
+        .checked_mul(exponent)
+        .ok_or_else(|| Error::runtime("decimal power exceeds the implementation scale limit"))?;
+    if left.inner().bits().saturating_mul(u64::from(exponent)) > MAX_DECIMAL_BITS
+        || scale > MAX_DECIMAL_SCALE
+    {
+        return Err(Error::runtime(
+            "decimal power exceeds the implementation limits",
+        ));
+    }
+    Decimal::from_bigint(left.inner().pow(exponent), scale)
+}
+
+#[derive(Clone, Copy)]
+enum DecimalRounding {
+    Down,
+    Up,
+    Floor,
+    Ceiling,
+    HalfUp,
+    HalfEven,
+}
+impl DecimalRounding {
+    fn parse(value: &Value) -> Result<Self, Error> {
+        let Value::String(value) = value else {
+            return Err(Error::runtime("decimal rounding mode must be a string"));
+        };
+        match value.as_ref() {
+            "down" => Ok(Self::Down),
+            "up" => Ok(Self::Up),
+            "floor" => Ok(Self::Floor),
+            "ceiling" => Ok(Self::Ceiling),
+            "half_up" => Ok(Self::HalfUp),
+            "half_even" => Ok(Self::HalfEven),
+            _ => Err(Error::runtime(
+                "decimal rounding mode must be down, up, floor, ceiling, half_up, or half_even",
+            )),
+        }
+    }
+}
+
+fn decimal_scale_argument(value: &Value) -> Result<u32, Error> {
+    let scale = match value {
+        Value::Number(value)
+            if value.is_finite()
+                && value.fract() == 0.
+                && *value >= 0.
+                && *value <= f64::from(MAX_DECIMAL_SCALE) =>
+        {
+            *value as u32
+        }
+        Value::Integer(value) => value.inner().to_u32().ok_or_else(|| {
+            Error::runtime("decimal scale must be a non-negative bounded integer")
+        })?,
+        _ => {
+            return Err(Error::runtime(
+                "decimal scale must be a non-negative integer",
+            ));
+        }
+    };
+    if scale > MAX_DECIMAL_SCALE {
+        Err(Error::runtime(
+            "decimal scale exceeds the implementation limit",
+        ))
+    } else {
+        Ok(scale)
+    }
+}
+
+fn round_decimal_ratio(
+    mut numerator: BigInt,
+    mut denominator: BigInt,
+    rounding: DecimalRounding,
+) -> Result<BigInt, Error> {
+    if denominator.is_zero() {
+        return Err(Error::runtime("decimal division by zero"));
+    }
+    if denominator.is_negative() {
+        numerator = -numerator;
+        denominator = -denominator;
+    }
+    let (quotient, remainder) = numerator.div_rem(&denominator);
+    if remainder.is_zero() {
+        return Ok(quotient);
+    }
+    let direction = numerator.signum();
+    let increment = match rounding {
+        DecimalRounding::Down => false,
+        DecimalRounding::Up => true,
+        DecimalRounding::Floor => numerator.is_negative(),
+        DecimalRounding::Ceiling => numerator.is_positive(),
+        DecimalRounding::HalfUp | DecimalRounding::HalfEven => {
+            match (remainder.abs() * BigInt::from(2_u8)).cmp(&denominator) {
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Equal => {
+                    matches!(rounding, DecimalRounding::HalfUp) || quotient.is_odd()
+                }
+            }
+        }
+    };
+    Ok(if increment {
+        quotient + direction
+    } else {
+        quotient
+    })
+}
+
+fn decimal_div_rounded(
+    left: &Decimal,
+    right: &Decimal,
+    scale: u32,
+    rounding: DecimalRounding,
+) -> Result<Decimal, Error> {
+    let numerator_scale = right
+        .scale
+        .checked_add(scale)
+        .ok_or_else(|| Error::runtime("decimal division exceeds the scale limit"))?;
+    let numerator = left.inner() * decimal_power_of_ten(numerator_scale);
+    let denominator = right.inner() * decimal_power_of_ten(left.scale);
+    Decimal::from_bigint(
+        round_decimal_ratio(numerator, denominator, rounding)?,
+        scale,
+    )
+}
+
+fn decimal_round(value: &Decimal, scale: u32, rounding: DecimalRounding) -> Result<Decimal, Error> {
+    decimal_div_rounded(value, &Decimal::from(1_i64), scale, rounding)
+}
+
 /// An immutable structured error visible to QuickCoffee scripts and embedding hosts.
 #[derive(Clone)]
 pub struct ScriptError {
@@ -132,6 +542,8 @@ pub enum Value {
     Number(f64),
     /// An arbitrary-precision signed integer.
     Integer(Rc<Integer>),
+    /// An exact normalized base-10 fixed-point value.
+    Decimal(Rc<Decimal>),
     /// An immutable UTF-8 string.
     String(Rc<str>),
     /// An immutable array of values.
@@ -150,6 +562,7 @@ impl fmt::Debug for Value {
             Self::Bool(x) => write!(f, "{x}"),
             Self::Number(x) => write!(f, "{x}"),
             Self::Integer(x) => write!(f, "{}n", x.to_decimal_string()),
+            Self::Decimal(x) => write!(f, "{}m", x.to_plain_string()),
             Self::String(x) => write!(f, "{x:?}"),
             Self::Array(x) => f.debug_list().entries(x.iter()).finish(),
             Self::Map(x) => f.debug_map().entries(x.iter()).finish(),
@@ -165,6 +578,7 @@ impl fmt::Display for Value {
             Self::Bool(x) => write!(f, "{x}"),
             Self::Number(x) => write!(f, "{x}"),
             Self::Integer(x) => write!(f, "{}n", x.to_decimal_string()),
+            Self::Decimal(x) => write!(f, "{}m", x.to_plain_string()),
             Self::String(x) => write!(f, "{x}"),
             Self::Array(x) => {
                 write!(f, "[")?;
@@ -199,6 +613,7 @@ impl Value {
             Self::Bool(_) => ValueKind::Bool,
             Self::Number(_) => ValueKind::Number,
             Self::Integer(_) => ValueKind::Integer,
+            Self::Decimal(_) => ValueKind::Decimal,
             Self::String(_) => ValueKind::String,
             Self::Array(_) => ValueKind::Array,
             Self::Map(_) => ValueKind::Map,
@@ -242,6 +657,14 @@ impl Value {
     /// Returns the exact integer, if this value is an integer.
     pub fn as_integer(&self) -> Option<&Integer> {
         if let Self::Integer(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+    /// Returns the exact Decimal, if this value is a Decimal.
+    pub fn as_decimal(&self) -> Option<&Decimal> {
+        if let Self::Decimal(value) = self {
             Some(value)
         } else {
             None
@@ -305,6 +728,11 @@ impl From<f64> for Value {
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Self::integer(value)
+    }
+}
+impl From<Decimal> for Value {
+    fn from(value: Decimal) -> Self {
+        Self::Decimal(Rc::new(value))
     }
 }
 impl From<String> for Value {
@@ -1315,7 +1743,9 @@ fn valid_error_data(value: &Value, depth: usize) -> bool {
         return false;
     }
     match value {
-        Value::Nil | Value::Bool(_) | Value::Integer(_) | Value::String(_) => true,
+        Value::Nil | Value::Bool(_) | Value::Integer(_) | Value::Decimal(_) | Value::String(_) => {
+            true
+        }
         Value::Number(value) => value.is_finite(),
         Value::Array(values) => values
             .iter()
@@ -1552,6 +1982,7 @@ impl Context {
                     Value::Bool(_) => "bool",
                     Value::Number(_) => "number",
                     Value::Integer(_) => "integer",
+                    Value::Decimal(_) => "decimal",
                     Value::String(_) => "string",
                     Value::Array(_) => "array",
                     Value::Map(_) => "map",
@@ -1590,6 +2021,9 @@ impl Context {
                 }
                 match &xs[0] {
                     Value::Integer(value) => Ok(Value::Integer(value.clone())),
+                    Value::Decimal(value) if value.scale == 0 => Ok(Value::Integer(Rc::new(
+                        Integer::from_bigint(value.inner().clone())?,
+                    ))),
                     Value::Number(value) if value.is_finite() && value.fract() == 0. => {
                         let value = BigInt::from_f64(*value).ok_or_else(|| {
                             Error::runtime("number cannot be converted to integer")
@@ -1597,7 +2031,7 @@ impl Context {
                         Ok(Value::Integer(Rc::new(Integer::from_bigint(value)?)))
                     }
                     _ => Err(Error::runtime(
-                        "integer expects an integer or finite integral number",
+                        "integer expects an integer, whole decimal, or finite integral number",
                     )),
                 }
             },
@@ -1619,9 +2053,79 @@ impl Context {
                         })?;
                     Ok(Value::Number(value as f64))
                 }
-                _ => Err(Error::runtime("number expects a number or integer")),
+                Value::Decimal(value) => decimal_to_exact_number(value).map(Value::Number),
+                _ => Err(Error::runtime(
+                    "number expects a number, integer, or exactly representable decimal",
+                )),
             }
         });
+        self.add_builtin(
+            "decimal",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("decimal expects one argument"));
+                }
+                let value = match &xs[0] {
+                    Value::Decimal(value) => (**value).clone(),
+                    Value::Integer(value) => Decimal::from_bigint(value.inner().clone(), 0)?,
+                    Value::String(value) => Decimal::parse(value).ok_or_else(|| {
+                        Error::runtime("string is not a valid bounded decimal")
+                    })?,
+                    Value::Number(_) => {
+                        return Err(Error::runtime(
+                            "decimal does not accept Number; use a suffixed literal or decimal string",
+                        ));
+                    }
+                    _ => {
+                        return Err(Error::runtime(
+                            "decimal expects a decimal, integer, or decimal string",
+                        ));
+                    }
+                };
+                Ok(Value::Decimal(Rc::new(value)))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "decimal_div",
+            |xs| {
+                if xs.len() != 4 {
+                    return Err(Error::runtime(
+                        "decimal_div expects two decimals, scale, and rounding mode",
+                    ));
+                }
+                let (Value::Decimal(left), Value::Decimal(right)) = (&xs[0], &xs[1]) else {
+                    return Err(Error::runtime(
+                        "decimal_div expects Decimal dividend and divisor",
+                    ));
+                };
+                let scale = decimal_scale_argument(&xs[2])?;
+                let rounding = DecimalRounding::parse(&xs[3])?;
+                Ok(Value::Decimal(Rc::new(decimal_div_rounded(
+                    left, right, scale, rounding,
+                )?)))
+            },
+            one_value_allocation,
+        );
+        self.add_builtin(
+            "round_decimal",
+            |xs| {
+                if xs.len() != 3 {
+                    return Err(Error::runtime(
+                        "round_decimal expects a decimal, scale, and rounding mode",
+                    ));
+                }
+                let Value::Decimal(value) = &xs[0] else {
+                    return Err(Error::runtime("round_decimal expects a Decimal value"));
+                };
+                let scale = decimal_scale_argument(&xs[1])?;
+                let rounding = DecimalRounding::parse(&xs[2])?;
+                Ok(Value::Decimal(Rc::new(decimal_round(
+                    value, scale, rounding,
+                )?)))
+            },
+            one_value_allocation,
+        );
         self.add_native("abs", |xs| {
             if xs.len() != 1 {
                 return Err(Error::runtime("abs expects one number"));
@@ -1631,7 +2135,13 @@ impl Context {
                 Value::Integer(value) => Ok(Value::Integer(Rc::new(Integer::from_bigint(
                     value.inner().abs(),
                 )?))),
-                _ => Err(Error::runtime("abs expects a finite number or integer")),
+                Value::Decimal(value) => Ok(Value::Decimal(Rc::new(Decimal::from_bigint(
+                    value.inner().abs(),
+                    value.scale,
+                )?))),
+                _ => Err(Error::runtime(
+                    "abs expects a finite number, integer, or decimal",
+                )),
             }
         });
         self.add_native("sum", |xs| aggregate_numeric(xs, "sum", Aggregate::Sum));
@@ -2220,7 +2730,19 @@ impl Vm {
                     Instruction::Neg => match pop(frame)? {
                         Value::Number(x) => frame.stack.push(Value::Number(-x)),
                         Value::Integer(x) => push_integer(frame, -x.inner())?,
-                        _ => return Err(Error::runtime("unary '-' expects number or integer")),
+                        Value::Decimal(x) => {
+                            frame
+                                .stack
+                                .push(Value::Decimal(Rc::new(Decimal::from_bigint(
+                                    -x.inner(),
+                                    x.scale,
+                                )?)))
+                        }
+                        _ => {
+                            return Err(Error::runtime(
+                                "unary '-' expects number, integer, or decimal",
+                            ));
+                        }
                     },
                     Instruction::Not => {
                         let x = truth(pop(frame)?)?;
@@ -2240,17 +2762,33 @@ impl Vm {
                     }
                     Instruction::Increment => numeric_update(frame, true)?,
                     Instruction::Decrement => numeric_update(frame, false)?,
-                    Instruction::Add => numeric_binary(frame, |a, b| a + b, |a, b| Ok(a + b))?,
-                    Instruction::Sub => numeric_binary(frame, |a, b| a - b, |a, b| Ok(a - b))?,
-                    Instruction::Mul => numeric_binary(frame, |a, b| a * b, |a, b| Ok(a * b))?,
-                    Instruction::Div => numeric_binary(frame, |a, b| a / b, integer_div)?,
-                    Instruction::FloorDiv => {
-                        numeric_binary(frame, |a, b| (a / b).floor(), integer_floor_div)?
+                    Instruction::Add => {
+                        numeric_binary(frame, |a, b| a + b, |a, b| Ok(a + b), decimal_add)?
                     }
-                    Instruction::Rem => numeric_binary(frame, |a, b| a % b, integer_rem)?,
-                    Instruction::Modulo => {
-                        numeric_binary(frame, |a, b| (a % b + b) % b, integer_modulo)?
+                    Instruction::Sub => {
+                        numeric_binary(frame, |a, b| a - b, |a, b| Ok(a - b), decimal_sub)?
                     }
+                    Instruction::Mul => {
+                        numeric_binary(frame, |a, b| a * b, |a, b| Ok(a * b), decimal_mul)?
+                    }
+                    Instruction::Div => {
+                        numeric_binary(frame, |a, b| a / b, integer_div, decimal_exact_div)?
+                    }
+                    Instruction::FloorDiv => numeric_binary(
+                        frame,
+                        |a, b| (a / b).floor(),
+                        integer_floor_div,
+                        decimal_floor_div,
+                    )?,
+                    Instruction::Rem => {
+                        numeric_binary(frame, |a, b| a % b, integer_rem, decimal_rem)?
+                    }
+                    Instruction::Modulo => numeric_binary(
+                        frame,
+                        |a, b| (a % b + b) % b,
+                        integer_modulo,
+                        decimal_modulo,
+                    )?,
                     Instruction::BitAnd => numeric_bit_binary(frame, |a, b| a & b, |a, b| a & b)?,
                     Instruction::BitOr => numeric_bit_binary(frame, |a, b| a | b, |a, b| a | b)?,
                     Instruction::BitXor => numeric_bit_binary(frame, |a, b| a ^ b, |a, b| a ^ b)?,
@@ -2259,13 +2797,23 @@ impl Vm {
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
                     }
-                    Instruction::Pow => numeric_binary(frame, |a, b| a.powf(b), integer_pow)?,
+                    Instruction::Pow => {
+                        numeric_binary(frame, |a, b| a.powf(b), integer_pow, decimal_pow)?
+                    }
                     Instruction::Eq => compare(frame, equal)?,
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
-                    Instruction::Lt => numeric_order(frame, |a, b| a < b, |a, b| a < b)?,
-                    Instruction::Le => numeric_order(frame, |a, b| a <= b, |a, b| a <= b)?,
-                    Instruction::Gt => numeric_order(frame, |a, b| a > b, |a, b| a > b)?,
-                    Instruction::Ge => numeric_order(frame, |a, b| a >= b, |a, b| a >= b)?,
+                    Instruction::Lt => {
+                        numeric_order(frame, |a, b| a < b, |a, b| a < b, |a, b| a < b)?
+                    }
+                    Instruction::Le => {
+                        numeric_order(frame, |a, b| a <= b, |a, b| a <= b, |a, b| a <= b)?
+                    }
+                    Instruction::Gt => {
+                        numeric_order(frame, |a, b| a > b, |a, b| a > b, |a, b| a > b)?
+                    }
+                    Instruction::Ge => {
+                        numeric_order(frame, |a, b| a >= b, |a, b| a >= b, |a, b| a >= b)?
+                    }
                     Instruction::Contains => {
                         let target = pop(frame)?;
                         let needle = pop(frame)?;
@@ -2882,6 +3430,30 @@ fn number(v: Value) -> Result<f64, Error> {
     v.as_number()
         .ok_or_else(|| Error::runtime("expected number"))
 }
+fn decimal_to_exact_number(value: &Decimal) -> Result<f64, Error> {
+    let mut numerator = value.inner().clone();
+    let mut denominator = decimal_power_of_ten(value.scale);
+    let gcd = numerator.gcd(&denominator);
+    numerator /= &gcd;
+    denominator /= gcd;
+    while denominator.is_even() {
+        denominator /= 2;
+    }
+    if denominator != BigInt::from(1_u8) || numerator.bits() > 53 {
+        return Err(Error::runtime(
+            "decimal is not exactly representable as a Number",
+        ));
+    }
+    let number = value
+        .to_plain_string()
+        .parse::<f64>()
+        .map_err(|_| Error::runtime("decimal is not representable as a Number"))?;
+    if !number.is_finite() || (!value.inner().is_zero() && number == 0.) {
+        Err(Error::runtime("decimal is outside the finite Number range"))
+    } else {
+        Ok(number)
+    }
+}
 enum Aggregate {
     Sum,
     Min,
@@ -2942,12 +3514,33 @@ fn aggregate_numeric(xs: &[Value], name: &str, aggregate: Aggregate) -> Result<V
             };
             Ok(Value::Integer(Rc::new(Integer::from_bigint(value)?)))
         }
+        Value::Decimal(_) => {
+            let decimals = values
+                .iter()
+                .map(|value| match value {
+                    Value::Decimal(value) => Ok(value.as_ref()),
+                    Value::Number(_) | Value::Integer(_) => Err(Error::runtime(format!(
+                        "{name} cannot mix number, integer, and decimal elements"
+                    ))),
+                    _ => Err(Error::runtime(format!("{name} expects numeric elements"))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = match aggregate {
+                Aggregate::Sum => decimals
+                    .into_iter()
+                    .try_fold(Decimal::from(0_i64), |sum, value| decimal_add(&sum, value))?,
+                Aggregate::Min => (*decimals.into_iter().min().expect("non-empty")).clone(),
+                Aggregate::Max => (*decimals.into_iter().max().expect("non-empty")).clone(),
+            };
+            Ok(Value::Decimal(Rc::new(value)))
+        }
         _ => Err(Error::runtime(format!("{name} expects numeric elements"))),
     }
 }
 fn string_value(value: &Value) -> String {
     match value {
         Value::Integer(value) => value.to_decimal_string(),
+        Value::Decimal(value) => value.to_plain_string(),
         value => value.to_string(),
     }
 }
@@ -3079,7 +3672,15 @@ fn numeric_update(f: &mut Frame, increment: bool) -> Result<(), Error> {
                 value.inner() - 1
             },
         )?,
-        _ => return Err(Error::runtime("update operand must be number or integer")),
+        Value::Decimal(value) => f.stack.push(Value::Decimal(Rc::new(decimal_add(
+            &value,
+            &Decimal::from(if increment { 1 } else { -1 }),
+        )?))),
+        _ => {
+            return Err(Error::runtime(
+                "update operand must be number, integer, or decimal",
+            ));
+        }
     }
     Ok(())
 }
@@ -3087,6 +3688,7 @@ fn numeric_binary(
     f: &mut Frame,
     number_op: impl FnOnce(f64, f64) -> f64,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> Result<BigInt, Error>,
+    decimal_op: impl FnOnce(&Decimal, &Decimal) -> Result<Decimal, Error>,
 ) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
@@ -3095,8 +3697,16 @@ fn numeric_binary(
         (Value::Integer(a), Value::Integer(b)) => {
             push_integer(f, integer_op(a.inner(), b.inner())?)?
         }
-        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
-            return Err(Error::runtime("cannot mix number and integer operands"));
+        (Value::Decimal(a), Value::Decimal(b)) => {
+            f.stack.push(Value::Decimal(Rc::new(decimal_op(&a, &b)?)))
+        }
+        (
+            Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
+            Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
+        ) => {
+            return Err(Error::runtime(
+                "cannot mix number, integer, and decimal operands",
+            ));
         }
         _ => {
             return Err(Error::runtime(
@@ -3261,14 +3871,21 @@ fn numeric_order(
     f: &mut Frame,
     number_op: impl FnOnce(f64, f64) -> bool,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
+    decimal_op: impl FnOnce(&Decimal, &Decimal) -> bool,
 ) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
     let result = match (a, b) {
         (Value::Number(a), Value::Number(b)) => number_op(a, b),
         (Value::Integer(a), Value::Integer(b)) => integer_op(a.inner(), b.inner()),
-        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
-            return Err(Error::runtime("cannot order number and integer values"));
+        (Value::Decimal(a), Value::Decimal(b)) => decimal_op(&a, &b),
+        (
+            Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
+            Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
+        ) => {
+            return Err(Error::runtime(
+                "cannot order number, integer, and decimal values",
+            ));
         }
         _ => {
             return Err(Error::runtime(
@@ -3285,6 +3902,7 @@ fn equal(a: &Value, b: &Value) -> bool {
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => x == y,
         (Value::Integer(x), Value::Integer(y)) => x == y,
+        (Value::Decimal(x), Value::Decimal(y)) => x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => {
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(a, b)| equal(a, b))

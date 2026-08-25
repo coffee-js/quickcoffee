@@ -164,6 +164,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "9007199254741693n",
     },
     Workload {
+        name: "exact-decimal-money",
+        source: "total = 0m\ni = 0\nwhile i < 100\n  total += 0.01m\n  i++\ndecimal_div(total * 17.5m, 100m, 2, 'half_even')",
+        expected: "0.18m",
+    },
+    Workload {
         name: "floor-modulo",
         source: "sum = 0\ni = -100\nwhile i < 100\n  sum += i // 3\n  sum += i %% 7\n  i += 1\nsum",
         expected: "500",

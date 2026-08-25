@@ -52,6 +52,10 @@ fn json_value(value: &Value) -> String {
             "{{\"$quickcoffee\":\"integer\",\"value\":\"{}\"}}",
             value.as_integer().unwrap().to_decimal_string()
         ),
+        quickcoffee::ValueKind::Decimal => format!(
+            "{{\"$quickcoffee\":\"decimal\",\"value\":\"{}\"}}",
+            value.as_decimal().unwrap().to_plain_string()
+        ),
         quickcoffee::ValueKind::String => {
             format!("\"{}\"", json_escape(value.as_str().unwrap()))
         }

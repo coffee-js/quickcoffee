@@ -18,3 +18,5 @@ QuickCoffee 的标准库是普通函数，而非 JavaScript 原型方法。已�
 ## 验收
 
 `tests/scripts/stdlib.qc` 验证成功路径；核心测试验证空数组、错误参数和非有限宿主数值的错误边界；五份文学手册列出函数。`make check` 必须继续通过 debug/release 全量测试及 qdocco 门禁。
+
+RFC 0135 与 0137 后续将 `abs`、`sum`、`min`、`max` 扩展到同质 Integer/Decimal；混合数值类型仍报错。

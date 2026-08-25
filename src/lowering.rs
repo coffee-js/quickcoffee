@@ -2,7 +2,7 @@ use crate::{
     ast::{Binary, Expr, Item, MapItem, Param, Pattern as AstPattern, Stmt, Unary, Update},
     bytecode::{Chunk, Constant, Instruction, Pattern},
     lexer::TokenSpan,
-    vm::{Error, Integer, Value},
+    vm::{Decimal, Error, Integer, Value},
 };
 use std::{collections::BTreeMap, rc::Rc};
 
@@ -105,6 +105,7 @@ fn constant_value(expression: &Expr) -> Option<Value> {
         Expr::Integer(digits, radix) => Some(Value::Integer(Rc::new(Integer::parse_radix(
             digits, *radix,
         )?))),
+        Expr::Decimal(source) => Some(Value::Decimal(Rc::new(Decimal::parse(source)?))),
         Expr::String(value) => Some(Value::String(Rc::from(value.as_str()))),
         Expr::Bool(value) => Some(Value::Bool(*value)),
         Expr::Nil => Some(Value::Nil),
@@ -114,6 +115,7 @@ fn constant_value(expression: &Expr) -> Option<Value> {
                 let value = constant_value(part)?;
                 match value {
                     Value::Integer(value) => output.push_str(&value.to_decimal_string()),
+                    Value::Decimal(value) => output.push_str(&value.to_plain_string()),
                     value => output.push_str(&value.to_string()),
                 }
             }
@@ -150,6 +152,9 @@ fn constant_value(expression: &Expr) -> Option<Value> {
                     Value::Integer(value) => Integer::from_bigint(-value.inner())
                         .ok()
                         .map(|value| Value::Integer(Rc::new(value))),
+                    Value::Decimal(value) => Decimal::from_bigint(-value.inner(), value.scale())
+                        .ok()
+                        .map(|value| Value::Decimal(Rc::new(value))),
                     _ => None,
                 },
                 Unary::Not => Some(Value::Bool(!value.as_bool()?)),
@@ -310,6 +315,7 @@ fn constant_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::Number(left), Value::Number(right)) => left == right,
         (Value::Integer(left), Value::Integer(right)) => left == right,
+        (Value::Decimal(left), Value::Decimal(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len()
@@ -583,6 +589,12 @@ impl Compiler {
                     Error::parse("invalid integer literal or integer exceeds the size limit")
                 })?;
                 self.emit_const(Value::Integer(Rc::new(value)));
+            }
+            Expr::Decimal(source) => {
+                let value = Decimal::parse(source).ok_or_else(|| {
+                    Error::parse("invalid decimal literal or decimal exceeds its limits")
+                })?;
+                self.emit_const(Value::Decimal(Rc::new(value)));
             }
             Expr::String(s) => self.emit_const(Value::String(Rc::from(s.as_str()))),
             Expr::Interpolate(parts) => {

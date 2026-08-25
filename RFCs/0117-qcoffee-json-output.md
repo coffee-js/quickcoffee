@@ -18,3 +18,5 @@
 ## 验收
 
 `tests/cli_tools.rs` 必须覆盖复合值、`nil`、解析错误、fuel 资源耗尽错误和 JSON/普通模式隔离；五份可执行手册与中英文语法索引说明该选项。`make check` 必须继续通过。
+
+RFC 0135、0136、0137 后续分别为 Integer、Error、Decimal 增加 `$quickcoffee` 标签表示；普通 JSON 值的既有映射不变。
