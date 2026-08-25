@@ -1,6 +1,6 @@
 # RFC 0138：确定性脚本 JSON 与精确数值映射
 
-- 状态：已采纳并实现核心
+- 状态：已采纳并实现（含 issue #140 可配置资源策略）
 - 日期：2026-08-25
 - 依赖：RFC 0056、RFC 0060、RFC 0118、RFC 0135、RFC 0136、RFC 0137
 - 跟踪：issue #78、issue #125
@@ -9,7 +9,7 @@
 
 QuickCoffee 增加普通纯函数 parse_json(string) 与 encode_json(value)。它们不读取文件、网络、环境变量或宿主对象，不借用 qcoffee --json 的 CLI 协议，也不引入 JavaScript 对象、原型、隐式类型转换或 ambient capability。
 
-parse_json 只接受一个 UTF-8 String。encode_json 只接受一个值。语法、类型、重复键与固定实现上限失败分别产生密封的 json.parse / json.encode Error，操作不修改脚本状态。统一可配置资源错误由 issue #76 接管前，这些纯函数的固定上限错误保持可捕获且无部分结果。
+parse_json 只接受一个 UTF-8 String。encode_json 只接受一个值。语法、类型、重复键与不可编码值失败分别产生密封的 json.parse / json.encode Error；配置边界失败产生 RFC 0118 的不可捕获 Resource error。两类失败都不修改脚本状态，也不返回部分结果。
 
 ## 精确数值
 
@@ -27,7 +27,7 @@ object key 必须为字符串，重复键直接报错，不采用 first/last-win
 
 ## 资源与输出
 
-首个核心采用以下确定性固定守卫：
+`ResourceLimits::default()` 保留首个核心的以下确定性默认守卫：
 
 - 输入与输出各 1,000,000 UTF-8 bytes；
 - 单 String 1,000,000 UTF-8 bytes；
@@ -35,6 +35,6 @@ object key 必须为字符串，重复键直接报错，不采用 first/last-win
 - 一次解析或编码 100,000 个值；
 - Array/object 最大嵌套 128 层。
 
-每次容器加入、值创建、字符串增长与输出追加前后都检查对应边界。输入先按 byte 长度拒绝，深度在递归进入容器前拒绝，编码在超过输出边界前停止且不返回部分 String。解析得到的托管 String/Integer/Decimal/Array/Map 与 object key 纳入既有 ExecutionStats.value_allocations 事件估算。
+宿主可用 `Context::with_resource_limits` / `set_resource_limits` 替换各 JSON 边界，并用 `resource_limits` 读取当前策略。模块子 Context 继承宿主策略。每次容器加入、值创建、字符串增长与输出追加前后都检查对应边界；输入先按 byte 长度拒绝，深度在递归进入容器前拒绝，编码在超过输出边界前停止且不返回部分 String。解析得到的托管 String/Integer/Decimal/Array/Map 与 object key 纳入既有 ExecutionStats.value_allocations 事件估算。
 
-issue #76 将这些固定守卫迁移为 Context/Runtime 可配置的统一 data-size、nesting、managed-object 与 retained-memory 预算，并把越界改为脚本不可捕获的 Resource error；迁移不得改变成功值、canonical JSON、重复键规则或精确数值映射。
+issue #140 已完成 JSON 固定守卫向 Context 可配置、脚本不可捕获 Resource error 的迁移。issue #76 继续统一 Integer/Decimal、一般 data-size、managed-object 与 retained-memory 预算；后续迁移不得改变成功值、canonical JSON、重复键规则或精确数值映射。

@@ -20,4 +20,4 @@ QuickCoffee 是一个 Rust 实现的、受 CoffeeScript 2016 启发的脚本引�
 
 本仓库中的测试即 0.1 的语义基线。对语法或运行时的新增特性必须先以 RFC 补充定义，并至少添加：成功测试、错误测试及字节码验证测试。
 
-当前后续语义与工具 RFC 延伸至 RFC 0138；RFC 0134 已采纳 class 内受限接收者、构造与私有继承链，尚待 issue #121 实现，RFC 0135 与 0137 已实现与 Number 严格分离的精确 Integer/Decimal，RFC 0136 以密封 Error 值取代字符串 catch 并保持资源错误不可捕获，RFC 0138 增加无隐式 I/O、重复键拒绝、精确数值映射与固定资源守卫的脚本 JSON。RFC 0077–0118 维持既有 CLI JSON、测试、指纹、文档、资源、性能与发布契约，RFC 0119 定义宿主控制的静态模块核心，RFC 0120–0124 建立跨运行时性能与剖析契约，RFC 0125 建立 CoffeeScript 2016 特性矩阵，RFC 0126–0132 建立结构化源码范围、运行期归因与 parser recovery，RFC 0133 提供显式根目录的受限文件模块 loader。RFC 0134 不引入全局对象或公开 JavaScript 原型能力。
+当前后续语义与工具 RFC 延伸至 RFC 0138；RFC 0134 已采纳 class 内受限接收者、构造与私有继承链，尚待 issue #121 实现，RFC 0135 与 0137 已实现与 Number 严格分离的精确 Integer/Decimal，RFC 0136 以密封 Error 值取代字符串 catch 并保持资源错误不可捕获，RFC 0138 增加无隐式 I/O、重复键拒绝、精确数值映射及 Context 可配置资源守卫的脚本 JSON。RFC 0077–0118 维持既有 CLI JSON、测试、指纹、文档、资源、性能与发布契约，RFC 0119 定义宿主控制的静态模块核心，RFC 0120–0124 建立跨运行时性能与剖析契约，RFC 0125 建立 CoffeeScript 2016 特性矩阵，RFC 0126–0132 建立结构化源码范围、运行期归因与 parser recovery，RFC 0133 提供显式根目录的受限文件模块 loader。RFC 0134 不引入全局对象或公开 JavaScript 原型能力。

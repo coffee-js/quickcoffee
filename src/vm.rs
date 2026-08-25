@@ -766,6 +766,102 @@ pub enum ResourceLimit {
     CallDepth,
     /// The embedding host cancelled the current execution.
     Cancellation,
+    /// A JSON input exceeded the configured UTF-8 byte boundary.
+    JsonInputBytes,
+    /// A JSON encoding exceeded the configured UTF-8 output byte boundary.
+    JsonOutputBytes,
+    /// A decoded or encoded JSON string exceeded its configured UTF-8 byte boundary.
+    JsonStringBytes,
+    /// A JSON array or object exceeded its configured item boundary.
+    JsonContainerItems,
+    /// One JSON operation exceeded its configured total value boundary.
+    JsonValueCount,
+    /// A JSON array or object exceeded its configured nesting boundary.
+    JsonNestingDepth,
+}
+
+/// Deterministic data-size boundaries applied by an execution [`Context`].
+///
+/// The defaults preserve RFC 0138's original fixed JSON guards. A policy is
+/// copied into a context with [`Context::with_resource_limits`] or
+/// [`Context::set_resource_limits`]; lowering a boundary to zero is valid and
+/// rejects every non-empty operation covered by that boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceLimits {
+    max_json_input_bytes: usize,
+    max_json_output_bytes: usize,
+    max_json_string_bytes: usize,
+    max_json_container_items: usize,
+    max_json_values: usize,
+    max_json_nesting_depth: usize,
+}
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self {
+            max_json_input_bytes: 1_000_000,
+            max_json_output_bytes: 1_000_000,
+            max_json_string_bytes: 1_000_000,
+            max_json_container_items: 100_000,
+            max_json_values: 100_000,
+            max_json_nesting_depth: 128,
+        }
+    }
+}
+impl ResourceLimits {
+    /// Returns the maximum UTF-8 bytes accepted by one `parse_json` call.
+    pub fn max_json_input_bytes(&self) -> usize {
+        self.max_json_input_bytes
+    }
+    /// Returns a policy with the maximum JSON input byte count replaced.
+    pub fn with_max_json_input_bytes(mut self, limit: usize) -> Self {
+        self.max_json_input_bytes = limit;
+        self
+    }
+    /// Returns the maximum UTF-8 bytes emitted by one `encode_json` call.
+    pub fn max_json_output_bytes(&self) -> usize {
+        self.max_json_output_bytes
+    }
+    /// Returns a policy with the maximum JSON output byte count replaced.
+    pub fn with_max_json_output_bytes(mut self, limit: usize) -> Self {
+        self.max_json_output_bytes = limit;
+        self
+    }
+    /// Returns the maximum UTF-8 bytes in one decoded or encoded JSON string.
+    pub fn max_json_string_bytes(&self) -> usize {
+        self.max_json_string_bytes
+    }
+    /// Returns a policy with the maximum JSON string byte count replaced.
+    pub fn with_max_json_string_bytes(mut self, limit: usize) -> Self {
+        self.max_json_string_bytes = limit;
+        self
+    }
+    /// Returns the maximum items accepted in one JSON array or object.
+    pub fn max_json_container_items(&self) -> usize {
+        self.max_json_container_items
+    }
+    /// Returns a policy with the maximum JSON container item count replaced.
+    pub fn with_max_json_container_items(mut self, limit: usize) -> Self {
+        self.max_json_container_items = limit;
+        self
+    }
+    /// Returns the maximum values visited by one JSON parse or encode operation.
+    pub fn max_json_values(&self) -> usize {
+        self.max_json_values
+    }
+    /// Returns a policy with the maximum JSON value count replaced.
+    pub fn with_max_json_values(mut self, limit: usize) -> Self {
+        self.max_json_values = limit;
+        self
+    }
+    /// Returns the maximum nested JSON array/object depth.
+    pub fn max_json_nesting_depth(&self) -> usize {
+        self.max_json_nesting_depth
+    }
+    /// Returns a policy with the maximum JSON nesting depth replaced.
+    pub fn with_max_json_nesting_depth(mut self, limit: usize) -> Self {
+        self.max_json_nesting_depth = limit;
+        self
+    }
 }
 /// A source coordinate attached to a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1096,6 +1192,10 @@ enum FunctionKind {
     Native {
         function: NativeFunction,
         allocation_profile: Option<fn(&Value) -> u64>,
+    },
+    ResourceBuiltin {
+        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        allocation_profile: fn(&Value) -> u64,
     },
 }
 type Env = Rc<RefCell<Environment>>;
@@ -1691,6 +1791,7 @@ pub struct Context {
     global: Env,
     fuel: u64,
     max_call_depth: usize,
+    resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
 }
@@ -1705,6 +1806,7 @@ thread_local! {
             global: global.clone(),
             fuel: 1_000_000,
             max_call_depth: 1_024,
+            resource_limits: ResourceLimits::default(),
             cancellation: None,
             last_execution: ExecutionStats::default(),
         };
@@ -1740,6 +1842,34 @@ fn json_value_allocations(value: &Value) -> u64 {
             .fold(values.len() as u64 + 1, u64::saturating_add),
         Value::Nil | Value::Bool(_) | Value::Number(_) | Value::Error(_) | Value::Function(_) => 0,
     }
+}
+
+fn json_error(code: &'static str, failure: json::JsonFailure) -> Error {
+    let limit = failure.resource_limit();
+    let message = failure.to_string();
+    match limit {
+        Some(limit) => Error::resource(limit, message),
+        None => Error::domain(code, message, Value::Nil),
+    }
+}
+
+fn parse_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 1 {
+        return Err(Error::runtime("parse_json expects one string argument"));
+    }
+    let Value::String(source) = &xs[0] else {
+        return Err(Error::runtime("parse_json expects a string"));
+    };
+    json::parse_json(source, limits).map_err(|error| json_error("json.parse", error))
+}
+
+fn encode_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 1 {
+        return Err(Error::runtime("encode_json expects one argument"));
+    }
+    json::encode_json(&xs[0], limits)
+        .map(Value::from)
+        .map_err(|error| json_error("json.encode", error))
 }
 
 fn valid_error_code(code: &str) -> bool {
@@ -1793,6 +1923,7 @@ impl Context {
             global,
             fuel: 1_000_000,
             max_call_depth: 1_024,
+            resource_limits: ResourceLimits::default(),
             cancellation: None,
             last_execution: ExecutionStats::default(),
         }
@@ -1828,6 +1959,22 @@ impl Context {
     /// Returns the maximum nested QuickCoffee function-call depth for each run.
     pub fn max_call_depth(&self) -> usize {
         self.max_call_depth
+    }
+    /// Returns this context with the supplied deterministic data-size policy.
+    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
+        self.set_resource_limits(limits);
+        self
+    }
+    /// Replaces deterministic data-size boundaries used by future operations.
+    ///
+    /// Existing globals and compiled programs remain valid. Module children and
+    /// already-installed standard-library functions observe the replacement.
+    pub fn set_resource_limits(&mut self, limits: ResourceLimits) {
+        self.resource_limits = limits;
+    }
+    /// Returns the deterministic data-size policy used by future operations.
+    pub fn resource_limits(&self) -> ResourceLimits {
+        self.resource_limits
     }
     /// Returns this context configured to observe an embedding-host cancellation token.
     pub fn with_cancellation_token(mut self, token: CancellationToken) -> Self {
@@ -1897,6 +2044,22 @@ impl Context {
             })),
         );
     }
+    fn add_resource_builtin(
+        &mut self,
+        name: impl Into<String>,
+        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        allocation_profile: fn(&Value) -> u64,
+    ) {
+        self.set_global(
+            name,
+            Value::Function(Rc::new(Function {
+                inner: FunctionKind::ResourceBuiltin {
+                    function,
+                    allocation_profile,
+                },
+            })),
+        );
+    }
     /// Returns this context after registering a host callback as a global.
     ///
     /// This builder-style form is equivalent to [`Context::add_native`].
@@ -1929,6 +2092,7 @@ impl Context {
             fuel: self.fuel,
             instructions: 0,
             max_call_depth: self.max_call_depth,
+            resource_limits: self.resource_limits,
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
@@ -1953,6 +2117,7 @@ impl Context {
             global: env(Some(self.global.clone())),
             fuel: self.fuel,
             max_call_depth: self.max_call_depth,
+            resource_limits: self.resource_limits,
             cancellation: self.cancellation.clone(),
             last_execution: ExecutionStats::default(),
         }
@@ -2028,32 +2193,7 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_builtin(
-            "parse_json",
-            |xs| {
-                if xs.len() != 1 {
-                    return Err(Error::runtime("parse_json expects one string argument"));
-                }
-                let Value::String(source) = &xs[0] else {
-                    return Err(Error::runtime("parse_json expects a string"));
-                };
-                json::parse_json(source)
-                    .map_err(|error| Error::domain("json.parse", error.to_string(), Value::Nil))
-            },
-            json_value_allocations,
-        );
-        self.add_builtin(
-            "encode_json",
-            |xs| {
-                if xs.len() != 1 {
-                    return Err(Error::runtime("encode_json expects one argument"));
-                }
-                json::encode_json(&xs[0])
-                    .map(Value::from)
-                    .map_err(|error| Error::domain("json.encode", error.to_string(), Value::Nil))
-            },
-            one_value_allocation,
-        );
+        self.install_json_builtins();
         self.add_builtin(
             "integer",
             |xs| {
@@ -2319,6 +2459,11 @@ impl Context {
             Err(Error::runtime(format!("assertion failed{detail}")))
         });
     }
+
+    fn install_json_builtins(&mut self) {
+        self.add_resource_builtin("parse_json", parse_json_builtin, json_value_allocations);
+        self.add_resource_builtin("encode_json", encode_json_builtin, one_value_allocation);
+    }
 }
 struct Frame {
     chunk: Rc<Chunk>,
@@ -2483,6 +2628,7 @@ struct Vm {
     fuel: u64,
     instructions: u64,
     max_call_depth: usize,
+    resource_limits: ResourceLimits,
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
@@ -2599,6 +2745,7 @@ impl Vm {
             fuel: self.fuel,
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
+            resource_limits: self.resource_limits,
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
@@ -3332,6 +3479,18 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_value_allocations(allocation_profile(&value));
                 }
+                frames
+                    .last_mut()
+                    .expect("call has a caller frame")
+                    .stack
+                    .push(value);
+            }
+            FunctionKind::ResourceBuiltin {
+                function,
+                allocation_profile,
+            } => {
+                let value = function(args, vm.resource_limits)?;
+                vm.record_value_allocations(allocation_profile(&value));
                 frames
                     .last_mut()
                     .expect("call has a caller frame")

@@ -11,7 +11,7 @@
 
 1. `Context::with_global(name, value)` 消费并返回上下文，语义等同于先调用 `set_global`。
 2. `Context::with_native(name, callback)` 消费并返回上下文，语义等同于先调用 `add_native`；回调仍返回结构化 `Result<Value, Error>`。
-3. 两个 builder 方法可与 `with_fuel`、RFC 0118 的 `with_max_call_depth` 和 `with_cancellation_token` 任意顺序链式组合；全局值、原生函数和资源边界的后续执行语义保持明确且彼此独立。
+3. 两个 builder 方法可与 `with_fuel`、RFC 0118 的 `with_max_call_depth`、`with_resource_limits` 和 `with_cancellation_token` 任意顺序链式组合；全局值、原生函数和资源边界的后续执行语义保持明确且彼此独立。
 4. 既有 `set_global`、`add_native`、`fuel` 和 `run_program` API 保持兼容；不暴露环境、原型链或 JavaScript 对象。
 
 ## 验收

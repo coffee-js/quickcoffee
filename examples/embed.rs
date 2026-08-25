@@ -1,10 +1,15 @@
-use quickcoffee::{CancellationToken, Context, Error, Value};
+use quickcoffee::{CancellationToken, Context, Error, ResourceLimits, Value};
 
 fn main() -> Result<(), Error> {
     let cancellation = CancellationToken::new();
     let mut context = Context::new()
         .with_fuel(100_000)
         .with_max_call_depth(128)
+        .with_resource_limits(
+            ResourceLimits::default()
+                .with_max_json_input_bytes(256_000)
+                .with_max_json_output_bytes(256_000),
+        )
         .with_cancellation_token(cancellation.clone())
         .with_global("factor", Value::from(2_f64))
         .with_native("host_add", |args| {

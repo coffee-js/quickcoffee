@@ -20,7 +20,7 @@ pub use module::{
 pub use vm::{
     CancellationToken, Context, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
     ErrorKind, ExecutionStats, Function, Integer, NativeFunction, Program, ResourceLimit,
-    ScriptError, SourcePosition, SourceSpan, Value, ValueKind,
+    ResourceLimits, ScriptError, SourcePosition, SourceSpan, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.
