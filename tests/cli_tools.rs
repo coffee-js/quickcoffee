@@ -725,6 +725,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "call-containing-local-loop",
         "captured-local-loop",
         "map-spread",
+        "member-lookup-loop",
         "negative-indexing",
         "stepped-string-iteration",
         "signed-by-iteration",
@@ -856,6 +857,22 @@ fn qbench_json_is_guarded_and_machine_readable() {
     let selected_stdout = String::from_utf8_lossy(&selected.stdout);
     assert_eq!(selected_stdout.lines().count(), 1);
     assert!(selected_stdout.contains("\"name\":\"map-spread\""));
+    let member = Command::new(bin("qbench"))
+        .args([
+            "--only",
+            "member-lookup-loop",
+            "--json",
+            "--iterations",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(member.status.success());
+    let member_stdout = String::from_utf8_lossy(&member.stdout);
+    assert_eq!(member_stdout.lines().count(), 1);
+    assert!(member_stdout.contains("\"name\":\"member-lookup-loop\""));
+    assert!(member_stdout.contains("\"expected\":\"1000\",\"compile_ns\":"));
+    assert!(member_stdout.contains("\"profile_container_ops\":400,\"profile_iterator_ops\":"));
     let unknown = Command::new(bin("qbench"))
         .args(["--only", "missing-workload"])
         .output()
