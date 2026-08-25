@@ -4,6 +4,7 @@ use crate::lexer::TokenSpan;
 pub(crate) enum Expr {
     Located(TokenSpan, Box<Expr>),
     Number(f64),
+    Integer(String, u32),
     String(String),
     Interpolate(Vec<Expr>),
     Bool(bool),

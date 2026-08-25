@@ -4,6 +4,8 @@ use crate::{
     lowering::{self, ChunkSourceMap, CompiledSourceMap},
     parser,
 };
+use num_bigint::BigInt;
+use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
@@ -16,6 +18,7 @@ use std::{
 };
 
 const MAX_RANGE_ITEMS: i128 = 1_000_000;
+const MAX_INTEGER_BITS: u64 = 1_000_000;
 const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
 
 /// Stable type tag for values crossing the embedding boundary.
@@ -27,6 +30,8 @@ pub enum ValueKind {
     Bool,
     /// An IEEE-754 number.
     Number,
+    /// An arbitrary-precision signed integer.
+    Integer,
     /// An immutable UTF-8 string.
     String,
     /// An immutable array.
@@ -35,6 +40,45 @@ pub enum ValueKind {
     Map,
     /// An opaque bytecode or native function.
     Function,
+}
+
+/// An opaque arbitrary-precision signed integer.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Integer(BigInt);
+impl Integer {
+    /// Parses unsigned digits in the given radix, which must be from 2 through 36.
+    pub fn parse_radix(digits: &str, radix: u32) -> Option<Self> {
+        if !(2..=36).contains(&radix) {
+            return None;
+        }
+        let value = BigInt::parse_bytes(digits.as_bytes(), radix)?;
+        (value.bits() <= MAX_INTEGER_BITS).then_some(Self(value))
+    }
+    /// Returns the value when it fits in a signed 64-bit integer.
+    pub fn as_i64(&self) -> Option<i64> {
+        self.0.to_i64()
+    }
+    /// Returns the canonical base-10 representation.
+    pub fn to_decimal_string(&self) -> String {
+        self.0.to_string()
+    }
+    pub(crate) fn inner(&self) -> &BigInt {
+        &self.0
+    }
+    pub(crate) fn from_bigint(value: BigInt) -> Result<Self, Error> {
+        if value.bits() > MAX_INTEGER_BITS {
+            Err(Error::runtime(
+                "integer exceeds the implementation size limit",
+            ))
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+impl From<i64> for Integer {
+    fn from(value: i64) -> Self {
+        Self(BigInt::from(value))
+    }
 }
 
 /// An immutable value crossing the QuickCoffee/host boundary.
@@ -46,6 +90,8 @@ pub enum Value {
     Bool(bool),
     /// An IEEE-754 number used by the language.
     Number(f64),
+    /// An arbitrary-precision signed integer.
+    Integer(Rc<Integer>),
     /// An immutable UTF-8 string.
     String(Rc<str>),
     /// An immutable array of values.
@@ -61,6 +107,7 @@ impl fmt::Debug for Value {
             Self::Nil => write!(f, "nil"),
             Self::Bool(x) => write!(f, "{x}"),
             Self::Number(x) => write!(f, "{x}"),
+            Self::Integer(x) => write!(f, "{}n", x.to_decimal_string()),
             Self::String(x) => write!(f, "{x:?}"),
             Self::Array(x) => f.debug_list().entries(x.iter()).finish(),
             Self::Map(x) => f.debug_map().entries(x.iter()).finish(),
@@ -74,6 +121,7 @@ impl fmt::Display for Value {
             Self::Nil => write!(f, "nil"),
             Self::Bool(x) => write!(f, "{x}"),
             Self::Number(x) => write!(f, "{x}"),
+            Self::Integer(x) => write!(f, "{}n", x.to_decimal_string()),
             Self::String(x) => write!(f, "{x}"),
             Self::Array(x) => {
                 write!(f, "[")?;
@@ -106,6 +154,7 @@ impl Value {
             Self::Nil => ValueKind::Nil,
             Self::Bool(_) => ValueKind::Bool,
             Self::Number(_) => ValueKind::Number,
+            Self::Integer(_) => ValueKind::Integer,
             Self::String(_) => ValueKind::String,
             Self::Array(_) => ValueKind::Array,
             Self::Map(_) => ValueKind::Map,
@@ -144,6 +193,18 @@ impl Value {
         } else {
             None
         }
+    }
+    /// Returns the exact integer, if this value is an integer.
+    pub fn as_integer(&self) -> Option<&Integer> {
+        if let Self::Integer(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+    /// Builds an exact integer from a signed 64-bit host value.
+    pub fn integer(value: impl Into<Integer>) -> Self {
+        Self::Integer(Rc::new(value.into()))
     }
     /// Returns the boolean, if this value is boolean.
     pub fn as_bool(&self) -> Option<bool> {
@@ -190,7 +251,7 @@ impl From<f64> for Value {
 }
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
-        Self::Number(value as f64)
+        Self::integer(value)
     }
 }
 impl From<String> for Value {
@@ -1335,6 +1396,7 @@ impl Context {
                     Value::Nil => "nil",
                     Value::Bool(_) => "bool",
                     Value::Number(_) => "number",
+                    Value::Integer(_) => "integer",
                     Value::String(_) => "string",
                     Value::Array(_) => "array",
                     Value::Map(_) => "map",
@@ -1350,8 +1412,7 @@ impl Context {
                 if xs.len() != 2 {
                     return Err(Error::runtime("range expects two arguments"));
                 }
-                let (a, b) = numbers(xs)?;
-                numeric_range(a, b, false)
+                range_values(xs[0].clone(), xs[1].clone(), false)
             },
             one_value_allocation,
         );
@@ -1361,38 +1422,65 @@ impl Context {
                 if xs.len() != 1 {
                     return Err(Error::runtime("str expects one argument"));
                 }
-                Ok(Value::String(Rc::from(xs[0].to_string())))
+                Ok(Value::String(Rc::from(string_value(&xs[0]))))
             },
             one_value_allocation,
         );
+        self.add_builtin(
+            "integer",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("integer expects one argument"));
+                }
+                match &xs[0] {
+                    Value::Integer(value) => Ok(Value::Integer(value.clone())),
+                    Value::Number(value) if value.is_finite() && value.fract() == 0. => {
+                        let value = BigInt::from_f64(*value).ok_or_else(|| {
+                            Error::runtime("number cannot be converted to integer")
+                        })?;
+                        Ok(Value::Integer(Rc::new(Integer::from_bigint(value)?)))
+                    }
+                    _ => Err(Error::runtime(
+                        "integer expects an integer or finite integral number",
+                    )),
+                }
+            },
+            one_value_allocation,
+        );
+        self.add_native("number", |xs| {
+            if xs.len() != 1 {
+                return Err(Error::runtime("number expects one argument"));
+            }
+            match &xs[0] {
+                Value::Number(value) => Ok(Value::Number(*value)),
+                Value::Integer(value) => {
+                    const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+                    let value = value
+                        .as_i64()
+                        .filter(|value| (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(value))
+                        .ok_or_else(|| {
+                            Error::runtime("integer is outside the safe number range")
+                        })?;
+                    Ok(Value::Number(value as f64))
+                }
+                _ => Err(Error::runtime("number expects a number or integer")),
+            }
+        });
         self.add_native("abs", |xs| {
             if xs.len() != 1 {
                 return Err(Error::runtime("abs expects one number"));
             }
-            let value = number(xs[0].clone())?;
-            if !value.is_finite() {
-                return Err(Error::runtime("abs expects a finite number"));
+            match &xs[0] {
+                Value::Number(value) if value.is_finite() => Ok(Value::Number(value.abs())),
+                Value::Integer(value) => Ok(Value::Integer(Rc::new(Integer::from_bigint(
+                    value.inner().abs(),
+                )?))),
+                _ => Err(Error::runtime("abs expects a finite number or integer")),
             }
-            Ok(Value::Number(value.abs()))
         });
-        self.add_native("sum", |xs| {
-            let values = numeric_array(xs, "sum")?;
-            Ok(Value::Number(values.into_iter().sum()))
-        });
-        self.add_native("min", |xs| {
-            let values = numeric_array(xs, "min")?;
-            let Some(value) = values.into_iter().reduce(f64::min) else {
-                return Err(Error::runtime("min expects a non-empty array"));
-            };
-            Ok(Value::Number(value))
-        });
-        self.add_native("max", |xs| {
-            let values = numeric_array(xs, "max")?;
-            let Some(value) = values.into_iter().reduce(f64::max) else {
-                return Err(Error::runtime("max expects a non-empty array"));
-            };
-            Ok(Value::Number(value))
-        });
+        self.add_native("sum", |xs| aggregate_numeric(xs, "sum", Aggregate::Sum));
+        self.add_native("min", |xs| aggregate_numeric(xs, "min", Aggregate::Min));
+        self.add_native("max", |xs| aggregate_numeric(xs, "max", Aggregate::Max));
         self.add_builtin(
             "keys",
             |xs| {
@@ -1929,44 +2017,55 @@ impl Vm {
                         let start = frame.stack.len() - 3;
                         frame.stack[start..].rotate_left(1);
                     }
-                    Instruction::Neg => {
-                        let x = number(pop(frame)?)?;
-                        frame.stack.push(Value::Number(-x))
-                    }
+                    Instruction::Neg => match pop(frame)? {
+                        Value::Number(x) => frame.stack.push(Value::Number(-x)),
+                        Value::Integer(x) => push_integer(frame, -x.inner())?,
+                        _ => return Err(Error::runtime("unary '-' expects number or integer")),
+                    },
                     Instruction::Not => {
                         let x = truth(pop(frame)?)?;
                         frame.stack.push(Value::Bool(!x))
                     }
-                    Instruction::BitNot => {
-                        let x = bit_integer(pop(frame)?)?;
-                        frame.stack.push(Value::Number((!x) as f64));
-                    }
+                    Instruction::BitNot => match pop(frame)? {
+                        Value::Number(x) => {
+                            let x = bit_integer(Value::Number(x))?;
+                            frame.stack.push(Value::Number((!x) as f64));
+                        }
+                        Value::Integer(x) => push_integer(frame, !x.inner())?,
+                        _ => return Err(Error::runtime("'~' expects number or integer")),
+                    },
                     Instruction::Exists => {
                         let value = pop(frame)?;
                         frame.stack.push(Value::Bool(!matches!(value, Value::Nil)))
                     }
-                    Instruction::Add => binary(frame, |a, b| Value::Number(a + b))?,
-                    Instruction::Sub => binary(frame, |a, b| Value::Number(a - b))?,
-                    Instruction::Mul => binary(frame, |a, b| Value::Number(a * b))?,
-                    Instruction::Div => binary(frame, |a, b| Value::Number(a / b))?,
-                    Instruction::FloorDiv => binary(frame, |a, b| Value::Number((a / b).floor()))?,
-                    Instruction::Rem => binary(frame, |a, b| Value::Number(a % b))?,
-                    Instruction::Modulo => binary(frame, |a, b| Value::Number((a % b + b) % b))?,
-                    Instruction::BitAnd => bit_binary(frame, |a, b| a & b)?,
-                    Instruction::BitOr => bit_binary(frame, |a, b| a | b)?,
-                    Instruction::BitXor => bit_binary(frame, |a, b| a ^ b)?,
-                    Instruction::ShiftLeft => bit_shift(frame, |a, b| a.wrapping_shl(b))?,
-                    Instruction::ShiftRight => bit_shift(frame, |a, b| a.wrapping_shr(b))?,
+                    Instruction::Increment => numeric_update(frame, true)?,
+                    Instruction::Decrement => numeric_update(frame, false)?,
+                    Instruction::Add => numeric_binary(frame, |a, b| a + b, |a, b| Ok(a + b))?,
+                    Instruction::Sub => numeric_binary(frame, |a, b| a - b, |a, b| Ok(a - b))?,
+                    Instruction::Mul => numeric_binary(frame, |a, b| a * b, |a, b| Ok(a * b))?,
+                    Instruction::Div => numeric_binary(frame, |a, b| a / b, integer_div)?,
+                    Instruction::FloorDiv => {
+                        numeric_binary(frame, |a, b| (a / b).floor(), integer_floor_div)?
+                    }
+                    Instruction::Rem => numeric_binary(frame, |a, b| a % b, integer_rem)?,
+                    Instruction::Modulo => {
+                        numeric_binary(frame, |a, b| (a % b + b) % b, integer_modulo)?
+                    }
+                    Instruction::BitAnd => numeric_bit_binary(frame, |a, b| a & b, |a, b| a & b)?,
+                    Instruction::BitOr => numeric_bit_binary(frame, |a, b| a | b, |a, b| a | b)?,
+                    Instruction::BitXor => numeric_bit_binary(frame, |a, b| a ^ b, |a, b| a ^ b)?,
+                    Instruction::ShiftLeft => numeric_shift(frame, false)?,
+                    Instruction::ShiftRight => numeric_shift(frame, true)?,
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
                     }
-                    Instruction::Pow => binary(frame, |a, b| Value::Number(a.powf(b)))?,
+                    Instruction::Pow => numeric_binary(frame, |a, b| a.powf(b), integer_pow)?,
                     Instruction::Eq => compare(frame, equal)?,
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
-                    Instruction::Lt => order(frame, |a, b| a < b)?,
-                    Instruction::Le => order(frame, |a, b| a <= b)?,
-                    Instruction::Gt => order(frame, |a, b| a > b)?,
-                    Instruction::Ge => order(frame, |a, b| a >= b)?,
+                    Instruction::Lt => numeric_order(frame, |a, b| a < b, |a, b| a < b)?,
+                    Instruction::Le => numeric_order(frame, |a, b| a <= b, |a, b| a <= b)?,
+                    Instruction::Gt => numeric_order(frame, |a, b| a > b, |a, b| a > b)?,
+                    Instruction::Ge => numeric_order(frame, |a, b| a >= b, |a, b| a >= b)?,
                     Instruction::Contains => {
                         let target = pop(frame)?;
                         let needle = pop(frame)?;
@@ -2226,10 +2325,7 @@ impl Vm {
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
                         let start = pop(frame)?;
-                        let (Value::Number(start), Value::Number(end)) = (start, end) else {
-                            return Err(Error::runtime("range bounds must be numbers"));
-                        };
-                        frame.stack.push(numeric_range(start, end, *inclusive)?);
+                        frame.stack.push(range_values(start, end, *inclusive)?);
                         self.record_value_allocations(1);
                     }
                     Instruction::MakeMap(keys) => {
@@ -2241,7 +2337,9 @@ impl Vm {
                     }
                     Instruction::Stringify => {
                         let value = pop(frame)?;
-                        frame.stack.push(Value::String(Rc::from(value.to_string())));
+                        frame
+                            .stack
+                            .push(Value::String(Rc::from(string_value(&value))));
                         self.record_value_allocations(1);
                     }
                     Instruction::Concat(n) => {
@@ -2558,32 +2656,74 @@ fn number(v: Value) -> Result<f64, Error> {
     v.as_number()
         .ok_or_else(|| Error::runtime("expected number"))
 }
-fn numbers(xs: &[Value]) -> Result<(f64, f64), Error> {
-    if xs.len() != 2 {
-        return Err(Error::runtime("expected two numbers"));
-    }
-    Ok((number(xs[0].clone())?, number(xs[1].clone())?))
+enum Aggregate {
+    Sum,
+    Min,
+    Max,
 }
-fn numeric_array(xs: &[Value], name: &str) -> Result<Vec<f64>, Error> {
+fn aggregate_numeric(xs: &[Value], name: &str, aggregate: Aggregate) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime(format!("{name} expects one array")));
     }
     let Value::Array(values) = &xs[0] else {
         return Err(Error::runtime(format!("{name} expects an array")));
     };
-    values
-        .iter()
-        .map(|value| {
-            let value = number(value.clone())?;
-            if value.is_finite() {
-                Ok(value)
-            } else {
-                Err(Error::runtime(format!(
-                    "{name} expects finite numeric elements"
-                )))
-            }
-        })
-        .collect()
+    if values.is_empty() {
+        return if matches!(aggregate, Aggregate::Sum) {
+            Ok(Value::Number(0.))
+        } else {
+            Err(Error::runtime(format!("{name} expects a non-empty array")))
+        };
+    }
+    match &values[0] {
+        Value::Number(_) => {
+            let numbers = values
+                .iter()
+                .map(|value| match value {
+                    Value::Number(value) if value.is_finite() => Ok(*value),
+                    Value::Integer(_) => Err(Error::runtime(format!(
+                        "{name} cannot mix number and integer elements"
+                    ))),
+                    _ => Err(Error::runtime(format!(
+                        "{name} expects finite numeric elements"
+                    ))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = match aggregate {
+                Aggregate::Sum => numbers.into_iter().sum(),
+                Aggregate::Min => numbers.into_iter().reduce(f64::min).expect("non-empty"),
+                Aggregate::Max => numbers.into_iter().reduce(f64::max).expect("non-empty"),
+            };
+            Ok(Value::Number(value))
+        }
+        Value::Integer(_) => {
+            let integers = values
+                .iter()
+                .map(|value| match value {
+                    Value::Integer(value) => Ok(value.inner()),
+                    Value::Number(_) => Err(Error::runtime(format!(
+                        "{name} cannot mix number and integer elements"
+                    ))),
+                    _ => Err(Error::runtime(format!("{name} expects numeric elements"))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = match aggregate {
+                Aggregate::Sum => integers
+                    .into_iter()
+                    .fold(BigInt::zero(), |sum, value| sum + value),
+                Aggregate::Min => (*integers.into_iter().min().expect("non-empty")).clone(),
+                Aggregate::Max => (*integers.into_iter().max().expect("non-empty")).clone(),
+            };
+            Ok(Value::Integer(Rc::new(Integer::from_bigint(value)?)))
+        }
+        _ => Err(Error::runtime(format!("{name} expects numeric elements"))),
+    }
+}
+fn string_value(value: &Value) -> String {
+    match value {
+        Value::Integer(value) => value.to_decimal_string(),
+        value => value.to_string(),
+    }
 }
 fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> {
     if !start.is_finite()
@@ -2617,23 +2757,69 @@ fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> 
             .collect(),
     )))
 }
-fn array_iteration_step(value: Value) -> Result<i64, Error> {
-    let Value::Number(step) = value else {
-        return Err(Error::runtime(
-            "for by step must be a non-zero finite integer",
-        ));
-    };
-    if !step.is_finite()
-        || step.fract() != 0.
-        || step == 0.
-        || step < i64::MIN as f64
-        || step > i64::MAX as f64
-    {
-        return Err(Error::runtime(
-            "for by step must be a non-zero finite integer",
-        ));
+fn range_values(start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
+    match (start, end) {
+        (Value::Number(start), Value::Number(end)) => numeric_range(start, end, inclusive),
+        (Value::Integer(start), Value::Integer(end)) => {
+            let ascending = start <= end;
+            let mut count = if ascending {
+                end.inner() - start.inner()
+            } else {
+                start.inner() - end.inner()
+            };
+            if inclusive {
+                count += 1;
+            }
+            let count = count
+                .to_usize()
+                .filter(|count| *count <= MAX_RANGE_ITEMS as usize)
+                .ok_or_else(|| Error::runtime("range is too large"))?;
+            let mut current = start.inner().clone();
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                values.push(Value::Integer(Rc::new(Integer(current.clone()))));
+                if ascending {
+                    current += 1;
+                } else {
+                    current -= 1;
+                }
+            }
+            Ok(Value::Array(Rc::new(values)))
+        }
+        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => Err(
+            Error::runtime("range bounds cannot mix number and integer values"),
+        ),
+        _ => Err(Error::runtime(
+            "range bounds must have the same numeric type",
+        )),
     }
-    Ok(step as i64)
+}
+fn array_iteration_step(value: Value) -> Result<i64, Error> {
+    let step = match value {
+        Value::Number(step)
+            if step.is_finite()
+                && step.fract() == 0.
+                && step >= i64::MIN as f64
+                && step <= i64::MAX as f64 =>
+        {
+            step as i64
+        }
+        Value::Integer(step) => step
+            .as_i64()
+            .ok_or_else(|| Error::runtime("for by step must fit in a signed 64-bit integer"))?,
+        _ => {
+            return Err(Error::runtime(
+                "for by step must be a non-zero finite integer",
+            ));
+        }
+    };
+    if step == 0 {
+        Err(Error::runtime(
+            "for by step must be a non-zero finite integer",
+        ))
+    } else {
+        Ok(step)
+    }
 }
 fn advance_position(position: &mut usize, step: i64) {
     if step >= 0 {
@@ -2647,10 +2833,94 @@ fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
         .ok_or_else(|| Error::runtime("condition must be bool"))
 }
-fn binary(f: &mut Frame, op: impl Fn(f64, f64) -> Value) -> Result<(), Error> {
-    let (a, b) = numbers(&[pop(f)?, pop(f)?])?;
-    f.stack.push(op(b, a));
+fn push_integer(f: &mut Frame, value: BigInt) -> Result<(), Error> {
+    f.stack
+        .push(Value::Integer(Rc::new(Integer::from_bigint(value)?)));
     Ok(())
+}
+fn numeric_update(f: &mut Frame, increment: bool) -> Result<(), Error> {
+    match pop(f)? {
+        Value::Number(value) => f.stack.push(Value::Number(if increment {
+            value + 1.
+        } else {
+            value - 1.
+        })),
+        Value::Integer(value) => push_integer(
+            f,
+            if increment {
+                value.inner() + 1
+            } else {
+                value.inner() - 1
+            },
+        )?,
+        _ => return Err(Error::runtime("update operand must be number or integer")),
+    }
+    Ok(())
+}
+fn numeric_binary(
+    f: &mut Frame,
+    number_op: impl FnOnce(f64, f64) -> f64,
+    integer_op: impl FnOnce(&BigInt, &BigInt) -> Result<BigInt, Error>,
+) -> Result<(), Error> {
+    let b = pop(f)?;
+    let a = pop(f)?;
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => f.stack.push(Value::Number(number_op(a, b))),
+        (Value::Integer(a), Value::Integer(b)) => {
+            push_integer(f, integer_op(a.inner(), b.inner())?)?
+        }
+        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
+            return Err(Error::runtime("cannot mix number and integer operands"));
+        }
+        _ => {
+            return Err(Error::runtime(
+                "expected matching number or integer operands",
+            ));
+        }
+    }
+    Ok(())
+}
+fn integer_div(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+    if b.is_zero() {
+        Err(Error::runtime("integer division by zero"))
+    } else {
+        Ok(a / b)
+    }
+}
+fn integer_rem(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+    if b.is_zero() {
+        Err(Error::runtime("integer remainder by zero"))
+    } else {
+        Ok(a % b)
+    }
+}
+fn integer_floor_div(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+    let quotient = integer_div(a, b)?;
+    let remainder = a % b;
+    if !remainder.is_zero() && a.is_negative() != b.is_negative() {
+        Ok(quotient - 1)
+    } else {
+        Ok(quotient)
+    }
+}
+fn integer_modulo(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+    let remainder = integer_rem(a, b)?;
+    if !remainder.is_zero() && remainder.is_negative() != b.is_negative() {
+        Ok(remainder + b)
+    } else {
+        Ok(remainder)
+    }
+}
+fn integer_pow(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
+    let exponent = b
+        .to_u32()
+        .ok_or_else(|| Error::runtime("integer exponent must be a non-negative 32-bit integer"))?;
+    if a.bits().saturating_mul(u64::from(exponent)) > MAX_INTEGER_BITS {
+        return Err(Error::runtime(
+            "integer power exceeds the implementation size limit",
+        ));
+    }
+    Ok(a.pow(exponent))
 }
 fn bit_integer(value: Value) -> Result<i32, Error> {
     let value = number(value)?;
@@ -2664,10 +2934,31 @@ fn bit_integer(value: Value) -> Result<i32, Error> {
     }
     Ok(value as i32)
 }
-fn bit_binary(f: &mut Frame, op: impl Fn(i32, i32) -> i32) -> Result<(), Error> {
-    let b = bit_integer(pop(f)?)?;
-    let a = bit_integer(pop(f)?)?;
-    f.stack.push(Value::Number(op(a, b) as f64));
+fn numeric_bit_binary(
+    f: &mut Frame,
+    number_op: impl FnOnce(i32, i32) -> i32,
+    integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
+) -> Result<(), Error> {
+    let b = pop(f)?;
+    let a = pop(f)?;
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            let a = bit_integer(Value::Number(a))?;
+            let b = bit_integer(Value::Number(b))?;
+            f.stack.push(Value::Number(number_op(a, b) as f64));
+        }
+        (Value::Integer(a), Value::Integer(b)) => {
+            push_integer(f, integer_op(a.inner(), b.inner()))?
+        }
+        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
+            return Err(Error::runtime("cannot mix number and integer operands"));
+        }
+        _ => {
+            return Err(Error::runtime(
+                "bitwise operands must have the same numeric type",
+            ));
+        }
+    }
     Ok(())
 }
 fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
@@ -2681,15 +2972,85 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
+fn numeric_shift(f: &mut Frame, right: bool) -> Result<(), Error> {
+    let shift = pop(f)?;
+    let value = pop(f)?;
+    match (value, shift) {
+        (Value::Number(value), Value::Number(shift)) => {
+            let shift = bit_integer(Value::Number(shift))?;
+            if !(0..32).contains(&shift) {
+                return Err(Error::runtime(
+                    "shift count must be an integer from 0 to 31",
+                ));
+            }
+            let value = bit_integer(Value::Number(value))?;
+            let result = if right {
+                value.wrapping_shr(shift as u32)
+            } else {
+                value.wrapping_shl(shift as u32)
+            };
+            f.stack.push(Value::Number(result as f64));
+        }
+        (Value::Integer(value), Value::Integer(shift)) => {
+            let shift = shift.inner().to_usize().ok_or_else(|| {
+                Error::runtime("integer shift count must be a non-negative platform integer")
+            })?;
+            if shift as u64 > MAX_INTEGER_BITS {
+                return Err(Error::runtime(
+                    "integer shift exceeds the implementation size limit",
+                ));
+            }
+            if !right && value.inner().bits().saturating_add(shift as u64) > MAX_INTEGER_BITS {
+                return Err(Error::runtime(
+                    "integer shift exceeds the implementation size limit",
+                ));
+            }
+            push_integer(
+                f,
+                if right {
+                    value.inner() >> shift
+                } else {
+                    value.inner() << shift
+                },
+            )?;
+        }
+        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
+            return Err(Error::runtime("cannot mix number and integer operands"));
+        }
+        _ => {
+            return Err(Error::runtime(
+                "shift operands must have the same numeric type",
+            ));
+        }
+    }
+    Ok(())
+}
 fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
     f.stack.push(Value::Bool(op(&a, &b)));
     Ok(())
 }
-fn order(f: &mut Frame, op: impl Fn(f64, f64) -> bool) -> Result<(), Error> {
-    let (a, b) = numbers(&[pop(f)?, pop(f)?])?;
-    f.stack.push(Value::Bool(op(b, a)));
+fn numeric_order(
+    f: &mut Frame,
+    number_op: impl FnOnce(f64, f64) -> bool,
+    integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
+) -> Result<(), Error> {
+    let b = pop(f)?;
+    let a = pop(f)?;
+    let result = match (a, b) {
+        (Value::Number(a), Value::Number(b)) => number_op(a, b),
+        (Value::Integer(a), Value::Integer(b)) => integer_op(a.inner(), b.inner()),
+        (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
+            return Err(Error::runtime("cannot order number and integer values"));
+        }
+        _ => {
+            return Err(Error::runtime(
+                "ordered comparison expects matching numeric types",
+            ));
+        }
+    };
+    f.stack.push(Value::Bool(result));
     Ok(())
 }
 fn equal(a: &Value, b: &Value) -> bool {
@@ -2697,6 +3058,7 @@ fn equal(a: &Value, b: &Value) -> bool {
         (Value::Nil, Value::Nil) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => x == y,
+        (Value::Integer(x), Value::Integer(y)) => x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => {
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(a, b)| equal(a, b))
@@ -2879,14 +3241,22 @@ fn bind_pattern(
 }
 fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
     match (target, key) {
-        (Value::Array(xs), Value::Number(i)) if i.is_finite() && i.fract() == 0. => xs
-            .get(sequence_index(i, xs.len(), "array")?)
+        (Value::Array(xs), i @ (Value::Number(_) | Value::Integer(_))) => xs
+            .get(sequence_index(
+                integral_i128(&i, "array index")?,
+                xs.len(),
+                "array",
+            )?)
             .cloned()
             .ok_or_else(|| Error::runtime("array index out of range")),
-        (Value::String(text), Value::Number(i)) if i.is_finite() && i.fract() == 0. => {
+        (Value::String(text), i @ (Value::Number(_) | Value::Integer(_))) => {
             let character = text
                 .chars()
-                .nth(sequence_index(i, text.chars().count(), "string")?)
+                .nth(sequence_index(
+                    integral_i128(&i, "string index")?,
+                    text.chars().count(),
+                    "string",
+                )?)
                 .ok_or_else(|| Error::runtime("string index out of range"))?;
             vm.record_value_allocations(1);
             Ok(Value::String(Rc::from(character.to_string())))
@@ -2898,8 +3268,24 @@ fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
         _ => Err(Error::runtime("invalid index operation")),
     }
 }
-fn sequence_index(index: f64, len: usize, kind: &str) -> Result<usize, Error> {
-    let index = index as i128;
+fn integral_i128(value: &Value, name: &str) -> Result<i128, Error> {
+    match value {
+        Value::Number(value)
+            if value.is_finite()
+                && value.fract() == 0.
+                && *value >= i128::MIN as f64
+                && *value <= i128::MAX as f64 =>
+        {
+            Ok(*value as i128)
+        }
+        Value::Integer(value) => value
+            .inner()
+            .to_i128()
+            .ok_or_else(|| Error::runtime(format!("{name} is out of range"))),
+        _ => Err(Error::runtime(format!("{name} must be an integer value"))),
+    }
+}
+fn sequence_index(index: i128, len: usize, kind: &str) -> Result<usize, Error> {
     let len = len as i128;
     let resolved = if index < 0 { len + index } else { index };
     if resolved < 0 || resolved >= len {
@@ -2958,14 +3344,15 @@ fn slice(
     }
 }
 fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
-    let Value::Number(value) = value else {
-        return Err(Error::runtime(format!("{name} must be a finite integer")));
-    };
-    if !value.is_finite() || value.fract() != 0. || value < -(len as f64) || value > len as f64 {
+    let value = integral_i128(&value, name)?;
+    if value < -(len as i128) || value > len as i128 {
         return Err(Error::runtime(format!("{name} out of range")));
     }
-    let value = value as i64;
-    let index = if value < 0 { len as i64 + value } else { value };
+    let index = if value < 0 {
+        len as i128 + value
+    } else {
+        value
+    };
     usize::try_from(index).map_err(|_| Error::runtime(format!("{name} out of range")))
 }
 
@@ -3032,7 +3419,7 @@ mod tests {
             )
             .unwrap();
         let mut context = Context::new();
-        context.add_native("count_args", |args| Ok(Value::from(args.len() as i64)));
+        context.add_native("count_args", |args| Ok(Value::from(args.len() as f64)));
 
         assert_eq!(
             context.run_program(&mixed_calls).unwrap().to_string(),

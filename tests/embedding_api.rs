@@ -13,7 +13,7 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
     assert_eq!(program.fingerprint(), clone.fingerprint());
 
     let mut context = Context::new();
-    context.set_global("factor", Value::from(2_i64));
+    context.set_global("factor", Value::from(2_f64));
     context.add_native("host", |args| {
         let (Some(left), Some(right)) = (
             args.first().and_then(Value::as_number),
@@ -130,7 +130,7 @@ fn builder_embedding_surface_chains_host_configuration() {
         .compile_program("host(20, 22) * factor")
         .unwrap();
     let mut context = Context::new()
-        .with_global("factor", Value::from(2_i64))
+        .with_global("factor", Value::from(2_f64))
         .with_native("host", |args| {
             let (Some(left), Some(right)) = (
                 args.first().and_then(Value::as_number),
@@ -150,7 +150,7 @@ fn builder_embedding_surface_chains_host_configuration() {
 #[test]
 fn contexts_keep_builtin_binding_replacements_isolated() {
     let mut replaced = Context::new();
-    replaced.set_global("len", Value::from(42_i64));
+    replaced.set_global("len", Value::from(42_f64));
 
     let mut fresh = Context::new();
     assert_eq!(replaced.eval("len").unwrap().as_number(), Some(42.));
@@ -163,7 +163,7 @@ fn public_values_and_native_errors_are_structured() {
     context.set_global(
         "host_values",
         Value::map([
-            ("answer", Value::from(42_i64)),
+            ("answer", Value::from(42_f64)),
             ("items", Value::array(vec![Value::from("coffee")])),
         ]),
     );
@@ -253,7 +253,10 @@ fn compiled_program_source_maps_attribute_runtime_and_resource_errors() {
             column: Some(6),
         })
     );
-    assert_eq!(top_level.to_string(), "runtime error: expected number");
+    assert_eq!(
+        top_level.to_string(),
+        "runtime error: expected matching number or integer operands"
+    );
 
     let unicode = context
         .eval_named(NAME, "状态 = 1\n状态 + 'x'")
@@ -515,7 +518,7 @@ fn execution_stats_count_managed_value_and_environment_allocations() {
     assert_eq!(stats.value_allocations, 2);
     assert_eq!(stats.environment_allocations, 1);
 
-    context.add_native("host_array", |_| Ok(Value::array(vec![Value::from(1_i64)])));
+    context.add_native("host_array", |_| Ok(Value::array(vec![Value::from(1_f64)])));
     assert_eq!(
         context
             .eval("host_array()")
@@ -583,4 +586,11 @@ fn cancellation_token_stops_runs_before_execution_and_can_be_replaced() {
 
     context.clear_cancellation_token();
     assert_eq!(context.eval("1 + 2").unwrap().as_number(), Some(3.));
+}
+
+#[test]
+fn signed_host_integers_cross_the_embedding_boundary_exactly() {
+    let value = Value::from(i64::MAX);
+    assert_eq!(value.kind(), quickcoffee::ValueKind::Integer);
+    assert_eq!(value.as_integer().unwrap().as_i64(), Some(i64::MAX));
 }

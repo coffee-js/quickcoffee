@@ -600,6 +600,16 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     );
     assert!(value.stderr.is_empty());
 
+    let integer = Command::new(bin("qcoffee"))
+        .args(["--json", "-e", "9007199254740993n"])
+        .output()
+        .unwrap();
+    assert!(integer.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&integer.stdout),
+        "{\"ok\":true,\"value\":{\"$quickcoffee\":\"integer\",\"value\":\"9007199254740993\"}}\n"
+    );
+
     let function = Command::new(bin("qcoffee"))
         .args(["--json", "-e", "(x) -> x"])
         .output()
@@ -734,6 +744,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "existence-tests",
         "existential-assignment",
         "name-updates",
+        "exact-integer-updates",
         "floor-modulo",
         "bitwise",
         "multiline-strings",

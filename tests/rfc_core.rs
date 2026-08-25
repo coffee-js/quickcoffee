@@ -17,6 +17,57 @@ fn arithmetic_precedence_and_arrays() {
     assert!(Context::new().eval("1.5 & 1").is_err());
 }
 #[test]
+fn exact_integer_literals_operations_and_numeric_boundaries() {
+    let value = eval("9007199254740993n + 7n");
+    assert_eq!(
+        value.as_integer().unwrap().to_decimal_string(),
+        "9007199254741000"
+    );
+    assert!(
+        !compile("1n + 2n")
+            .unwrap()
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::Add))
+    );
+    assert_eq!(eval("[0xffn, 0b101n, 0o10n]").to_string(), "[255n, 5n, 8n]");
+    assert_eq!(
+        eval("[-7n / 3n, -7n // 3n, -7n % 3n, -7n %% 3n]").to_string(),
+        "[-2n, -3n, -1n, 2n]"
+    );
+    assert_eq!(
+        eval("[2n ** 10n, ~0n, 5n << 3n, -8n >> 2n]").to_string(),
+        "[1024n, -1n, 40n, -2n]"
+    );
+    assert_eq!(
+        eval("[1n == 1n, 1n == 1, 1n < 2n]").to_string(),
+        "[true, false, true]"
+    );
+    assert_eq!(eval("[1n..3n]").to_string(), "[1n, 2n, 3n]");
+    assert_eq!(
+        eval("[['a', 'b', 'c'][1n], str(42n), type(42n)]").to_string(),
+        "[b, 42, integer]"
+    );
+    assert_eq!(eval("\"value #{42n}\"").to_string(), "value 42");
+    assert_eq!(
+        eval("[sum([1n, 2n]), min([3n, -1n]), abs(-5n)]").to_string(),
+        "[3n, -1n, 5n]"
+    );
+    assert_eq!(eval("[integer(42), number(42n)]").to_string(), "[42n, 42]");
+    assert_eq!(
+        eval("value = 4n\n[value++, value, --value]").to_string(),
+        "[4n, 5n, 4n]"
+    );
+
+    assert!(Context::new().eval("1n + 1").is_err());
+    assert!(Context::new().eval("1n < 2").is_err());
+    assert!(Context::new().eval("1n >>> 1n").is_err());
+    assert!(Context::new().eval("1.5n").is_err());
+    assert!(Context::new().eval("1e3n").is_err());
+    assert!(Context::new().eval("number(9007199254740992n)").is_err());
+    assert!(Context::new().eval("1n / 0n").is_err());
+}
+#[test]
 fn destructuring_pattern_defaults_are_dynamic_and_atomic() {
     assert_eq!(
         eval("[first = 1, second = first + 1] = [nil]\nsecond").as_number(),
@@ -126,7 +177,7 @@ fn embedding_execution_stats_cover_success_runtime_error_and_fuel() {
 #[test]
 fn embedding_context_can_adjust_fuel_without_losing_globals() {
     let mut context = Context::new().with_fuel(5);
-    context.set_global("answer", Value::from(42_i64));
+    context.set_global("answer", Value::from(42_f64));
     assert_eq!(context.fuel(), 5);
     assert!(context.eval("while true then answer").is_err());
     context.set_fuel(100);
@@ -893,9 +944,9 @@ fn host_function_embedding_is_deliberate_and_small() {
     assert_eq!(cx.eval("answer()").unwrap().as_number(), Some(42.));
     cx.set_global(
         "host_array",
-        Value::array(vec![Value::from(40_i64), Value::from(2_i64)]),
+        Value::array(vec![Value::from(40_f64), Value::from(2_f64)]),
     );
-    cx.set_global("host_map", Value::map([("answer", Value::from(42_i64))]));
+    cx.set_global("host_map", Value::map([("answer", Value::from(42_f64))]));
     assert_eq!(
         cx.eval("host_array[0] + host_array[1]")
             .unwrap()
@@ -910,14 +961,14 @@ fn host_function_embedding_is_deliberate_and_small() {
     assert!(cx.get_global("missing").is_none());
     assert_eq!(Value::string("coffee").as_str(), Some("coffee"));
     assert_eq!(
-        Value::array(vec![Value::from(1_i64)])
+        Value::array(vec![Value::from(1_f64)])
             .as_array()
             .unwrap()
             .len(),
         1
     );
     assert_eq!(
-        Value::map([("x", Value::from(1_i64))])
+        Value::map([("x", Value::from(1_f64))])
             .as_map()
             .unwrap()
             .len(),

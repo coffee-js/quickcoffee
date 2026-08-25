@@ -740,6 +740,7 @@ impl Parser {
             self.tokens.get(index),
             Some(
                 Token::Number(_)
+                    | Token::Integer(_, _)
                     | Token::String(_, _)
                     | Token::Ident(_)
                     | Token::True
@@ -797,6 +798,7 @@ impl Parser {
             self.tokens.get(index),
             Some(
                 Token::Number(_)
+                    | Token::Integer(_, _)
                     | Token::String(_, _)
                     | Token::Ident(_)
                     | Token::True
@@ -854,6 +856,7 @@ impl Parser {
         let span = self.spans[self.at];
         match self.next() {
             Token::Number(n) => Ok(Expr::Number(n)),
+            Token::Integer(digits, radix) => Ok(Expr::Integer(digits, radix)),
             Token::String(s, interpolate) => {
                 if interpolate && s.contains("#{") {
                     self.interpolated_string(s)
