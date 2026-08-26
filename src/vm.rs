@@ -1401,6 +1401,14 @@ fn value_needs_resource_check(value: &Value) -> bool {
     !matches!(value, Value::Nil | Value::Bool(_) | Value::Number(_))
 }
 
+#[inline(never)]
+fn check_member_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+    if value_needs_resource_check(value) {
+        check_value_resources(value, limits)?;
+    }
+    Ok(())
+}
+
 fn decimal_limits_active(limits: ResourceLimits) -> bool {
     decimal_coefficient_bit_limit(limits) < MAX_DECIMAL_BITS
         || decimal_scale_limit(limits) < MAX_DECIMAL_SCALE
@@ -4697,9 +4705,7 @@ impl Vm {
                     Instruction::Member(name) => {
                         let target = pop(frame)?;
                         let value = member_value(target, name, false)?;
-                        if self.value_limits_active && value_needs_resource_check(&value) {
-                            check_value_resources(&value, self.resource_limits)?;
-                        }
+                        check_member_value_resources(&value, self.resource_limits)?;
                         if matches!(value, Value::Function(_)) {
                             self.record_value_allocations(1);
                         }
