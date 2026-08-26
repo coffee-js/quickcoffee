@@ -113,7 +113,7 @@ fn evaluate_rule() -> Result<(), Error> {
 }
 ```
 
-生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载见[模块示例](examples/modules.rs)。
+生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载见[模块示例](examples/modules.rs)。
 
 ## 当前状态与已知缺口
 
@@ -156,4 +156,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0141](RFCs/0141-restricted-cli-module-execution.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0142](RFCs/0142-strict-embedding-value-conversions.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

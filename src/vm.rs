@@ -976,6 +976,23 @@ pub enum Value {
     /// An opaque bytecode or native function.
     Function(Rc<Function>),
 }
+
+/// Converts one host value into an immutable QuickCoffee [`Value`] without
+/// applying language-level coercion.
+pub trait IntoValue {
+    /// Consumes this host value and returns its exact QuickCoffee counterpart.
+    fn into_value(self) -> Value;
+}
+
+/// Strictly converts an immutable QuickCoffee [`Value`] into an owned host value.
+///
+/// Implementations never coerce between `Number`, `Integer`, and `Decimal`.
+/// Container implementations recursively convert every child and return a
+/// stable runtime error that identifies the first failing path.
+pub trait TryFromValue: Sized {
+    /// Converts `value`, or returns a stable type-mismatch runtime error.
+    fn try_from_value(value: &Value) -> Result<Self, Error>;
+}
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1170,6 +1187,205 @@ impl From<String> for Value {
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Self::string(value)
+    }
+}
+
+impl IntoValue for Value {
+    fn into_value(self) -> Value {
+        self
+    }
+}
+impl IntoValue for () {
+    fn into_value(self) -> Value {
+        Value::Nil
+    }
+}
+impl IntoValue for bool {
+    fn into_value(self) -> Value {
+        Value::Bool(self)
+    }
+}
+impl IntoValue for f64 {
+    fn into_value(self) -> Value {
+        Value::Number(self)
+    }
+}
+impl IntoValue for Integer {
+    fn into_value(self) -> Value {
+        Value::Integer(Rc::new(self))
+    }
+}
+impl IntoValue for Decimal {
+    fn into_value(self) -> Value {
+        Value::Decimal(Rc::new(self))
+    }
+}
+impl IntoValue for String {
+    fn into_value(self) -> Value {
+        Value::string(self)
+    }
+}
+impl IntoValue for &str {
+    fn into_value(self) -> Value {
+        Value::string(self)
+    }
+}
+impl<T> IntoValue for Vec<T>
+where
+    T: IntoValue,
+{
+    fn into_value(self) -> Value {
+        Value::array(
+            self.into_iter()
+                .map(IntoValue::into_value)
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+impl<T> IntoValue for BTreeMap<String, T>
+where
+    T: IntoValue,
+{
+    fn into_value(self) -> Value {
+        Value::map(
+            self.into_iter()
+                .map(|(key, value)| (key, value.into_value())),
+        )
+    }
+}
+impl<T> IntoValue for Option<T>
+where
+    T: IntoValue,
+{
+    fn into_value(self) -> Value {
+        self.map_or(Value::Nil, IntoValue::into_value)
+    }
+}
+
+impl TryFromValue for Value {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        Ok(value.clone())
+    }
+}
+impl TryFromValue for () {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        matches!(value, Value::Nil)
+            .then_some(())
+            .ok_or_else(|| value_type_error("nil", value))
+    }
+}
+impl TryFromValue for bool {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        value
+            .as_bool()
+            .ok_or_else(|| value_type_error("bool", value))
+    }
+}
+impl TryFromValue for f64 {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        value
+            .as_number()
+            .ok_or_else(|| value_type_error("number", value))
+    }
+}
+impl TryFromValue for Integer {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        value
+            .as_integer()
+            .cloned()
+            .ok_or_else(|| value_type_error("integer", value))
+    }
+}
+impl TryFromValue for Decimal {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        value
+            .as_decimal()
+            .cloned()
+            .ok_or_else(|| value_type_error("decimal", value))
+    }
+}
+impl TryFromValue for String {
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| value_type_error("string", value))
+    }
+}
+impl<T> TryFromValue for Vec<T>
+where
+    T: TryFromValue,
+{
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        let values = value
+            .as_array()
+            .ok_or_else(|| value_type_error("array", value))?;
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                T::try_from_value(value)
+                    .map_err(|error| conversion_path_error(format!("[{index}]"), error))
+            })
+            .collect()
+    }
+}
+impl<T> TryFromValue for BTreeMap<String, T>
+where
+    T: TryFromValue,
+{
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        let values = value
+            .as_map()
+            .ok_or_else(|| value_type_error("map", value))?;
+        values
+            .iter()
+            .map(|(key, value)| {
+                T::try_from_value(value)
+                    .map(|value| (key.clone(), value))
+                    .map_err(|error| conversion_path_error(format!(".{key}"), error))
+            })
+            .collect()
+    }
+}
+impl<T> TryFromValue for Option<T>
+where
+    T: TryFromValue,
+{
+    fn try_from_value(value: &Value) -> Result<Self, Error> {
+        if value.is_nil() {
+            Ok(None)
+        } else {
+            T::try_from_value(value).map(Some)
+        }
+    }
+}
+
+fn value_type_error(expected: &str, value: &Value) -> Error {
+    Error::runtime(format!(
+        "expected {expected}, got {}",
+        value_kind_name(value)
+    ))
+}
+
+fn conversion_path_error(path: String, error: Error) -> Error {
+    Error::runtime(format!("value at {path}: {}", error.message()))
+}
+
+fn value_kind_name(value: &Value) -> &'static str {
+    match value.kind() {
+        ValueKind::Nil => "nil",
+        ValueKind::Bool => "bool",
+        ValueKind::Number => "number",
+        ValueKind::Integer => "integer",
+        ValueKind::Decimal => "decimal",
+        ValueKind::String => "string",
+        ValueKind::Array => "array",
+        ValueKind::Map => "map",
+        ValueKind::Error => "error",
+        ValueKind::Class => "class",
+        ValueKind::Instance => "instance",
+        ValueKind::Function => "function",
     }
 }
 

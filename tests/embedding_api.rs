@@ -1,7 +1,8 @@
 use quickcoffee::{
-    CancellationToken, Context, DiagnosticLabelKind, Engine, Error, ErrorKind, ResourceLimit,
-    ResourceLimits, Value, ValueKind,
+    CancellationToken, Context, Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, Integer,
+    IntoValue, ResourceLimit, ResourceLimits, TryFromValue, Value, ValueKind,
 };
+use std::collections::BTreeMap;
 
 #[test]
 fn public_embedding_surface_runs_shared_programs_with_host_state() {
@@ -31,6 +32,72 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
     assert_eq!(context.run_program(&clone).unwrap().as_number(), Some(84.));
     assert_eq!(context.get_global("factor").unwrap().as_number(), Some(2.));
     assert!(context.get_global("missing").is_none());
+}
+
+#[test]
+fn strict_host_value_conversions_are_recursive_and_non_coercing() {
+    let input = BTreeMap::from([(
+        "names".to_owned(),
+        vec![Some("coffee".to_owned()), None, Some("tea".to_owned())],
+    )]);
+    let value = input.clone().into_value();
+    assert_eq!(value.kind(), ValueKind::Map);
+    assert_eq!(
+        BTreeMap::<String, Vec<Option<String>>>::try_from_value(&value).unwrap(),
+        input
+    );
+    assert!(().into_value().is_nil());
+    assert_eq!(Option::<String>::try_from_value(&Value::Nil).unwrap(), None);
+    assert_eq!(
+        Option::<String>::try_from_value(&Value::from("coffee")).unwrap(),
+        Some("coffee".to_owned())
+    );
+
+    let integer = Integer::from(9007199254740993_i64);
+    let decimal = Decimal::from(123_i64);
+    assert_eq!(
+        Integer::try_from_value(&integer.clone().into_value()).unwrap(),
+        integer
+    );
+    assert_eq!(
+        Decimal::try_from_value(&decimal.clone().into_value()).unwrap(),
+        decimal
+    );
+    assert_eq!(f64::try_from_value(&Value::from(1_f64)).unwrap(), 1.);
+
+    for value in [
+        Value::integer(1_i64),
+        Decimal::from(1_i64).into_value(),
+        Value::from("1"),
+    ] {
+        let error = f64::try_from_value(&value).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Runtime);
+        assert!(error.message().starts_with("expected number, got "));
+    }
+    assert_eq!(
+        Integer::try_from_value(&Value::from(1_f64))
+            .unwrap_err()
+            .message(),
+        "expected integer, got number"
+    );
+    assert_eq!(
+        Decimal::try_from_value(&Value::integer(1_i64))
+            .unwrap_err()
+            .message(),
+        "expected decimal, got integer"
+    );
+
+    let nested = Value::map([(
+        "settings",
+        Value::array(vec![Value::from(true), Value::from("no")]),
+    )]);
+    let error = BTreeMap::<String, Vec<bool>>::try_from_value(&nested).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(
+        error.message(),
+        "value at .settings: value at [1]: expected bool, got string"
+    );
+    assert!(Vec::<bool>::try_from_value(&Value::from("not an array")).is_err());
 }
 
 #[test]

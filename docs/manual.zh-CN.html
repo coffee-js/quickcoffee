@@ -7,6 +7,7 @@
 <p>嵌入模块可写 import { public as local } from 'name' 与 export；Engine::compile_module 和 Context::run_module 只经宿主 ModuleLoader 取源码，模块全局私有且整张图共享 fuel。</p>
 <p>qcoffee --module-root ROOT ENTRY 只为本次执行显式授予一个受限文件模块根；ENTRY 相对根目录，导入仍须 ./ 或 ../，成功输出排序后的导出 Map（JSON 为 exports 记录）。fuel、stats 与 argv 可用；单文件、stdin、-e、REPL、check、反汇编和指纹模式绝不取得此能力。</p>
 <p>嵌入宿主可用 Context::with_fuel、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。</p>
+<p>IntoValue 与 TryFromValue 可递归转换拥有型宿主标量、Vec、BTreeMap&lt;String, T&gt; 与 Option，不执行脚本；只有 nil 映射为 None，Number、Integer、Decimal 及其他类别之间绝不 coercion。</p>
 <p>qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。</p>
 <p>qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。</p>
 <p>qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。</p>
