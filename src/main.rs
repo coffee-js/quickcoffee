@@ -1,6 +1,6 @@
 //! Command-line entry point for the `qcoffee` interpreter.
 
-use quickcoffee::{Context, Engine, Error, Value};
+use quickcoffee::{Context, Engine, Error, RestrictedFileModuleLoader, Value};
 use std::{
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
@@ -9,7 +9,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -136,6 +136,13 @@ fn json_io_error(stage: &str, message: &str) -> String {
         json_escape(message)
     )
 }
+fn module_exports_value(exports: &quickcoffee::ModuleExports) -> Value {
+    Value::map(
+        exports
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.clone())),
+    )
+}
 fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
     let stdin = io::stdin();
     let show_prompt = stdin.is_terminal() && io::stdout().is_terminal();
@@ -223,6 +230,8 @@ fn main() -> ExitCode {
     let mut json = false;
     let mut interactive = false;
     let mut quit = false;
+    let mut module_root = None;
+    let mut module_entry = None;
     let mut script_args = vec![];
     while let Some(arg) = args.next() {
         if quit {
@@ -264,6 +273,8 @@ fn main() -> ExitCode {
                     || stats
                     || json
                     || interactive
+                    || module_root.is_some()
+                    || module_entry.is_some()
                 {
                     eprintln!("--quit cannot be combined with execution options or a source");
                     return ExitCode::from(2);
@@ -271,7 +282,15 @@ fn main() -> ExitCode {
                 quit = true;
             }
             "-e" => match args.next() {
-                Some(s) if source.is_none() && !dump && !check && !fingerprint => source = Some(s),
+                Some(s)
+                    if source.is_none()
+                        && module_root.is_none()
+                        && !dump
+                        && !check
+                        && !fingerprint =>
+                {
+                    source = Some(s)
+                }
                 Some(_) => {
                     eprintln!("-e cannot be combined with another source or execution mode");
                     return ExitCode::from(2);
@@ -286,7 +305,13 @@ fn main() -> ExitCode {
                     eprintln!("--json cannot be combined with --dump-bytecode");
                     return ExitCode::from(2);
                 }
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some()
+                    || module_root.is_some()
+                    || dump
+                    || check
+                    || fingerprint
+                    || stats
+                {
                     eprintln!(
                         "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
@@ -320,7 +345,13 @@ fn main() -> ExitCode {
                     eprintln!("--json cannot be combined with --check");
                     return ExitCode::from(2);
                 }
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some()
+                    || module_root.is_some()
+                    || dump
+                    || check
+                    || fingerprint
+                    || stats
+                {
                     eprintln!(
                         "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
@@ -353,7 +384,13 @@ fn main() -> ExitCode {
                     eprintln!("--json cannot be combined with --fingerprint");
                     return ExitCode::from(2);
                 }
-                if source.is_some() || dump || check || fingerprint || stats {
+                if source.is_some()
+                    || module_root.is_some()
+                    || dump
+                    || check
+                    || fingerprint
+                    || stats
+                {
                     eprintln!(
                         "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
@@ -382,7 +419,28 @@ fn main() -> ExitCode {
                     }
                 }
             }
-            "-" if source.is_none() => match read_source("-") {
+            "--module-root" => {
+                if source.is_some()
+                    || module_root.is_some()
+                    || dump
+                    || check
+                    || fingerprint
+                    || interactive
+                {
+                    eprintln!(
+                        "--module-root cannot be combined with another source or execution mode"
+                    );
+                    return ExitCode::from(2);
+                }
+                match args.next() {
+                    Some(root) => module_root = Some(root),
+                    None => {
+                        eprintln!("--module-root requires a directory");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "-" if source.is_none() && module_root.is_none() => match read_source("-") {
                 Ok(text) => {
                     source = Some(text);
                     source_name = Some("-".to_owned());
@@ -396,20 +454,25 @@ fn main() -> ExitCode {
                     return ExitCode::from(1);
                 }
             },
-            path if !path.starts_with('-') && source.is_none() => match read_source(path) {
-                Ok(text) => {
-                    source = Some(text);
-                    source_name = Some(path.to_owned());
-                }
-                Err(error) => {
-                    if json {
-                        println!("{}", json_io_error("read", &error));
-                    } else {
-                        eprintln!("{error}");
+            path if !path.starts_with('-') && module_root.is_some() && module_entry.is_none() => {
+                module_entry = Some(path.to_owned());
+            }
+            path if !path.starts_with('-') && source.is_none() && module_root.is_none() => {
+                match read_source(path) {
+                    Ok(text) => {
+                        source = Some(text);
+                        source_name = Some(path.to_owned());
                     }
-                    return ExitCode::from(1);
+                    Err(error) => {
+                        if json {
+                            println!("{}", json_io_error("read", &error));
+                        } else {
+                            eprintln!("{error}");
+                        }
+                        return ExitCode::from(1);
+                    }
                 }
-            },
+            }
             _ => {
                 usage();
                 return ExitCode::from(2);
@@ -427,13 +490,99 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     if interactive {
-        if source.is_some() || check || dump || fingerprint || json {
+        if source.is_some() || module_root.is_some() || check || dump || fingerprint || json {
             eprintln!(
                 "--interactive cannot be combined with a source, --check, --dump-bytecode, --fingerprint, or --json"
             );
             return ExitCode::from(2);
         }
         return repl(fuel, script_args, stats);
+    }
+    if let Some(root) = module_root {
+        let Some(entry) = module_entry else {
+            eprintln!("--module-root requires an entry module");
+            return ExitCode::from(2);
+        };
+        if stats && (dump || check || fingerprint) {
+            eprintln!(
+                "--check, --dump-bytecode, --fingerprint, and --stats are execution-mode alternatives"
+            );
+            return ExitCode::from(2);
+        }
+        let loader = match RestrictedFileModuleLoader::new(&root) {
+            Ok(loader) => loader,
+            Err(error) => {
+                if json {
+                    println!("{}", json_error(&error));
+                } else {
+                    eprintln!("{error}");
+                }
+                return ExitCode::from(1);
+            }
+        };
+        let source = match loader.load_entry(&entry) {
+            Ok(source) => source,
+            Err(error) => {
+                if json {
+                    println!("{}", json_error(&error));
+                } else {
+                    eprintln!("{error}");
+                }
+                return ExitCode::from(1);
+            }
+        };
+        let module = match Engine::new().compile_module(source.name(), source.source()) {
+            Ok(module) => module,
+            Err(error) => {
+                if json {
+                    println!("{}", json_error(&error));
+                } else {
+                    eprintln!("{error}");
+                }
+                return ExitCode::from(1);
+            }
+        };
+        let mut context = Context::new().with_fuel(fuel);
+        context.set_global(
+            "argv",
+            Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
+        );
+        let result = context.run_module(&module, &loader);
+        if stats {
+            let execution = context.last_execution();
+            eprintln!(
+                "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
+                execution.instructions,
+                execution.fuel_remaining,
+                execution.name_loads,
+                execution.name_stores,
+                execution.calls,
+                execution.container_ops,
+                execution.iterator_ops,
+                execution.exception_ops,
+                execution.value_allocations,
+                execution.environment_allocations
+            );
+        }
+        return match result {
+            Ok(exports) => {
+                let exports = module_exports_value(&exports);
+                if json {
+                    println!("{{\"ok\":true,\"exports\":{}}}", json_value(&exports));
+                } else {
+                    println!("{exports}");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                if json {
+                    println!("{}", json_error(&error));
+                } else {
+                    eprintln!("{error}");
+                }
+                ExitCode::from(1)
+            }
+        };
     }
     let Some(source) = source else {
         usage();

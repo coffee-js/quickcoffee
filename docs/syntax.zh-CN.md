@@ -54,7 +54,7 @@
 
 `for` 的绑定可用严格递归模式：`for [left, right] in pairs then left + right`、`for own _, value of record then value` 均可。模式不匹配是运行时错误，且本轮绑定绝不部分写入。
 
-模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。宿主可显式构造 `RestrictedFileModuleLoader`，只读取一个规范根目录内的 UTF-8 `.qc` 文件；依赖必须使用 `./` 或 `../`，省略扩展名时补 `.qc`，绝对/bare 名、平台专用分隔符、词法越界及符号链接逃逸均拒绝。`qcoffee` CLI 暂不解析模块路径。
+模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。宿主可显式构造 `RestrictedFileModuleLoader`，只读取一个规范根目录内的 UTF-8 `.qc` 文件；依赖必须使用 `./` 或 `../`，省略扩展名时补 `.qc`，绝对/bare 名、平台专用分隔符、词法越界及符号链接逃逸均拒绝。CLI 仅可用 `qcoffee --module-root ROOT ENTRY` 显式启用同一能力：成功时输出按名称排序的导出 Map，`--json` 输出 `exports`；该模式可配合 fuel、stats 和 `argv`，但与单文件、stdin、`-e`、REPL、check、反汇编和指纹模式互斥，普通 CLI 运行不会隐式读取模块。
 
 名称亦支持前置、后置数值更新：`next = ++counter` 产生更新后的值，`previous = counter--` 先产生旧值再减一。`++`、`--` 只接受名称并使用严格数值运算；成员、索引和解构形式在解析阶段拒绝。
 

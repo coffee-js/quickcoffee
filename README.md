@@ -60,7 +60,7 @@ print counter.increment()
 | 配置归并、表单/事件数据整形 | 适合 | 有不可变数组/Map、spread、解构、推导、Unicode 字符串和精确 JSON。 |
 | class 形式的业务模型 | 适合 | 支持构造、继承、覆盖、`super` 和安全逸出的 receiver-bound `=>`。 |
 | 受控嵌入式策略/插件 | 条件适合 | 宿主可注入全局值/原生函数，并设置 fuel、调用深度、数据资源限制和取消。 |
-| 多文件 CLI 应用 | 尚不适合 | 模块仅通过嵌入 API 显式加载；CLI 不会解析或加载模块依赖。 |
+| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.qc` 模块图；尚无模块包或模块图指纹。 |
 | HTTP、文件 I/O、异步任务、定时调度 | 尚不适合 | 语言没有隐式环境能力、事件循环或异步语法；这些应由宿主以明确 capability 提供。 |
 | 直接替换 JavaScript/CoffeeScript 项目 | 不适合 | 语义刻意不同，且缺少正则、日期时间、字节/流、生成器等能力。 |
 
@@ -88,6 +88,7 @@ QuickCoffee 已提供：
 | 执行表达式 | `qcoffee -e "print(1 + 2)"` |
 | 执行文件并传参 | `qcoffee script.qc -- first second`（脚本中读取 `argv`） |
 | 从标准输入执行 | `qcoffee - < script.qc` |
+| 运行受限模块图 | `qcoffee --module-root modules app/main -- first` |
 | 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
 | 只检查、不执行 | `qcoffee --check script.qc` |
 | 稳定 JSON 输出 | `qcoffee --json script.qc` |
@@ -120,7 +121,7 @@ QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode �
 
 但它仍处于实验性 0.1：
 
-- CLI 模式没有模块包、模块图指纹或模块加载；受限文件模块 loader 仅供嵌入宿主使用。
+- CLI 已支持显式根目录的受限模块加载，但仍没有模块包或模块图指纹；普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
 - 尚无完整内存预算、生命周期隔离或稳定的 capability table；这些由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 和 [#77](https://github.com/coffee-js/quickcoffee/issues/77) 跟踪。
 - 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
 - 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
@@ -155,4 +156,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0140](RFCs/0140-resource-bounded-stable-scalar-sort.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0141](RFCs/0141-restricted-cli-module-execution.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
