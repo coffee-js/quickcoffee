@@ -142,7 +142,13 @@ issue #150 加入 `class-bound-callback`：实例方法创建并返回一个 rec
 
 issue #157 仅复用已正常返回或因可捕获错误退栈的 callee 值栈：值先清空，线程本地只保留一个缓冲，容量硬限 64；顶层帧不进入池，递归层级也不会各自长期保留缓冲。它不改变 `Vm`/`Frame` 公开布局、字节码、fuel/cancellation 检查、错误、调用深度或确定性 profile 计数，且不同 Context 只能复用已清空容量，不能观察值。
 
-同机 2,000 iterations / repeat 11 初测中，`call-containing-local-loop` execute 从 `45.667 ms` 降至 `42.005 ms`（改善 **8.0%**）；独立 qcompare 11 样本的 `function-loop` hot 从 `111.940 ms` 降至 `98.887 ms`（改善 **11.7%**），其他 qcompare collection/Unicode 路径无目标性变化。相同 100-run 采样的总样本从 11,325 降至 10,246，`grow_one` 不再进入前 30 个 inclusive 热点，`Frame` 析构降至 6.8%，新增回收本身为 1.6%。这些本地结果仍须由 PR 的 Linux AB/BA 报告确认；任何可重复的非目标回退都阻止保留该优化。
+同机 2,000 iterations / repeat 11 初测中，`call-containing-local-loop` execute 从 `45.667 ms` 降至 `42.005 ms`（改善 **8.0%**）；独立 qcompare 11 样本的 `function-loop` hot 从 `111.940 ms` 降至 `98.887 ms`（改善 **11.7%**），其他 qcompare collection/Unicode 路径无目标性变化。相同 100-run 采样的总样本从 11,325 降至 10,246，`grow_one` 不再进入前 30 个 inclusive 热点，`Frame` 析构降至 6.8%，新增回收本身为 1.6%。PR #158 的 Linux x86_64 配对报告中，目标 execute 从 `54.399 ms` 到 `54.168 ms`（改善 0.43%；AB -0.03%，BA -0.82%），196 个 phase comparison 为零告警。因此该收益明确记录为 Apple arm64 上显著、Linux runner 上中性至轻微改善，而不是跨平台同幅加速。
+
+### issue #159 小参数 receiver-bound 调用栈切片
+
+在 `17fbe51` 上重新比较 class 护栏后，2,000 iterations / repeat 11 的 `class-construction-dispatch`、`class-inherited-super-dispatch` 与 `class-bound-callback` execute 分别为 `313.112 ms`、`212.924 ms` 与 `136.267 ms`。带完整符号的 10,000-iteration 构造负载采样取得 1,943 个纯执行路径样本，其中 `libsystem_malloc` 主分配路径占 16.5% inclusive，`call_with_context` 占 7.4%，直接成员调用占 5.4%。普通 `BoundMethod` 与捕获 receiver 的 `ReceiverBound` 原先都会另建 `Vec<Value>`，仅用于把 receiver 前置到已收集参数。
+
+issue #159 对 0、1、2 个显式参数使用栈上固定数组，更多参数仍走原有 heap fallback；构造器、实例/静态方法、`super` 和逸出 `=>` 共用同一入口。Apple arm64 上按 base→candidate→candidate→base 交替采样后，构造/dispatch 从 `306.356 ms` 到 `286.151 ms`（改善 **6.6%**），继承/super 从 `209.688 ms` 到 `185.721 ms`（改善 **11.4%**），绑定回调从 `134.696 ms` 到 `120.234 ms`（改善 **10.7%**）。指令、调用深度、名称读写、调用、容器操作、托管值和逻辑环境分配 profile 逐字段不变；修改后采样中同一 `libsystem_malloc` 主路径降至 14.1%，另一条 allocator 路径从 11.6% 降至 8.5%。最终保留仍以 PR 的完整 CI 与 Linux AB/BA 零回退告警为门槛。
 
 `scripts/qbench_compare.py` 要求每个负载恰好包含一组 AB 与一组 BA、序号连续、pair 完整且迭代数/样本数/期望值一致。每个 phase 先分别计算两组 candidate-base 效应，再以配对中位数作为审阅效应。只有聚合效应以及 AB、BA 两个方向各自都超过 `max(5% × baseline, 3 × (base MAD + candidate MAD), 0.1 ms)` 才产生 warning；配对差值 MAD、AB/BA 全局中位数、未配对 side 中位数及正向负载数用于诊断，不从单项结果中扣除，因此不会隐藏真实的全局回退。
 

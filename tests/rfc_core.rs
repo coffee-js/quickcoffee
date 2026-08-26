@@ -1704,6 +1704,14 @@ fn classes_construct_dedicated_instances_with_confined_receivers() {
     assert!(format!("{chunk:?}").contains("SetMember"));
 }
 #[test]
+fn receiver_bound_calls_preserve_stack_and_heap_argument_arities() {
+    assert_eq!(
+        eval("class Base\n  constructor: (@a, @b, @c, @d, @e) ->\n  zero: -> @a\n  one: (value) -> @b + value\n  two: (left, right) -> @c + left + right\n  many: (a, b, c, d, e) -> @d + a + b + c + d + e\n  callback: -> (a, b, c, d, e) => @e + a + b + c + d + e\nclass Child extends Base\n  constructor: (a, b, c, d, e) -> super(a, b, c, d, e)\nitem = new Child(1, 2, 3, 4, 5)\ncallback = item.callback()\n[item.zero(), item.one(10), item.two(10, 20), item.many(1, 2, 3, 4, 5), callback(1, 2, 3, 4, 5)]")
+            .to_string(),
+        "[1, 12, 33, 19, 20]"
+    );
+}
+#[test]
 fn classes_inherit_privately_and_resolve_super_from_the_defining_class() {
     assert_eq!(
         eval("class Base\n  constructor: (@value) ->\n  score: -> 1\n  inherited: -> @value\n  @score: -> 10\nclass Middle extends Base\n  constructor: (value) ->\n    super(value + 1)\n  score: -> super() + 1\n  @score: -> super() + 1\nclass Leaf extends Middle\nleaf = new Leaf(40)\n[leaf.inherited(), leaf.score(), Leaf.score()]")
