@@ -965,7 +965,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(classes_stdout.contains("\"name\":\"class-construction-dispatch\""));
     assert!(classes_stdout.contains("\"expected\":\"5050\",\"compile_ns\":"));
     assert!(classes_stdout.contains("\"profile_calls\":200,\"profile_container_ops\":301"));
-    assert!(classes_stdout.contains("\"profile_value_allocations\":303"));
+    assert!(classes_stdout.contains("\"profile_value_allocations\":103"));
     assert!(classes_stdout.contains("\"profile_environment_allocations\":200"));
     let inherited = Command::new(bin("qbench"))
         .args([
@@ -983,7 +983,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(inherited_stdout.contains("\"name\":\"class-inherited-super-dispatch\""));
     assert!(inherited_stdout.contains("\"expected\":\"4200\",\"compile_ns\":"));
     assert!(inherited_stdout.contains("\"profile_calls\":201,\"profile_container_ops\":103"));
-    assert!(inherited_stdout.contains("\"profile_value_allocations\":207"));
+    assert!(inherited_stdout.contains("\"profile_value_allocations\":6"));
     assert!(inherited_stdout.contains("\"profile_environment_allocations\":201"));
     let bound = Command::new(bin("qbench"))
         .args([
@@ -1001,7 +1001,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(bound_stdout.contains("\"name\":\"class-bound-callback\""));
     assert!(bound_stdout.contains("\"expected\":\"5050\",\"compile_ns\":"));
     assert!(bound_stdout.contains("\"profile_calls\":102,\"profile_container_ops\":302"));
-    assert!(bound_stdout.contains("\"profile_value_allocations\":7"));
+    assert!(bound_stdout.contains("\"profile_value_allocations\":5"));
     assert!(bound_stdout.contains("\"profile_environment_allocations\":102"));
     let unknown = Command::new(bin("qbench"))
         .args(["--only", "missing-workload"])

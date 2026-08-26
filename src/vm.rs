@@ -3285,10 +3285,18 @@ enum Step {
     Continue,
     Return(Value),
     Call {
-        callee: Value,
+        target: CallTarget,
         args: Vec<Value>,
         return_override: Option<Value>,
         initialize_caller_receiver: bool,
+    },
+}
+enum CallTarget {
+    Value(Value),
+    Receiver {
+        function: Rc<Function>,
+        receiver: Value,
+        context: MethodContext,
     },
 }
 impl Vm {
@@ -3335,7 +3343,7 @@ impl Vm {
             }
         };
         Ok(Step::Call {
-            callee,
+            target: CallTarget::Value(callee),
             args,
             return_override: None,
             initialize_caller_receiver: false,
@@ -3344,6 +3352,7 @@ impl Vm {
 
     #[inline(never)]
     fn direct_member_call(
+        &mut self,
         frame: &mut Frame,
         argument_count: usize,
         name: &str,
@@ -3363,15 +3372,18 @@ impl Vm {
                 return Err(error);
             }
         };
-        let callee = match member_value(target, name, true) {
-            Ok(callee) => callee,
+        let (target, preserves_profile_allocation) = match member_call_target(target, name) {
+            Ok(target) => target,
             Err(error) => {
                 Self::recycle_call_arguments(args);
                 return Err(error);
             }
         };
+        if preserves_profile_allocation {
+            self.record_value_allocations(1);
+        }
         Ok(Step::Call {
-            callee,
+            target,
             args,
             return_override: None,
             initialize_caller_receiver: false,
@@ -3393,18 +3405,16 @@ impl Vm {
         }));
         self.record_value_allocations(1);
         if let Some((owner, constructor)) = find_constructor(&class) {
-            let callee = bound_method(
-                constructor,
-                instance.clone(),
-                MethodContext {
-                    owner,
-                    name: Rc::from("constructor"),
-                    kind: MethodKind::Constructor,
-                },
-            );
-            self.record_value_allocations(1);
             return Ok(Step::Call {
-                callee,
+                target: CallTarget::Receiver {
+                    function: constructor,
+                    receiver: instance.clone(),
+                    context: MethodContext {
+                        owner,
+                        name: Rc::from("constructor"),
+                        kind: MethodKind::Constructor,
+                    },
+                },
                 args,
                 return_override: Some(instance),
                 initialize_caller_receiver: false,
@@ -3452,18 +3462,16 @@ impl Vm {
                     frame.stack.push(Value::Nil);
                     return Ok(Step::Continue);
                 };
-                let callee = bound_method(
-                    constructor,
-                    receiver,
-                    MethodContext {
-                        owner,
-                        name: Rc::from("constructor"),
-                        kind: MethodKind::Constructor,
-                    },
-                );
-                self.record_value_allocations(1);
                 Ok(Step::Call {
-                    callee,
+                    target: CallTarget::Receiver {
+                        function: constructor,
+                        receiver,
+                        context: MethodContext {
+                            owner,
+                            name: Rc::from("constructor"),
+                            kind: MethodKind::Constructor,
+                        },
+                    },
                     args,
                     return_override: Some(Value::Nil),
                     initialize_caller_receiver: true,
@@ -3477,18 +3485,16 @@ impl Vm {
                             context.owner.name, context.name
                         ))
                     })?;
-                let callee = bound_method(
-                    function,
-                    receiver,
-                    MethodContext {
-                        owner,
-                        name: context.name,
-                        kind: MethodKind::Instance,
-                    },
-                );
-                self.record_value_allocations(1);
                 Ok(Step::Call {
-                    callee,
+                    target: CallTarget::Receiver {
+                        function,
+                        receiver,
+                        context: MethodContext {
+                            owner,
+                            name: context.name,
+                            kind: MethodKind::Instance,
+                        },
+                    },
                     args,
                     return_override: None,
                     initialize_caller_receiver: false,
@@ -3502,18 +3508,16 @@ impl Vm {
                             context.owner.name, context.name
                         ))
                     })?;
-                let callee = bound_method(
-                    function,
-                    receiver,
-                    MethodContext {
-                        owner,
-                        name: context.name,
-                        kind: MethodKind::Static,
-                    },
-                );
-                self.record_value_allocations(1);
                 Ok(Step::Call {
-                    callee,
+                    target: CallTarget::Receiver {
+                        function,
+                        receiver,
+                        context: MethodContext {
+                            owner,
+                            name: context.name,
+                            kind: MethodKind::Static,
+                        },
+                    },
                     args,
                     return_override: None,
                     initialize_caller_receiver: false,
@@ -4389,8 +4393,7 @@ impl Vm {
                         frame.stack.push(value);
                     }
                     Instruction::MemberCall { name, count } => {
-                        self.record_value_allocations(1);
-                        return Self::direct_member_call(frame, *count, name);
+                        return self.direct_member_call(frame, *count, name);
                     }
                     Instruction::MemberCallSpread(name) => {
                         let args = pop(frame)?;
@@ -4398,10 +4401,13 @@ impl Vm {
                             return Err(Error::runtime("splat call expects an array"));
                         };
                         let target = pop(frame)?;
-                        let callee = member_value(target, name, true)?;
-                        self.record_value_allocations(1);
+                        let (target, preserves_profile_allocation) =
+                            member_call_target(target, name)?;
+                        if preserves_profile_allocation {
+                            self.record_value_allocations(1);
+                        }
                         return Ok(Step::Call {
-                            callee,
+                            target,
                             args: args.as_ref().clone(),
                             return_override: None,
                             initialize_caller_receiver: false,
@@ -4512,7 +4518,7 @@ impl Vm {
                         };
                         let callee = pop(frame)?;
                         return Ok(Step::Call {
-                            callee,
+                            target: CallTarget::Value(callee),
                             args: args.as_ref().clone(),
                             return_override: None,
                             initialize_caller_receiver: false,
@@ -4569,13 +4575,27 @@ impl Vm {
                     parent.stack.push(value);
                 }
                 Ok(Step::Call {
-                    callee,
+                    target,
                     args,
                     return_override,
                     initialize_caller_receiver,
                 }) => {
                     let frame_count = frames.len();
-                    let result = call(self, &mut frames, callee, &args);
+                    let result = match target {
+                        CallTarget::Value(callee) => call(self, &mut frames, callee, &args),
+                        CallTarget::Receiver {
+                            function,
+                            receiver,
+                            context,
+                        } => call_with_receiver(
+                            self,
+                            &mut frames,
+                            function,
+                            &receiver,
+                            &args,
+                            Some(context),
+                        ),
+                    };
                     Self::recycle_call_arguments(args);
                     match result {
                         Ok(()) => {
@@ -4720,6 +4740,59 @@ fn unbound_method(owner: &str, name: &str) -> Value {
             name: Rc::from(name),
         },
     }))
+}
+
+fn member_call_target(target: Value, name: &str) -> Result<(CallTarget, bool), Error> {
+    match target {
+        Value::Instance(instance) => {
+            if let Some(value) = instance.fields.borrow().get(name).cloned() {
+                return Ok((CallTarget::Value(value), true));
+            }
+            let (owner, function) =
+                find_instance_method(&instance.class, name).ok_or_else(|| {
+                    Error::runtime(format!(
+                        "instance of {} has no member '{name}'",
+                        instance.class.name
+                    ))
+                })?;
+            Ok((
+                CallTarget::Receiver {
+                    function,
+                    receiver: Value::Instance(instance),
+                    context: MethodContext {
+                        owner,
+                        name: Rc::from(name),
+                        kind: MethodKind::Instance,
+                    },
+                },
+                false,
+            ))
+        }
+        Value::Class(class) => {
+            if let Some(value) = find_static_field(&class, name) {
+                return Ok((CallTarget::Value(value), true));
+            }
+            let (owner, function) = find_static_method(&class, name).ok_or_else(|| {
+                Error::runtime(format!(
+                    "class {} has no static member '{name}'",
+                    class.name
+                ))
+            })?;
+            Ok((
+                CallTarget::Receiver {
+                    function,
+                    receiver: Value::Class(class),
+                    context: MethodContext {
+                        owner,
+                        name: Rc::from(name),
+                        kind: MethodKind::Static,
+                    },
+                },
+                false,
+            ))
+        }
+        value => member_value(value, name, true).map(|value| (CallTarget::Value(value), true)),
+    }
 }
 
 fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, Error> {
