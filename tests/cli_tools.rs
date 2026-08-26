@@ -30,7 +30,11 @@ fn qdocco_renders_escaped_source_and_checks() {
     fs::create_dir_all(&temp).unwrap();
     let input = temp.join("demo.litcoffee");
     let output = temp.join("demo.html");
-    fs::write(&input, "# <Guide>\n\n    1 + 2\n").unwrap();
+    fs::write(
+        &input,
+        "# <Guide>\n\nCall `Context::eval` with `<source>`.\n\n    1 + 2\n",
+    )
+    .unwrap();
     assert!(
         Command::new(bin("qdocco"))
             .args([input.to_str().unwrap(), "-o", output.to_str().unwrap()])
@@ -40,6 +44,7 @@ fn qdocco_renders_escaped_source_and_checks() {
     );
     let page = fs::read_to_string(&output).unwrap();
     assert!(page.contains("&lt;Guide&gt;"));
+    assert!(page.contains("Call <code>Context::eval</code> with <code>&lt;source&gt;</code>."));
     assert!(page.contains("Final value: <code>3</code>"));
     let non_test_document = Command::new(bin("qdocco"))
         .args(["--check", input.to_str().unwrap()])
@@ -70,7 +75,7 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let document = fs::read_to_string(&markdown).unwrap();
-    assert!(document.contains("## Notes\n\n# <Guide>"));
+    assert!(document.contains("## Notes\n\n# <Guide>\n\nCall `Context::eval` with `<source>`."));
     assert!(document.contains("````coffee\n1 + 2\n````"));
     assert!(document.contains("## Final value\n\n`3`"));
     let fenced_input = temp.join("fenced.litcoffee");
@@ -133,7 +138,7 @@ fn qdocco_renders_escaped_source_and_checks() {
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("output path must differ"));
     assert_eq!(
         fs::read_to_string(&input).unwrap(),
-        "# <Guide>\n\n    1 + 2\n"
+        "# <Guide>\n\nCall `Context::eval` with `<source>`.\n\n    1 + 2\n"
     );
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])

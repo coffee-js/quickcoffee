@@ -4,73 +4,73 @@
 
 Source is parsed, compiled to verified bytecode, and executed with a fuel budget.
 
-qcoffee - reads a QuickCoffee program from standard input.
+`qcoffee -` reads a QuickCoffee program from standard input.
 
-qcoffee --quit initializes one Context and exits silently; it cannot be combined with source or execution options.
+`qcoffee --quit` initializes one Context and exits silently; it cannot be combined with source or execution options.
 
-qcoffee --stats writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
+`qcoffee --stats` writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 
-Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
+Embedded modules may use named import/export; `Engine::compile_module` and `Context::run_module` obtain source only through a host `ModuleLoader`, keep module globals private, and share fuel across the graph.
 
-qcoffee --module-root ROOT ENTRY explicitly grants one restricted-file module root to that execution only; ENTRY is root-relative, imports stay ./ or ../, and success prints the ordered export Map (or an exports JSON record). Fuel, stats, and argv work there, while single-file, stdin, -e, REPL, check, disassembly, and fingerprint modes never gain that authority.
+`qcoffee --module-root ROOT ENTRY` explicitly grants one restricted-file module root to that execution only; ENTRY is root-relative, imports stay ./ or ../, and success prints the ordered export Map (or an exports JSON record). Fuel, stats, and argv work there, while single-file, stdin, -e, REPL, check, disassembly, and fingerprint modes never gain that authority.
 
-Embedders may set Context ResourceLimits for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
+Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
 
-IntoValue and TryFromValue convert owned host scalars, Vec, BTreeMap<String, T>, and Option recursively without running a script; nil alone maps to None, and Number, Integer, Decimal, and other kinds never coerce across their boundaries.
+`IntoValue` and `TryFromValue` convert owned host scalars, Vec, `BTreeMap<String, T>`, and Option recursively without running a script; nil alone maps to None, and Number, Integer, Decimal, and other kinds never coerce across their boundaries.
 
-qcoffee --check FILE parses, compiles, and verifies without executing FILE.
+`qcoffee --check FILE` parses, compiles, and verifies without executing FILE.
 
-qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
+`qcoffee --interactive` (or `-i`) keeps one Context for a line-oriented session; `:help` and `:quit` are built-in commands.
 
-qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
+`qcoffee --interactive --stats` writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
 
-for character, index in 'a☕中' then index yields [0, 1, 2]; strings iterate Unicode scalars and accept non-zero signed by steps.
+`for character, index in 'a☕中' then index` yields `[0, 1, 2]`; strings iterate Unicode scalars and accept non-zero signed `by` steps.
 
-do (name, other) -> ... immediately calls and forwards same-named outer values; do -> ... remains zero-argument.
+`do (name, other) -> ...` immediately calls and forwards same-named outer values; `do -> ...` remains zero-argument.
 
-[head, tail...] = [1, 2, 3] binds tail to [2, 3]; array-pattern rest must be final.
+`[head, tail...] = [1, 2, 3]` binds tail to `[2, 3]`; array-pattern rest must be final.
 
-qtest --fuel N gives each executable documentation file its own instruction budget.
+`qtest --fuel N` gives each executable documentation file its own instruction budget.
 
-qtest --stats writes each file's instruction count and remaining fuel to stderr without changing its ok output.
+`qtest --stats` writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 
-qtest --json writes one stable JSON result per file for CI consumers; --stats remains on stderr.
+`qtest --json` writes one stable JSON result per file for CI consumers; `--stats` remains on stderr.
 
-qtest --tap writes TAP version 13 records with deterministic numbering; --json and --tap are mutually exclusive.
+`qtest --tap` writes TAP version 13 records with deterministic numbering; `--json` and `--tap` are mutually exclusive.
 
-qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.
+`qtest --filter TEXT` selects matching paths, while `qtest --list` enumerates selected files without executing them.
 
-qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.
+`qcoffee --json` emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 
-Rust embedding errors expose ErrorKind::Parse, Verify, Runtime, or Resource plus a display-independent message; error.resource_limit() distinguishes fuel, call depth, cancellation, JSON boundaries, StringBytes, ArrayItems, MapEntries, IntegerBits, DecimalCoefficientBits, DecimalScale, and CollectionOperationItems. Host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
+Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, and `CollectionOperationItems`. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
 
-Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
+`Engine::compile_program` verifies once; `Context::run_program` reuses the immutable verified bytecode for repeated embedding calls.
 
-Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
+`Program::fingerprint` provides a deterministic u64 bytecode cache key without changing execution.
 
-qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
+`qcoffee --fingerprint FILE` prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
 
-qbench --json emits one timing record per guarded workload; --iterations controls sample count.
+`qbench --json` emits one timing record per guarded workload; `--iterations` controls sample count.
 
-make fuzz-smoke uses a separate pinned-nightly cargo-fuzz package to run bounded parser and verifier fuzz targets with a fixed seed; confirmed crashes become minimized ordinary regression tests.
+`make fuzz-smoke` uses a separate pinned-nightly cargo-fuzz package to run bounded parser and verifier fuzz targets with a fixed seed; confirmed crashes become minimized ordinary regression tests.
 
-Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by --iterations or --repeat.
+Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by `--iterations` or `--repeat`.
 
-qbench --compare-qjs PATH separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use --repeat 11; each phase has a median and *_mad_ns.
+`qbench --compare-qjs PATH` separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use `--repeat` 11; each phase has a median and *_mad_ns.
 
 Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.
 
-qdocco --markdown writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
+`qdocco --markdown` writes Notes, fenced QuickCoffee code, and the final value as a reviewable Markdown artifact.
 
-Embedders may call Context::set_fuel or set_resource_limits between runs without clearing globals; with_resource_limits, with_global, and with_native provide chainable setup.
+Embedders may call `Context::set_fuel` or set_resource_limits between runs without clearing globals; with_resource_limits, with_global, and with_native provide chainable setup.
 
-cargo run --example embed compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
+`cargo run --example embed` compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 
-A host can branch on Value::kind() and use Value::is_nil() without inspecting internal containers.
+A host can branch on `Value::kind()` and use `Value::is_nil()` without inspecting internal containers.
 
 Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 
-Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
+`Context::last_execution()` exposes instruction and remaining-fuel counters without VM frames.
 
 Arguments after -- are exposed as the ordinary string array argv.
 
@@ -86,17 +86,17 @@ This is not JavaScript: public prototypes, global/free this, eval, and embedded 
     bound_callback = new BoundCounter(40).callback()
     bound_callback()
 
-# is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
+`#` is a line comment; `### … ###` is a non-nesting block comment removed before layout and parsing.
 
 Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 
-yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
+`yes/on` and `no/off` are Boolean aliases; `is/isnt` preserve strict equality.
 
 ! is a strict Bool alias for not; != remains strict inequality.
 
 Chained strict or numeric comparisons keep the middle value once and short-circuit.
 
-The standard library is ordinary functions: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. RFC 0139 string queries are strict and locale-free; trim uses a pinned Unicode White_Space table. RFC 0140 sort returns a new stable array of homogeneous finite scalar values and uses locale-free Unicode-scalar String order. RFC 0144 concat immutably joins exactly two Strings or two Arrays and checks resource limits before allocation. error(code, message, data, cause) creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
+The standard library is ordinary functions: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. RFC 0139 string queries are strict and locale-free; trim uses a pinned Unicode White_Space table. RFC 0140 sort returns a new stable array of homogeneous finite scalar values and uses locale-free Unicode-scalar String order. RFC 0144 concat immutably joins exactly two Strings or two Arrays and checks resource limits before allocation. `error(code, message, data, cause)` creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
 
     trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
     contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
@@ -105,69 +105,69 @@ The standard library is ordinary functions: print, len, type, error, range, str,
 
 RFC 0137 Decimal literals use an m suffix; exact division rejects repeating results, while decimal_div and round_decimal require an explicit scale and rounding mode.
 
-switch/when selects one strict-equality branch without fallthrough.
+`switch/when` selects one strict-equality branch without fallthrough.
 
-try/catch/finally handles sealed QuickCoffee Error values without JavaScript prototypes, stacks, or forgeable source locations.
+`try/catch/finally` handles sealed QuickCoffee Error values without JavaScript prototypes, stacks, or forgeable source locations.
 
-Integer ranges use [1..3] for an inclusive end and [1...3] for an exclusive end.
+Integer ranges use `[1..3]` for an inclusive end and `[1...3]` for an exclusive end.
 
-Ranges may descend too: [3..1] yields [3, 2, 1], while [3...1] yields [3, 2].
+Ranges may descend too: `[3..1]` yields `[3, 2, 1]`, while `[3...1]` yields `[3, 2]`.
 
-Triple-quoted heredocs preserve newlines: """...""" interpolates and '''...''' remains literal.
+Triple-quoted heredocs preserve newlines: `"""..."""` interpolates and `'''...'''` remains literal.
 
-Array slices use a[start..end] for an inclusive end and a[start...end] for an exclusive end; bounds are finite in-range integers, negatives count from the end, and a nil-safe slice skips bounds on nil.
+Array slices use `a[start..end]` for an inclusive end and `a[start...end]` for an exclusive end; bounds are finite in-range integers, negatives count from the end, and a nil-safe slice skips bounds on nil.
 
-Nil-specific fallback is written as left ? right; false and zero are kept unchanged.
+Nil-specific fallback is written as `left ? right`; false and zero are kept unchanged.
 
-Postfix value? tests only non-nil: nil? is false, false? and 0? are true, and an unbound name remains an error.
+Postfix `value?` tests only non-nil: `nil?` is false, `false?` and `0?` are true, and an unbound name remains an error.
 
-name ?= value writes only for an unbound or nil name; a non-nil name short-circuits its right side, and members, indexes, and patterns are excluded.
+`name ?= value` writes only for an unbound or nil name; a non-nil name short-circuits its right side, and members, indexes, and patterns are excluded.
 
-value in array checks array membership; key of map checks only map-owned string keys.
+`value in array` checks array membership; `key of map` checks only map-owned string keys.
 
-value not in array and key not of map negate those same strict checks without prototype keys.
+`value not in array` and `key not of map` negate those same strict checks without prototype keys.
 
-In a map literal, {name} abbreviates {name: name}.
+In a map literal, `{name}` abbreviates `{name: name}`.
 
-Map literals support checked left-to-right spread: {...defaults, theme: 'dark'}; later keys win.
+Map literals support checked left-to-right spread: `{...defaults, theme: 'dark'}`; later keys win.
 
-Map patterns may end with ...metadata to capture unlisted keys immutably.
+Map patterns may end with `...metadata` to capture unlisted keys immutably.
 
-Arrays and Unicode strings accept negative indices: items[-1] is the final item.
+Arrays and Unicode strings accept negative indices: `items[-1]` is the final item.
 
 Assignment patterns may nest arrays and maps; validation is atomic before bindings change.
 
-In arrays and calls, items... expands an array without JavaScript apply.
+In arrays and calls, `items...` expands an array without JavaScript apply.
 
-Nil-safe soak suffixes record?.name, values?[i], and fn?(args) short-circuit only a nil receiver.
+Nil-safe soak suffixes `record?.name`, `values?[i]`, and `fn?(args)` short-circuit only a nil receiver.
 
-until condition then body repeats until its Boolean condition becomes true.
+`until condition then body` repeats until its Boolean condition becomes true.
 
-At statement position, postfix while/until repeats a whole assignment or strict destructuring, not an ordinary subexpression.
+At statement position, postfix `while/until` repeats a whole assignment or strict destructuring, not an ordinary subexpression.
 
-loop body is infinite while true; break exits it and fuel still bounds it.
+`loop body` is infinite `while true`; break exits it and fuel still bounds it.
 
 A for expression collects body values; when and continue omit values, and break keeps the collected prefix.
 
-for bindings may use strict patterns: for [left, right] in pairs binds each pair atomically.
+for bindings may use strict patterns: `for [left, right] in pairs` binds each pair atomically.
 
-An array for loop may use by step; the non-zero finite integer step is evaluated once, negative steps start at the last item, and maps exclude it.
+An array for loop may use `by step`; the non-zero finite integer step is evaluated once, negative steps start at the last item, and maps exclude it.
 
-Array for may bind a zero-based index too: for value, index in items then value + index.
+Array for may bind a zero-based index too: `for value, index in items then value + index`.
 
-Postfix comprehensions use the same strict collector: value * 2 for value in items, or [value * 2 for value in items].
+Postfix comprehensions use the same strict collector: `value * 2 for value in items`, or `[value * 2 for value in items]`.
 
-Functions capture lexical scope; y = 2 defaults when omitted or nil, and a final rest parameter is tail....
+Functions capture lexical scope; `y = 2` defaults when omitted or nil, and a final rest parameter is `tail...`.
 
-Plain names may omit lambda parentheses: left, right -> left + right; defaults, rest, and patterns retain parentheses.
+Plain names may omit lambda parentheses: `left, right -> left + right`; defaults, rest, and patterns retain parentheses.
 
-Names support strict arithmetic compound assignment: total += amount and power **= 2; members and indexes do not.
+Names support strict arithmetic compound assignment: `total += amount` and `power **= 2`; members and indexes do not.
 
-Names also support strict prefix/postfix updates: next = ++counter yields the new value, while previous = counter-- yields the old value.
+Names also support strict prefix/postfix updates: `next = ++counter` yields the new value, while `previous = counter--` yields the old value.
 
-Arithmetic also has floor division // and dividend-dependent modulo %%: -7 // 5 is -2, while -7 %% 5 is 3.
+Arithmetic also has floor division // and dividend-dependent modulo %%: `-7 // 5` is -2, while `-7 %% 5` is 3.
 
-return expression exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.
+`return expression` exits only its current function; bare return yields nil, cleans loops, and runs enclosing finally blocks.
 
 Parameters may use strict nested array/map patterns; defaults and rest stay name-only.
 
