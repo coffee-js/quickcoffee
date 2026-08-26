@@ -26,6 +26,7 @@
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 ## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
 ## qbench --json emits one timing record per guarded workload; --iterations controls sample count.
+## make fuzz-smoke uses a separate pinned-nightly cargo-fuzz package to run bounded parser and verifier fuzz targets with a fixed seed; confirmed crashes become minimized ordinary regression tests.
 ## Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by --iterations or --repeat.
 ## qbench --compare-qjs PATH separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use --repeat 11; each phase has a median and *_mad_ns.
 ## Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting, so cache keys survive toolchain display changes.

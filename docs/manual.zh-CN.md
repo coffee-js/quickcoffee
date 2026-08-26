@@ -30,6 +30,7 @@ Engine::compile_program 创建时验证一次；Context::run_program 重复执�
 Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
 qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
 qbench --json 为每个带语义护栏的负载输出一条计时记录；--iterations 设置样本次数。
+make fuzz-smoke 使用独立固定-nightly 的 cargo-fuzz 包，以固定 seed 有界运行 parser 与 verifier target；确认的 crash 要最小化并转为普通回归测试。
 每条 qbench 记录的 profile_* 字段来自一次不计时执行，给出热点与分配事件，不乘以 --iterations 或 --repeat。
 qbench --compare-qjs PATH 分别报告双方的启动、编译、预编译热执行与端到端 CLI 总耗时。正式报告宜用 --repeat 11；每个阶段都有中位数和 *_mad_ns。
 指纹使用显式规范化字节码编码，不依赖 Rust 调试格式，故工具链显示变化不会改缓存键。
