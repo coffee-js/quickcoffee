@@ -3,7 +3,8 @@
 *.rs   diff=rust
 *.md   text
 *.coffee    text linguist-language=CoffeeScript
-*.litcoffee text linguist-language=CoffeeScript
+# GitHub Linguist natively maps this to its Literate CoffeeScript grammar.
+*.litcoffee text
 *.html text
 *.toml text
 Makefile text

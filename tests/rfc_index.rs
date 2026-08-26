@@ -65,21 +65,20 @@ fn package_manifest_declares_the_documented_msrv() {
 }
 
 #[test]
-fn source_extensions_have_coffeescript_linguist_metadata() {
+fn source_extensions_preserve_github_linguist_classification() {
     let attributes = fs::read_to_string(".gitattributes").expect("attributes file exists");
-    for extension in ["coffee", "litcoffee"] {
-        let prefix = format!("*.{extension} ");
-        assert!(
-            attributes.lines().any(|line| {
-                line.starts_with(&prefix)
-                    && line.split_whitespace().any(|part| part == "text")
-                    && line
-                        .split_whitespace()
-                        .any(|part| part == "linguist-language=CoffeeScript")
-            }),
-            ".{extension} must be classified as CoffeeScript"
-        );
-    }
+    assert!(attributes.lines().any(|line| {
+        line.split_whitespace()
+            .eq(["*.coffee", "text", "linguist-language=CoffeeScript"])
+    }));
+    let literate = attributes
+        .lines()
+        .find(|line| line.starts_with("*.litcoffee "))
+        .expect(".litcoffee attributes exist");
+    assert_eq!(
+        literate.split_whitespace().collect::<Vec<_>>(),
+        ["*.litcoffee", "text"]
+    );
 }
 
 #[test]
