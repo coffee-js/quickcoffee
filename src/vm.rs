@@ -24,6 +24,7 @@ const MAX_INTEGER_BITS: u64 = 1_000_000;
 const MAX_DECIMAL_BITS: u64 = 1_000_000;
 const MAX_DECIMAL_SCALE: u32 = 100_000;
 const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
+const MAX_REUSABLE_FRAME_STACK: usize = 64;
 
 /// Stable type tag for values crossing the embedding boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2220,6 +2221,10 @@ thread_local! {
     // Keeping the pool outside `Context`, `Vm`, and `Vm::run` preserves the
     // layout of unrelated dispatch paths. Borrows never cross a script call.
     static REUSABLE_CALL_ARGUMENTS: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
+    // Completed bytecode calls return their cleared value-stack capacity here.
+    // One bounded buffer removes allocator churn from sequential calls without
+    // retaining a stack for every recursion level or changing `Vm` layout.
+    static REUSABLE_FRAME_STACK: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
 }
 
 fn one_value_allocation(_: &Value) -> u64 {
@@ -3620,6 +3625,24 @@ impl Vm {
         });
     }
 
+    fn take_frame_stack() -> Vec<Value> {
+        REUSABLE_FRAME_STACK.with(|reusable| std::mem::take(&mut *reusable.borrow_mut()))
+    }
+
+    fn recycle_frame_stack(mut stack: Vec<Value>) {
+        stack.clear();
+        REUSABLE_FRAME_STACK.with(|reusable| {
+            let mut reusable = reusable.borrow_mut();
+            if stack.capacity() > MAX_REUSABLE_FRAME_STACK {
+                if reusable.capacity() == 0 {
+                    *reusable = Vec::with_capacity(MAX_REUSABLE_FRAME_STACK);
+                }
+            } else if stack.capacity() > reusable.capacity() {
+                *reusable = stack;
+            }
+        });
+    }
+
     fn record_profile(&mut self, instruction: &Instruction) {
         match instruction {
             Instruction::Load(_) | Instruction::LoadOrNil(_) => self.name_loads += 1,
@@ -4533,18 +4556,17 @@ impl Vm {
                     let returning = frames.last_mut().expect("VM has a returning frame");
                     let value = returning.return_override.take().unwrap_or(value);
                     let initialize_caller_receiver = returning.initialize_caller_receiver_on_return;
-                    if frames.len() > 1 {
-                        self.call_depth = self.call_depth.saturating_sub(1);
-                    }
-                    frames.pop();
-                    if let Some(parent) = frames.last_mut() {
-                        if initialize_caller_receiver {
-                            parent.receiver_initialized = true;
-                        }
-                        parent.stack.push(value);
-                    } else {
+                    if frames.len() == 1 {
                         return Ok(value);
                     }
+                    self.call_depth = self.call_depth.saturating_sub(1);
+                    let mut returning = frames.pop().expect("VM has a returning frame");
+                    Self::recycle_frame_stack(std::mem::take(&mut returning.stack));
+                    let parent = frames.last_mut().expect("returning frame has a caller");
+                    if initialize_caller_receiver {
+                        parent.receiver_initialized = true;
+                    }
+                    parent.stack.push(value);
                 }
                 Ok(Step::Call {
                     callee,
@@ -4966,7 +4988,7 @@ fn call_with_context(
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
-                    stack: vec![],
+                    stack: Vm::take_frame_stack(),
                     iterators: vec![],
                     handlers: vec![],
                     debug_info: debug_info.clone(),
@@ -5032,10 +5054,14 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
             frame.pc = handler.catch_pc;
             return true;
         }
-        if frames.len() > 1 {
+        let has_caller = frames.len() > 1;
+        if has_caller {
             vm.call_depth = vm.call_depth.saturating_sub(1);
         }
-        frames.pop();
+        let mut discarded = frames.pop().expect("VM has a failing frame");
+        if has_caller {
+            Vm::recycle_frame_stack(std::mem::take(&mut discarded.stack));
+        }
     }
 }
 fn pop(f: &mut Frame) -> Result<Value, Error> {
@@ -6177,6 +6203,76 @@ mod tests {
         assert_eq!(context.last_execution(), successful_stats);
         assert_eq!(reusable_capacity(), post_large_capacity);
         REUSABLE_CALL_ARGUMENTS.with(|reusable| *reusable.borrow_mut() = Vec::new());
+    }
+
+    #[test]
+    fn reusable_frame_stack_is_bounded_and_preserves_calls_errors_and_contexts() {
+        fn reusable_capacity() -> usize {
+            REUSABLE_FRAME_STACK.with(|reusable| reusable.borrow().capacity())
+        }
+        fn reusable_is_empty() -> bool {
+            REUSABLE_FRAME_STACK.with(|reusable| reusable.borrow().is_empty())
+        }
+
+        REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
+        let engine = Engine::new();
+        let program = engine
+            .compile_program(
+                "step = (value) -> value + 1\nrecurse = (value) -> if value == 0 then step(value) else step(recurse(value - 1))\ntry recurse(3) catch problem then -1",
+            )
+            .unwrap();
+        let failure = engine
+            .compile_program("fail = -> missing\ntry fail() catch problem then problem.code")
+            .unwrap();
+        let retained_closure = engine
+            .compile_program("make = ->\n  captured = 41\n  -> captured + 1\nkept = make()\nkept()")
+            .unwrap();
+        let nested_program = engine
+            .compile_program("twice = (value) -> value * 2\ntwice(21)")
+            .unwrap();
+        let reentrant = engine
+            .compile_program("wrap = -> host_nested()\nwrap()")
+            .unwrap();
+
+        let mut first = Context::new();
+        assert_eq!(first.run_program(&program).unwrap().as_number(), Some(4.));
+        let successful_stats = first.last_execution();
+        assert!(reusable_is_empty());
+        assert!(reusable_capacity() > 0);
+        assert!(reusable_capacity() <= MAX_REUSABLE_FRAME_STACK);
+
+        assert_eq!(
+            first.run_program(&failure).unwrap().as_str(),
+            Some("runtime")
+        );
+        assert!(reusable_is_empty());
+        assert!(reusable_capacity() <= MAX_REUSABLE_FRAME_STACK);
+        assert_eq!(first.run_program(&program).unwrap().as_number(), Some(4.));
+        assert_eq!(first.last_execution(), successful_stats);
+        assert_eq!(
+            first.run_program(&retained_closure).unwrap().as_number(),
+            Some(42.)
+        );
+
+        first.add_native("host_nested", move |_| {
+            Context::new().run_program(&nested_program)
+        });
+        assert_eq!(
+            first.run_program(&reentrant).unwrap().as_number(),
+            Some(42.)
+        );
+        assert!(reusable_is_empty());
+        assert!(reusable_capacity() <= MAX_REUSABLE_FRAME_STACK);
+
+        let mut second = Context::new();
+        assert_eq!(second.run_program(&program).unwrap().as_number(), Some(4.));
+        assert_eq!(second.last_execution(), successful_stats);
+
+        REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
+        Vm::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
+        assert!(reusable_is_empty());
+        assert_eq!(reusable_capacity(), MAX_REUSABLE_FRAME_STACK);
+        REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
     }
 
     #[test]
