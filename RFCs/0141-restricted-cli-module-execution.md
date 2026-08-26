@@ -11,7 +11,7 @@ RFC 0133 已把受限文件模块加载器作为显式宿主能力交付，但 `
 ## 决策
 
 1. 新增执行模式：`qcoffee --module-root ROOT ENTRY [--fuel N] [--stats] [--json] [-- ARG...]`。`ROOT` 必须由调用者显式给出，并原样传给 `RestrictedFileModuleLoader::new`；CLI 不会从当前目录、entry 路径、环境变量或搜索路径推导根目录。
-2. `ENTRY` 是相对于该根目录的模块入口名，而不是普通文件输入。`.qc` 推断、规范名称、UTF-8、显式 `./` / `../` 导入、词法越界和符号链接逃逸均完全复用 RFC 0133 的 loader 契约。
+2. `ENTRY` 是相对于该根目录的模块入口名，而不是普通文件输入。`.coffee` 默认推断、显式 `.coffee` / `.litcoffee`、规范名称、UTF-8、显式 `./` / `../` 导入、词法越界和符号链接逃逸均完全复用 RFC 0133 的 loader 契约。
 3. 入口以规范模块名编译，并以 `Context::run_module` 执行完整静态图；图共享 fuel、取消和当前 Context 的资源政策。成功时 CLI 输出按名称排序的不可变导出 Map；`--json` 输出唯一记录 `{"ok":true,"exports":VALUE}`。没有部分初始化或部分导出会在失败时输出。
 4. `--module-root ROOT ENTRY` 与 `-e`、普通文件/标准输入、`--interactive`、`--check`、`--dump-bytecode` 和 `--fingerprint` 互斥。`--fuel`、`--stats`、`--json` 和 `--` 后的字符串 `argv` 保持可用。普通 CLI 模式与嵌入 API 不会因此取得文件加载能力。
 5. loader、编译、导入、运行和资源错误沿用既有结构化错误类别；已命名模块的 parse/verify/runtime JSON 诊断携带其规范模块来源名。`--stats` 继续写入标准错误。

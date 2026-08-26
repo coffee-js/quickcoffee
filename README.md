@@ -23,7 +23,7 @@ cargo install --path .
 qcoffee --version
 ```
 
-创建 `invoice.qc`：
+创建 `invoice.coffee`：
 
 ```coffee
 discount = (amount) ->
@@ -35,7 +35,7 @@ print discount(120)
 运行它：
 
 ```sh
-qcoffee invoice.qc
+qcoffee invoice.coffee
 # 108
 ```
 
@@ -60,7 +60,7 @@ print counter.increment()
 | 配置归并、表单/事件数据整形 | 适合 | 有不可变数组/Map、spread、解构、推导、Unicode 字符串和精确 JSON。 |
 | class 形式的业务模型 | 适合 | 支持构造、继承、覆盖、`super` 和安全逸出的 receiver-bound `=>`。 |
 | 受控嵌入式策略/插件 | 条件适合 | 宿主可注入全局值/原生函数，并设置 fuel、调用深度、数据资源限制和取消。 |
-| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.qc` 模块图；尚无模块包或模块图指纹。 |
+| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.coffee` 模块图；尚无模块包或模块图指纹。 |
 | HTTP、文件 I/O、异步任务、定时调度 | 尚不适合 | 语言没有隐式环境能力、事件循环或异步语法；这些应由宿主以明确 capability 提供。 |
 | 直接替换 JavaScript/CoffeeScript 项目 | 不适合 | 语义刻意不同，且缺少正则、日期时间、字节/流、生成器等能力。 |
 
@@ -86,16 +86,16 @@ QuickCoffee 已提供：
 | 目的 | 命令 |
 |---|---|
 | 执行表达式 | `qcoffee -e "print(1 + 2)"` |
-| 执行文件并传参 | `qcoffee script.qc -- first second`（脚本中读取 `argv`） |
-| 从标准输入执行 | `qcoffee - < script.qc` |
+| 执行文件并传参 | `qcoffee script.coffee -- first second`（脚本中读取 `argv`） |
+| 从标准输入执行 | `qcoffee - < script.coffee` |
 | 运行受限模块图 | `qcoffee --module-root modules app/main -- first` |
 | 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
-| 只检查、不执行 | `qcoffee --check script.qc` |
-| 稳定 JSON 输出 | `qcoffee --json script.qc` |
-| 限制本次执行 fuel | `qcoffee --fuel 100000 script.qc` |
-| 检查编译结果 | `qcoffee --dump-bytecode script.qc` 或 `qcoffee --fingerprint script.qc` |
+| 只检查、不执行 | `qcoffee --check script.coffee` |
+| 稳定 JSON 输出 | `qcoffee --json script.coffee` |
+| 限制本次执行 fuel | `qcoffee --fuel 100000 script.coffee` |
+| 检查编译结果 | `qcoffee --dump-bytecode script.coffee` 或 `qcoffee --fingerprint script.coffee` |
 
-`qtest` 用于目录脚本测试，`qdocco` 用于生成文档，`qbench` 用于可重复的基准和 QuickJS 同机对照。它们是项目工具，不是部署时的必需组件。
+`.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 是 Markdown 文学源码，正文保持为未缩进文本，可执行代码块统一缩进四个空格。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成文档。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
 
 ## 嵌入 Rust 应用
 
@@ -107,7 +107,7 @@ use quickcoffee::{Context, Error};
 fn evaluate_rule() -> Result<(), Error> {
     let value = Context::new()
         .with_fuel(100_000)
-        .eval_named("rules/discount.qc", "amount = 120; amount * 0.9")?;
+        .eval_named("rules/discount.coffee", "amount = 120; amount * 0.9")?;
     println!("{value}");
     Ok(())
 }
@@ -158,4 +158,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0144](RFCs/0144-resource-bounded-immutable-concat.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0145](RFCs/0145-coffee-and-literate-sources.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

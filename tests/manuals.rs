@@ -1,18 +1,36 @@
 use quickcoffee::{Context, Value};
 use std::{path::PathBuf, process::Command};
 
-const MANUALS: &[&str] = &[
-    include_str!("../manuals/manual.zh-CN.qc"),
-    include_str!("../manuals/manual.classical-zh.qc"),
-    include_str!("../manuals/manual.en.qc"),
-    include_str!("../manuals/manual.latin.qc"),
-    include_str!("../manuals/manual.devanagari-sa.qc"),
+const MANUALS: &[(&str, &str)] = &[
+    (
+        "manual.zh-CN.litcoffee",
+        include_str!("../manuals/manual.zh-CN.litcoffee"),
+    ),
+    (
+        "manual.classical-zh.litcoffee",
+        include_str!("../manuals/manual.classical-zh.litcoffee"),
+    ),
+    (
+        "manual.en.litcoffee",
+        include_str!("../manuals/manual.en.litcoffee"),
+    ),
+    (
+        "manual.latin.litcoffee",
+        include_str!("../manuals/manual.latin.litcoffee"),
+    ),
+    (
+        "manual.devanagari-sa.litcoffee",
+        include_str!("../manuals/manual.devanagari-sa.litcoffee"),
+    ),
 ];
 
 #[test]
 fn every_literate_manual_is_an_executable_passing_example() {
-    for source in MANUALS {
-        assert!(matches!(Context::new().eval(source), Ok(Value::Bool(true))));
+    for (name, source) in MANUALS {
+        assert!(matches!(
+            Context::new().eval_named(name, source),
+            Ok(Value::Bool(true))
+        ));
     }
 }
 
@@ -22,7 +40,7 @@ fn qdocco_checks_every_manual_source() {
     for locale in ["zh-CN", "classical-zh", "en", "latin", "devanagari-sa"] {
         assert!(
             Command::new(&qdocco)
-                .args(["--check", &format!("manuals/manual.{locale}.qc")])
+                .args(["--check", &format!("manuals/manual.{locale}.litcoffee")])
                 .status()
                 .expect("qdocco starts")
                 .success()

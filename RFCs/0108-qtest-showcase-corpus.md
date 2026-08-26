@@ -9,7 +9,7 @@
 
 ## 约定
 
-`tests/scripts/` 中的每个 `.qc` 文件都必须：
+`tests/scripts/` 中的每个 `.coffee` 文件都必须：
 
 1. 不依赖宿主文件、网络或时间；
 2. 以严格的 `true` 作为最终值；

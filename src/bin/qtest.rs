@@ -16,6 +16,12 @@ fn collect(
 ) -> Result<(), String> {
     let metadata = fs::metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
     if metadata.is_file() {
+        if !is_source_file(path) {
+            return Err(format!(
+                "{}: expected a .coffee or .litcoffee source file",
+                path.display()
+            ));
+        }
         let canonical =
             fs::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))?;
         if visited_files.insert(canonical) {
@@ -37,11 +43,16 @@ fn collect(
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let child = entry.path();
-        if child.is_dir() || child.extension().is_some_and(|extension| extension == "qc") {
+        if child.is_dir() || is_source_file(&child) {
             collect(&child, files, visited_directories, visited_files)?;
         }
     }
     Ok(())
+}
+fn is_source_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "coffee" | "litcoffee"))
 }
 fn usage() {
     eprintln!(
@@ -156,9 +167,9 @@ fn main() -> ExitCode {
     }
     if files.is_empty() {
         let message = if filtered {
-            "no matching .qc test files found"
+            "no matching .coffee or .litcoffee test files found"
         } else {
-            "no .qc test files found"
+            "no .coffee or .litcoffee test files found"
         };
         if tap {
             println!("TAP version 13");
@@ -189,7 +200,10 @@ fn main() -> ExitCode {
             .map_err(|e| e.to_string())
             .and_then(|src| {
                 let mut context = Context::new().with_fuel(fuel);
-                let result = context.eval(&src).map_err(|e| e.to_string());
+                let source_name = label.to_string();
+                let result = context
+                    .eval_named(&source_name, &src)
+                    .map_err(|e| e.to_string());
                 if stats {
                     let execution = context.last_execution();
                     eprintln!(

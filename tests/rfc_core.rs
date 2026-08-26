@@ -577,14 +577,17 @@ fn lowering_errors_preserve_control_flow_keyword_spans() {
         ),
         ("if 状态 then break", "break outside of loop", 1, 12, 17),
     ] {
-        let error = quickcoffee::compile_named("virtual://lowering.qc", source).unwrap_err();
+        let error = quickcoffee::compile_named("virtual://lowering.coffee", source).unwrap_err();
         assert_eq!(error.message(), message);
         let span = &error
             .labels()
             .first()
             .unwrap_or_else(|| panic!("missing lowering diagnostic label for {source}"))
             .span;
-        assert_eq!(span.source_name.as_deref(), Some("virtual://lowering.qc"));
+        assert_eq!(
+            span.source_name.as_deref(),
+            Some("virtual://lowering.coffee")
+        );
         assert_eq!(span.start.line, line);
         assert_eq!(span.start.column, Some(start));
         assert_eq!(
@@ -1114,7 +1117,7 @@ fn structured_error_values_expose_sealed_fields_causes_and_rethrow() {
     let mut context = Context::new();
     let error = context
         .eval_named(
-            "domain.qc",
+            "domain.coffee",
             "problem = error('invoice.missing', 'invoice missing', {id: 42})\ntry\n  throw problem\ncatch caught\n  throw caught",
         )
         .unwrap_err();
@@ -1124,7 +1127,7 @@ fn structured_error_values_expose_sealed_fields_causes_and_rethrow() {
     assert_eq!(script.data().as_map().unwrap()["id"].as_number(), Some(42.));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("domain.qc")
+        Some("domain.coffee")
     );
     assert_eq!(error.position().unwrap().line, 3);
 
@@ -1820,11 +1823,11 @@ fn fat_arrows_capture_only_valid_class_receivers_and_escape_safely() {
     assert!(before_super.message().contains("before super"));
 
     let error = Engine::new()
-        .compile_named("bound-arrow.qc", "value = 1\ncallback = => value")
+        .compile_named("bound-arrow.coffee", "value = 1\ncallback = => value")
         .unwrap_err();
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("bound-arrow.qc")
+        Some("bound-arrow.coffee")
     );
     assert_eq!(error.labels()[0].span.start.line, 2);
     assert_eq!(error.labels()[0].span.start.column, Some(12));

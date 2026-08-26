@@ -65,6 +65,24 @@ fn package_manifest_declares_the_documented_msrv() {
 }
 
 #[test]
+fn source_extensions_have_coffeescript_linguist_metadata() {
+    let attributes = fs::read_to_string(".gitattributes").expect("attributes file exists");
+    for extension in ["coffee", "litcoffee"] {
+        let prefix = format!("*.{extension} ");
+        assert!(
+            attributes.lines().any(|line| {
+                line.starts_with(&prefix)
+                    && line.split_whitespace().any(|part| part == "text")
+                    && line
+                        .split_whitespace()
+                        .any(|part| part == "linguist-language=CoffeeScript")
+            }),
+            ".{extension} must be classified as CoffeeScript"
+        );
+    }
+}
+
+#[test]
 fn frontend_stage_ownership_is_explicit() {
     fn defines(source: &str, definition: &str) -> bool {
         source.lines().any(|line| line.trim() == definition)

@@ -2,7 +2,7 @@ use crate::{
     ast::{
         Binary, ClassMember, Expr, Item, MapItem, ModuleSyntax, Param, Pattern, Stmt, Unary, Update,
     },
-    lexer::{Token, TokenSpan, lex_spanned},
+    lexer::{Token, TokenSpan, lex_spanned, lex_spanned_with_columns},
     vm::Error,
 };
 type SwitchCases = (Vec<(Vec<Expr>, Expr)>, Option<Expr>);
@@ -15,21 +15,35 @@ type ForHeader = (
     Option<Box<Expr>>,
 );
 
+#[cfg(test)]
 pub(crate) fn parse(source: &str) -> Result<Vec<Stmt>, Error> {
-    let (tokens, spans) = lex_spanned(source)?;
+    parse_with_columns(source, true)
+}
+
+pub(crate) fn parse_with_columns(
+    source: &str,
+    columns_are_precise: bool,
+) -> Result<Vec<Stmt>, Error> {
+    let (tokens, spans) = lex_spanned_with_columns(source, columns_are_precise)?;
     Parser::new(tokens, spans).program()
 }
 /// Parses source while collecting independently recoverable statement errors.
 ///
 /// This deliberately recovers only at top-level statement boundaries. The
-/// regular [`parse`] entry point retains its first-error behavior for existing
-/// compiler and embedding callers.
-pub(crate) fn parse_recover(source: &str) -> Result<Vec<Stmt>, Vec<Error>> {
-    let (tokens, spans) = lex_spanned(source).map_err(|error| vec![error])?;
+/// regular compiler entry points retain their first-error behavior.
+pub(crate) fn parse_recover_with_columns(
+    source: &str,
+    columns_are_precise: bool,
+) -> Result<Vec<Stmt>, Vec<Error>> {
+    let (tokens, spans) =
+        lex_spanned_with_columns(source, columns_are_precise).map_err(|error| vec![error])?;
     Parser::new(tokens, spans).program_recover()
 }
-pub(crate) fn parse_module(source: &str) -> Result<ModuleSyntax, Error> {
-    let statements = parse(source)?;
+pub(crate) fn parse_module_with_columns(
+    source: &str,
+    columns_are_precise: bool,
+) -> Result<ModuleSyntax, Error> {
+    let statements = parse_with_columns(source, columns_are_precise)?;
     let mut imports = Vec::new();
     let mut exports = Vec::new();
     let mut body = Vec::new();

@@ -11,6 +11,7 @@ mod lowering;
 mod module;
 mod parser;
 mod resource;
+mod source;
 mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
@@ -27,7 +28,17 @@ pub use vm::{
 
 /// Compiles `source` to verified bytecode without executing it.
 pub fn compile(source: &str) -> Result<Chunk, Error> {
-    let ast = parser::parse(source)?;
+    compile_source(None, source)
+}
+
+fn compile_source(source_name: Option<&str>, source: &str) -> Result<Chunk, Error> {
+    let attach_name = |error: Error| match source_name {
+        Some(source_name) => error.with_source_name(source_name),
+        None => error,
+    };
+    let prepared = source::prepare(source_name, source).map_err(attach_name)?;
+    let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
+        .map_err(attach_name)?;
     let chunk = lowering::compile(&ast)?;
     chunk.verify()?;
     Ok(chunk)
@@ -35,8 +46,9 @@ pub fn compile(source: &str) -> Result<Chunk, Error> {
 
 /// Compiles `source` to verified bytecode and attaches the opaque
 /// host-provided `source_name` to any diagnostic labels produced on failure.
+/// A name ending in `.litcoffee` enables literate CoffeeScript preprocessing.
 pub fn compile_named(source_name: &str, source: &str) -> Result<Chunk, Error> {
-    compile(source).map_err(|error| error.with_source_name(source_name))
+    compile_source(Some(source_name), source).map_err(|error| error.with_source_name(source_name))
 }
 
 /// Compiles `source` to a cheaply cloneable shared verified program.
