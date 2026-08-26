@@ -700,6 +700,39 @@ fn json_resource_policy_is_replaceable_labeled_and_uncatchable() {
 }
 
 #[test]
+fn collection_operation_resource_policy_is_replaceable_labeled_and_uncatchable() {
+    let defaults = ResourceLimits::default();
+    let constrained = defaults.with_max_collection_operation_items(2);
+    assert_eq!(constrained.max_collection_operation_items(), 2);
+
+    let mut context = Context::new().with_resource_limits(constrained);
+    context.eval("items = [3, 2, 1]").unwrap();
+    let error = context
+        .eval_named(
+            "virtual://collection-limits.qc",
+            "try sort(items) catch ignored then [0]",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::CollectionOperationItems)
+    );
+    assert!(error.message().contains("sort input exceeds 2 items"));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://collection-limits.qc")
+    );
+    assert_eq!(context.eval("items").unwrap().to_string(), "[3, 2, 1]");
+
+    context.set_resource_limits(defaults);
+    assert_eq!(
+        context.eval("sort(items)").unwrap().to_string(),
+        "[1, 2, 3]"
+    );
+}
+
+#[test]
 fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() {
     let defaults = ResourceLimits::default();
     let constrained = defaults
@@ -796,6 +829,7 @@ fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() 
     for source in [
         "left = 0.9m\nright = 0.8001m\nleft < right",
         "min([0.9m, 0.8001m])",
+        "sort([0.9m, 0.8001m])",
     ] {
         let error = alignment_context.eval(source).unwrap_err();
         assert_eq!(

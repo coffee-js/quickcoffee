@@ -1953,6 +1953,48 @@ fn numeric_standard_library_is_strict_and_total() {
     assert!(host.eval("sum([nan])").is_err());
 }
 #[test]
+fn stable_scalar_sort_is_immutable_strict_and_deterministic() {
+    assert_eq!(eval("sort([3, -1, 2, 2])").to_string(), "[-1, 2, 2, 3]");
+    assert_eq!(eval("sort([3n, -1n, 2n])").to_string(), "[-1n, 2n, 3n]");
+    assert_eq!(
+        eval("sort([3m, -1.2m, 2.00m])").to_string(),
+        "[-1.2m, 2m, 3m]"
+    );
+    assert_eq!(eval("sort(['☕', '中', 'a'])").to_string(), "[a, ☕, 中]");
+    assert_eq!(eval("sort([])").to_string(), "[]");
+    assert_eq!(eval("sort(['only'])").to_string(), "[only]");
+    assert_eq!(
+        eval("items = [3, 1, 2]\nsorted = sort(items)\nitems[0] == 3 and sorted[0] == 1")
+            .to_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("values = sort([-0, 0])\n1 / values[0] < 0 and 1 / values[1] > 0").to_string(),
+        "true"
+    );
+
+    for source in [
+        "sort()",
+        "sort(1)",
+        "sort([1, 1n])",
+        "sort([true])",
+        "sort([1 / 0])",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+
+    let mut context = Context::new();
+    context.eval("items = [3, 1, 2]").unwrap();
+    assert_eq!(
+        context.eval("sort(items)").unwrap().to_string(),
+        "[1, 2, 3]"
+    );
+    assert_eq!(context.last_execution().value_allocations, 4);
+}
+#[test]
 fn array_destructuring_is_strict_and_has_an_explicit_ignore_name() {
     assert_eq!(
         eval("left, right = [20, 22]\nleft + right").as_number(),
