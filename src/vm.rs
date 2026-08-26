@@ -2988,7 +2988,8 @@ fn lookup_environment<const SHARED: bool>(
     cached: Option<&Cell<Option<usize>>>,
     name: &str,
 ) -> Option<Value> {
-    let environment = environment.borrow();
+    let current = environment;
+    let environment = current.borrow();
     if let Some(slot) = cached.and_then(Cell::get) {
         let value = if SHARED {
             environment.get_shared_cached(name, slot)
@@ -3007,7 +3008,26 @@ fn lookup_environment<const SHARED: bool>(
     }
     let parent = environment.parent.clone();
     drop(environment);
-    parent.and_then(|parent| lookup(&parent, name))
+    parent.and_then(|parent| lookup_parent_environment(current, parent, cached, name))
+}
+#[cold]
+#[inline(never)]
+fn lookup_parent_environment(
+    current: &Env,
+    parent: Env,
+    cached: Option<&Cell<Option<usize>>>,
+    name: &str,
+) -> Option<Value> {
+    let is_builtin_parent = BUILTIN_ENVIRONMENT.with(|builtins| Rc::ptr_eq(&parent, builtins));
+    if is_builtin_parent {
+        let value = parent.borrow().get_local(name)?;
+        let slot = current.borrow_mut().set_local(name, value.clone());
+        if let Some(cached) = cached {
+            cached.set(Some(slot));
+        }
+        return Some(value);
+    }
+    lookup(&parent, name)
 }
 fn store_environment<const SHARED: bool>(
     environment: &Env,
