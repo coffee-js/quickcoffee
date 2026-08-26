@@ -2,7 +2,8 @@
 
 *.rs   diff=rust
 *.md   text
-*.qc   text
+*.coffee    text linguist-language=CoffeeScript
+*.litcoffee text linguist-language=CoffeeScript
 *.html text
 *.toml text
 Makefile text

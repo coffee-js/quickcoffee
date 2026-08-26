@@ -319,7 +319,7 @@ fn module_children_inherit_general_value_resource_policy() {
 #[test]
 fn module_directives_are_not_accepted_by_single_file_compilation() {
     let error = Engine::new()
-        .compile_program_named("virtual://single.qc", "value = 1\nexport answer = 42")
+        .compile_program_named("virtual://single.coffee", "value = 1\nexport answer = 42")
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Verify);
     assert_eq!(
@@ -327,7 +327,7 @@ fn module_directives_are_not_accepted_by_single_file_compilation() {
         "verify error: module directives require Engine::compile_module"
     );
     let span = &error.labels()[0].span;
-    assert_eq!(span.source_name.as_deref(), Some("virtual://single.qc"));
+    assert_eq!(span.source_name.as_deref(), Some("virtual://single.coffee"));
     assert_eq!(span.start.line, 2);
     assert_eq!(span.start.column, Some(1));
     assert_eq!(
@@ -386,28 +386,49 @@ fn restricted_file_loader_resolves_nested_relative_modules() {
     fs::create_dir_all(root.join("app/lib")).unwrap();
     fs::create_dir_all(root.join("shared")).unwrap();
     fs::write(
-        root.join("app/main.qc"),
-        "import { double } from './lib/math'\nimport { base } from '../shared/value.qc'\nexport result = double(base)",
+        root.join("app/main.coffee"),
+        "import { double } from './lib/math'\nimport { base } from '../shared/value.coffee'\nexport result = double(base)",
     )
     .unwrap();
     fs::write(
-        root.join("app/lib/math.qc"),
+        root.join("app/lib/math.coffee"),
         "export double = (value) -> value * 2",
     )
     .unwrap();
-    fs::write(root.join("shared/value.qc"), "export base = 21").unwrap();
+    fs::write(root.join("shared/value.coffee"), "export base = 21").unwrap();
 
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
     let source = loader.load_entry("app/main").unwrap();
-    assert_eq!(source.name(), "app/main.qc");
+    assert_eq!(source.name(), "app/main.coffee");
     let main = Engine::new()
         .compile_module(source.name(), source.source())
         .unwrap();
     let exports = Context::new().run_module(&main, &loader).unwrap();
     assert_eq!(exports.get("result").and_then(Value::as_number), Some(42.));
 
-    let normalized = loader.load("./lib/../lib/math", "app/main.qc").unwrap();
-    assert_eq!(normalized.name(), "app/lib/math.qc");
+    let normalized = loader.load("./lib/../lib/math", "app/main.coffee").unwrap();
+    assert_eq!(normalized.name(), "app/lib/math.coffee");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn restricted_file_loader_executes_explicit_litcoffee_modules() {
+    let root = module_temp("literate");
+    fs::create_dir_all(root.join("app")).unwrap();
+    fs::write(
+        root.join("app/main.litcoffee"),
+        "# Literate entry\n\n    export answer = 42\n",
+    )
+    .unwrap();
+
+    let loader = RestrictedFileModuleLoader::new(&root).unwrap();
+    let source = loader.load_entry("app/main.litcoffee").unwrap();
+    assert_eq!(source.name(), "app/main.litcoffee");
+    let module = Engine::new()
+        .compile_module(source.name(), source.source())
+        .unwrap();
+    let exports = Context::new().run_module(&module, &loader).unwrap();
+    assert_eq!(exports.get("answer").and_then(Value::as_number), Some(42.));
     let _ = fs::remove_dir_all(root);
 }
 
@@ -415,38 +436,50 @@ fn restricted_file_loader_resolves_nested_relative_modules() {
 fn restricted_file_loader_rejects_ambiguous_and_escaping_paths() {
     let root = module_temp("invalid");
     fs::create_dir_all(root.join("app")).unwrap();
-    fs::write(root.join("app/main.qc"), "export value = 1").unwrap();
+    fs::write(root.join("app/main.coffee"), "export value = 1").unwrap();
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
 
-    for specifier in ["package", "/absolute", "./windows\\module", "./wrong.txt"] {
-        let error = loader.load(specifier, "app/main.qc").unwrap_err();
+    for specifier in [
+        "package",
+        "/absolute",
+        "./windows\\module",
+        "./wrong.txt",
+        "./legacy.qc",
+    ] {
+        let error = loader.load(specifier, "app/main.coffee").unwrap_err();
         assert_eq!(
             error.message(),
             format!("invalid module specifier: {specifier}")
         );
     }
-    let error = loader.load("../../outside", "app/main.qc").unwrap_err();
+    let error = loader.load("../../outside", "app/main.coffee").unwrap_err();
     assert_eq!(
         error.message(),
         "module path escapes configured root: ../../outside"
     );
-    let error = loader.load("./missing", "app/main.qc").unwrap_err();
-    assert_eq!(error.message(), "module not found: app/missing.qc");
-    let error = loader.load("./main", "../app/main.qc").unwrap_err();
-    assert_eq!(error.message(), "invalid module referrer: ../app/main.qc");
+    let error = loader.load("./missing", "app/main.coffee").unwrap_err();
+    assert_eq!(error.message(), "module not found: app/missing.coffee");
+    let error = loader.load("./main", "../app/main.coffee").unwrap_err();
+    assert_eq!(
+        error.message(),
+        "invalid module referrer: ../app/main.coffee"
+    );
     let error = loader.load_entry("../outside").unwrap_err();
     assert_eq!(error.message(), "invalid module entry: ../outside");
     let error = loader.load_entry("app/main.txt").unwrap_err();
     assert_eq!(error.message(), "invalid module entry: app/main.txt");
-    fs::write(root.join("app/binary.qc"), [0xff]).unwrap();
+    fs::write(root.join("app/binary.coffee"), [0xff]).unwrap();
     let error = loader.load_entry("app/binary").unwrap_err();
     assert_eq!(
         error.message(),
-        "module source is not readable UTF-8: app/binary.qc"
+        "module source is not readable UTF-8: app/binary.coffee"
     );
-    fs::create_dir(root.join("app/directory.qc")).unwrap();
+    fs::create_dir(root.join("app/directory.coffee")).unwrap();
     let error = loader.load_entry("app/directory").unwrap_err();
-    assert_eq!(error.message(), "invalid module target: app/directory.qc");
+    assert_eq!(
+        error.message(),
+        "invalid module target: app/directory.coffee"
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -458,35 +491,38 @@ fn restricted_file_loader_canonicalizes_aliases_and_rejects_symlink_escape() {
     let base = module_temp("symlink");
     let root = base.join("root");
     fs::create_dir_all(root.join("real")).unwrap();
-    fs::write(root.join("real/module.qc"), "export value = 42").unwrap();
-    fs::write(base.join("outside.qc"), "export value = 0").unwrap();
-    fs::write(root.join("real:module.qc"), "export value = 1").unwrap();
-    fs::write(root.join("real\\module.qc"), "export value = 2").unwrap();
-    symlink("real/module.qc", root.join("alias.qc")).unwrap();
-    symlink(base.join("outside.qc"), root.join("escape.qc")).unwrap();
-    symlink("real:module.qc", root.join("colon-alias.qc")).unwrap();
-    symlink("real\\module.qc", root.join("backslash-alias.qc")).unwrap();
+    fs::write(root.join("real/module.coffee"), "export value = 42").unwrap();
+    fs::write(base.join("outside.coffee"), "export value = 0").unwrap();
+    fs::write(root.join("real:module.coffee"), "export value = 1").unwrap();
+    fs::write(root.join("real\\module.coffee"), "export value = 2").unwrap();
+    symlink("real/module.coffee", root.join("alias.coffee")).unwrap();
+    symlink(base.join("outside.coffee"), root.join("escape.coffee")).unwrap();
+    symlink("real:module.coffee", root.join("colon-alias.coffee")).unwrap();
+    symlink("real\\module.coffee", root.join("backslash-alias.coffee")).unwrap();
 
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
     let alias = loader.load_entry("alias").unwrap();
-    assert_eq!(alias.name(), "real/module.qc");
+    assert_eq!(alias.name(), "real/module.coffee");
     let error = loader.load_entry("escape").unwrap_err();
     assert_eq!(
         error.message(),
-        "module path escapes configured root: escape.qc"
+        "module path escapes configured root: escape.coffee"
     );
     for alias in ["colon-alias", "backslash-alias"] {
         let error = loader.load_entry(alias).unwrap_err();
         assert_eq!(
             error.message(),
-            format!("invalid module target: {alias}.qc")
+            format!("invalid module target: {alias}.coffee")
         );
     }
-    let locked = root.join("locked.qc");
+    let locked = root.join("locked.coffee");
     fs::write(&locked, "export value = 3").unwrap();
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
     let error = loader.load_entry("locked").unwrap_err();
-    assert_eq!(error.message(), "module source is not readable: locked.qc");
+    assert_eq!(
+        error.message(),
+        "module source is not readable: locked.coffee"
+    );
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
     let _ = fs::remove_dir_all(base);
 }

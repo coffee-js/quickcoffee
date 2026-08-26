@@ -1,10 +1,9 @@
 //! Literate-programming renderer and checker for QuickCoffee sources.
 
-use quickcoffee::{Context, Engine, Value};
+use quickcoffee::{Context, Value};
 use std::{
     env,
     ffi::OsString,
-    fmt::Write as _,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -12,7 +11,9 @@ use std::{
 };
 
 fn usage() {
-    eprintln!("Usage: qdocco [--check | --markdown] FILE [-o OUTPUT]\n       qdocco --version");
+    eprintln!(
+        "Usage: qdocco [--check | --markdown] DOCUMENT.litcoffee [-o OUTPUT]\n       qdocco --version"
+    );
 }
 fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
     match (fs::canonicalize(left), fs::canonicalize(right)) {
@@ -65,43 +66,73 @@ fn escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
-fn prose_text(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    let text = trimmed.strip_prefix("##")?;
-    (!text.starts_with('#')).then_some(text)
+fn literate_code_line(line: &str) -> Option<&str> {
+    line.strip_prefix("    ")
+        .or_else(|| line.strip_prefix('\t'))
 }
 fn split_source(source: &str) -> (String, String) {
     let mut prose = String::new();
     let mut code = String::new();
-    let mut in_block_comment = false;
+    let mut in_code = false;
+    let mut code_may_start = true;
     for line in source.lines() {
-        let trimmed = line.trim_start();
-        if in_block_comment {
-            code.push_str(line);
-            code.push('\n');
-            if trimmed.contains("###") {
-                in_block_comment = false;
-            }
-        } else if let Some(after_marker) = trimmed.strip_prefix("###") {
-            code.push_str(line);
-            code.push('\n');
-            in_block_comment = !after_marker.contains("###");
-        } else if let Some(text) = prose_text(line) {
-            prose.push_str(text.trim());
+        if line.trim().is_empty() {
             prose.push('\n');
-        } else {
-            code.push_str(line);
             code.push('\n');
+            code_may_start = true;
+            continue;
         }
+        if let Some(code_line) = literate_code_line(line) {
+            if in_code || code_may_start {
+                code.push_str(code_line);
+                code.push('\n');
+                in_code = true;
+                code_may_start = false;
+                continue;
+            }
+        }
+        prose.push_str(line);
+        prose.push('\n');
+        in_code = false;
+        code_may_start = false;
     }
-    (prose, code)
+    (trim_section(&prose), trim_section(&code))
+}
+fn trim_section(section: &str) -> String {
+    let section = section.trim_matches('\n');
+    if section.is_empty() {
+        String::new()
+    } else {
+        format!("{section}\n")
+    }
+}
+fn render_prose_html(source: &str) -> String {
+    source
+        .split("\n\n")
+        .filter_map(|paragraph| {
+            let paragraph = paragraph.trim();
+            if paragraph.is_empty() {
+                return None;
+            }
+            let (tag, text) = if let Some(text) = paragraph.strip_prefix("### ") {
+                ("h3", text)
+            } else if let Some(text) = paragraph.strip_prefix("## ") {
+                ("h2", text)
+            } else if let Some(text) = paragraph.strip_prefix("# ") {
+                ("h1", text)
+            } else {
+                ("p", paragraph)
+            };
+            Some(format!(
+                "<{tag}>{}</{tag}>",
+                escape(&text.replace('\n', " "))
+            ))
+        })
+        .collect()
 }
 fn render(source: &str, result: &str) -> String {
     let (prose_text, code) = split_source(source);
-    let prose = prose_text.lines().fold(String::new(), |mut prose, line| {
-        writeln!(prose, "<p>{}</p>", escape(line)).expect("writing to a string cannot fail");
-        prose
-    });
+    let prose = render_prose_html(&prose_text);
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>QuickCoffee document</title><style>body{{font:16px system-ui;display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:2rem}}pre{{background:#f5f5f5;padding:1rem;white-space:pre-wrap}}footer{{grid-column:1/-1}}</style><main><h1>Notes</h1>{prose}</main><main><h1>Code</h1><pre><code>{}</code></pre></main><footer>Final value: <code>{}</code></footer>",
         escape(&code),
@@ -112,7 +143,7 @@ fn render_markdown(source: &str, result: &str) -> String {
     let (prose, code) = split_source(source);
     let fence = markdown_fence(source);
     format!(
-        "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}quickcoffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"
+        "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}coffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"
     )
 }
 fn markdown_fence(source: &str) -> String {
@@ -160,6 +191,10 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
+    if input.extension().and_then(|extension| extension.to_str()) != Some("litcoffee") {
+        eprintln!("qdocco expects a .litcoffee document");
+        return ExitCode::from(2);
+    }
     if check && markdown {
         eprintln!("--check and --markdown are mutually exclusive");
         return ExitCode::from(2);
@@ -171,14 +206,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let chunk = match Engine::new().compile(&source) {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(1);
-        }
-    };
-    let result = match Context::new().run(chunk) {
+    let source_name = input.to_string_lossy();
+    let result = match Context::new().eval_named(&source_name, &source) {
         Ok(x) => x,
         Err(e) => {
             eprintln!("{e}");
@@ -212,7 +241,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::write_output;
+    use super::{render_markdown, split_source, write_output};
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -240,5 +269,15 @@ mod tests {
         write_output(&destination, "new").expect("replace output");
         assert_eq!(fs::read_to_string(&destination).expect("new output"), "new");
         fs::remove_dir_all(directory).expect("remove temporary directory");
+    }
+
+    #[test]
+    fn literate_source_renders_markdown_prose_and_extracted_coffee() {
+        let source = "# Rules\n\n    answer = 40\n    answer + 2\n";
+        let (prose, code) = split_source(source);
+        assert_eq!(prose.trim(), "# Rules");
+        assert_eq!(code.trim(), "answer = 40\nanswer + 2");
+        let rendered = render_markdown(source, "42");
+        assert!(rendered.contains("````coffee\nanswer = 40"));
     }
 }

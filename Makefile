@@ -26,23 +26,23 @@ api-doc:
 	RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --locked --no-deps
 
 doc-check:
-	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.zh-CN.qc
-	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.classical-zh.qc
-	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.en.qc
-	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.latin.qc
-	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.devanagari-sa.qc
+	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.zh-CN.litcoffee
+	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.classical-zh.litcoffee
+	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.en.litcoffee
+	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.latin.litcoffee
+	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.devanagari-sa.litcoffee
 
 docs: doc-check
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.zh-CN.qc -o docs/manual.zh-CN.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.classical-zh.qc -o docs/manual.classical-zh.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.en.qc -o docs/manual.en.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.qc -o docs/manual.latin.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.html
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.zh-CN.qc -o docs/manual.zh-CN.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.classical-zh.qc -o docs/manual.classical-zh.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.en.qc -o docs/manual.en.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.latin.qc -o docs/manual.latin.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.qc -o docs/manual.devanagari-sa.md
+	cargo run --locked --quiet --bin qdocco -- manuals/manual.zh-CN.litcoffee -o docs/manual.zh-CN.html
+	cargo run --locked --quiet --bin qdocco -- manuals/manual.classical-zh.litcoffee -o docs/manual.classical-zh.html
+	cargo run --locked --quiet --bin qdocco -- manuals/manual.en.litcoffee -o docs/manual.en.html
+	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.litcoffee -o docs/manual.latin.html
+	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.litcoffee -o docs/manual.devanagari-sa.html
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.zh-CN.litcoffee -o docs/manual.zh-CN.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.classical-zh.litcoffee -o docs/manual.classical-zh.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.en.litcoffee -o docs/manual.en.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.latin.litcoffee -o docs/manual.latin.md
+	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.litcoffee -o docs/manual.devanagari-sa.md
 
 check: fmt test release-test examples package-metadata package qbench-check clippy api-doc doc-check
 

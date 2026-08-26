@@ -1,7 +1,3 @@
-# QuickCoffee document
-
-## Notes
-
 # QuickCoffee 用法
 
 
@@ -14,7 +10,15 @@
 
 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无公开原型之链、全局或游离之 this、eval 与内嵌之文；今已有缩进 class、构造、受限接收者、new、私有 extends 之链、静析之 super，及可逸出而不泄接收者之 =>。
 
+    class BoundCounter
+      constructor: (@value) ->
+      callback: ->
+        =>
+          @value = @value + 1
+          @value
 
+    bound_callback = new BoundCounter(40).callback()
+    bound_callback()
 
 # 注一行；### … ### 注一段，弗相嵌，先于布局析法略之。
 
@@ -92,6 +96,10 @@ Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
 
 其内府皆常函，如 print、len、type、error、range、str、trim、contains、starts_with、ends_with、sort、concat、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split、assert；RFC 0139 之字询严而无 locale，trim 依固定 Unicode White_Space 表；RFC 0140 之 sort 不改原列，稳次有限同类标量；RFC 0144 之 concat 惟连二同类 String 或 Array，先验资源而后作新值；error(code, message, data, cause) 作密封 Error，catch 得之，而资源之误不可捕。Decimal 以 m 为缀，除不尽者须明定数位与舍法。
 
+    trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
+    contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
+    sort(['中', 'a', '☕']) == ['a', '☕', '中']
+    concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
 
 函式取词法之境；末常参可书 y = 2，参缺或传 nil 则于函中取其值；末有余参，则书 tail...。
 
@@ -145,158 +153,71 @@ for 所系可为严式：for [left, right] in pairs，每项全合乃易名。
 
 后置之推导亦循严收集：value * 2 for value in items，或括以 [value * 2 for value in items]。
 
-## Code
-
-````coffee
-class BoundCounter
-  constructor: (@value) ->
-  callback: ->
-    =>
-      @value = @value + 1
-      @value
-
-bound_callback = new BoundCounter(40).callback()
-bound_callback()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
-contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
-sort(['中', 'a', '☕']) == ['a', '☕', '中']
-concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-甲 = 6
-倍 = (x) -> x * 2
-shorthand = 'yes'
-[first, {point: [x, y]}] = [0, {point: [20, 22]}]
-scale = ([left, right], {factor}) -> (left + right) * factor
-倍(甲) == 12 and "其数为 #{倍(甲)}" == '其数为 12' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((首, y = 2) -> 首 + y)(40) == 42 and ((首, 余...) -> 首 + len(余))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
-步和 = 0
-for n in [1..9] by 3 then 步和 = 步和 + n
-步和 == 12
-len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
-后置之倍 = value * 2 for value in [1..3]
-后置之倍 == [2, 4, 6]
-计数 = 2
-前增 = ++计数
-后减 = 计数--
-[前增, 后减, 计数] == [3, 3, 3]
-[-7 // 5, -7 %% 5] == [-2, 3]
-[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
-continued = 1 +
-  2 * 3
-continued == 7
-message = "hello
-  world"
-message == 'hello world'
-escaped = "A\\x42\\u{43}"
-escaped == 'ABC'
-folded = (1 + 2 * 3) == 7
-folded
-values = [
-  1
-  2
-]
-values == [1, 2]
-record = {
-  first: 20
-  second: 22
-}
-record.first + record.second == 42
-indented_record =
-  first: 20
-  nested:
-    second: 22
-indented_record.nested.second == 22
-implicit_add = (left, right) -> left + right
-implicit_answer = implicit_add 20, 22
-implicit_answer == 42
-3 not in [1, 2] and '缺' not of {在: 1}
-循环数 = 0
-loop
-  循环数 = 循环数 + 1
-  break if 循环数 == 3
-循环数 == 3
-裸加 = left, right -> left + right
-裸加(20, 22) == 42
-后置数 = 0
-后置数 = 后置数 + 1 while 后置数 < 3
-后置数 == 3
-切片数 = [0..4][1..3]
-len(切片数) == 3 and 切片数[0] == 1 and [0..4][-3...-1][0] == 2
-nil? == false and false? == true and 0? == true
-默认数 ?= 42
-默认数 == 42
-### 此段有无效 ` 文，机不求之
-###
-0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
-json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
-encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
-42 == 42
-````
-
-## Final value
-
-`true`
+    甲 = 6
+    倍 = (x) -> x * 2
+    shorthand = 'yes'
+    [first, {point: [x, y]}] = [0, {point: [20, 22]}]
+    scale = ([left, right], {factor}) -> (left + right) * factor
+    倍(甲) == 12 and "其数为 #{倍(甲)}" == '其数为 12' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((首, y = 2) -> 首 + y)(40) == 42 and ((首, 余...) -> 首 + len(余))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+    步和 = 0
+    for n in [1..9] by 3 then 步和 = 步和 + n
+    步和 == 12
+    len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+    后置之倍 = value * 2 for value in [1..3]
+    后置之倍 == [2, 4, 6]
+    计数 = 2
+    前增 = ++计数
+    后减 = 计数--
+    [前增, 后减, 计数] == [3, 3, 3]
+    [-7 // 5, -7 %% 5] == [-2, 3]
+    [5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+    continued = 1 +
+      2 * 3
+    continued == 7
+    message = "hello
+      world"
+    message == 'hello world'
+    escaped = "A\\x42\\u{43}"
+    escaped == 'ABC'
+    folded = (1 + 2 * 3) == 7
+    folded
+    values = [
+      1
+      2
+    ]
+    values == [1, 2]
+    record = {
+      first: 20
+      second: 22
+    }
+    record.first + record.second == 42
+    indented_record =
+      first: 20
+      nested:
+        second: 22
+    indented_record.nested.second == 22
+    implicit_add = (left, right) -> left + right
+    implicit_answer = implicit_add 20, 22
+    implicit_answer == 42
+    3 not in [1, 2] and '缺' not of {在: 1}
+    循环数 = 0
+    loop
+      循环数 = 循环数 + 1
+      break if 循环数 == 3
+    循环数 == 3
+    裸加 = left, right -> left + right
+    裸加(20, 22) == 42
+    后置数 = 0
+    后置数 = 后置数 + 1 while 后置数 < 3
+    后置数 == 3
+    切片数 = [0..4][1..3]
+    len(切片数) == 3 and 切片数[0] == 1 and [0..4][-3...-1][0] == 2
+    nil? == false and false? == true and 0? == true
+    默认数 ?= 42
+    默认数 == 42
+    ### 此段有无效 ` 文，机不求之
+    ###
+    0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+    json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+    encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
+    42 == 42

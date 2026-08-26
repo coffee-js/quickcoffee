@@ -11,9 +11,9 @@ RFC 0119 把模块源码解析权完全留给宿主，并刻意没有提供文�
 ## 决策
 
 1. 新增 `RestrictedFileModuleLoader::new(root)`。构造函数只接受一个宿主明确提供且已经存在的目录，并将其打开为 capability directory；没有全局默认实例，也不读取当前目录、环境变量、搜索路径或网络。`MemoryModuleLoader` 与 `ModuleLoader` 契约保持不变。
-2. `load_entry(name)` 接受根目录相对的 UTF-8 入口名。入口名不得为空，不得包含绝对路径、`.`、`..`、反斜杠或冒号；未写扩展名时追加 `.qc`，显式扩展名只能是小写 `.qc`。
+2. `load_entry(name)` 接受根目录相对的 UTF-8 入口名。入口名不得为空，不得包含绝对路径、`.`、`..`、反斜杠或冒号；未写扩展名时追加 `.coffee`，显式扩展名只能是小写 `.coffee` 或 `.litcoffee`。
 3. 依赖 specifier 必须显式以 `./` 或 `../` 开头，并相对 referrer 的规范根目录相对名称解析。bare/package 名、绝对路径、平台专用分隔符、其他扩展名、空段以及词法上越过根目录的 `..` 均返回结构化 runtime error。
-4. 所有规范化和打开操作都相对同一个已打开的 capability directory 执行。规范目标必须仍位于该能力内、是 `.qc` 普通文件且内容为 UTF-8；打开后的同一文件 handle 用于 metadata 验证和读取，因此并发替换路径或符号链接不能把读取重定向到根目录外。根目录内的符号链接别名使用真实目标的根目录相对 `/` 分隔名称作为 `ModuleSource::name`，且规范名称组件也拒绝反斜杠和冒号，使缓存、循环识别与跨平台 referrer 解析使用同一合法身份。
+4. 所有规范化和打开操作都相对同一个已打开的 capability directory 执行。规范目标必须仍位于该能力内、是 `.coffee` 或 `.litcoffee` 普通文件且内容为 UTF-8；打开后的同一文件 handle 用于 metadata 验证和读取，因此并发替换路径或符号链接不能把读取重定向到根目录外。根目录内的符号链接别名使用真实目标的根目录相对 `/` 分隔名称作为 `ModuleSource::name`，且规范名称组件也拒绝反斜杠和冒号，使缓存、循环识别与跨平台 referrer 解析使用同一合法身份。
 5. 缺失文件、无效 entry/specifier/referrer、根目录越界、无效目标、读取失败和非 UTF-8 源码使用稳定且可区分的 `ErrorKind::Runtime` 分类。编译诊断继续使用 loader 返回的规范名称；fuel、取消、执行统计、bytecode、指纹和导出语义不变。
 6. 本 RFC 只提供显式宿主 loader 与以后 CLI 可复用的解析策略。`qcoffee` 单文件模式仍拒绝模块指令；CLI 激活、初始化循环策略、模块图指纹、预编译包和 qtest 包用例继续由 issue #75 的后续切片定义。
 

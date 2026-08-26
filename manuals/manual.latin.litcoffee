@@ -1,7 +1,3 @@
-# QuickCoffee document
-
-## Notes
-
 # Manuale QuickCoffee
 
 
@@ -80,7 +76,15 @@ Argumenta post -- ut series chordarum ordinaria argv praebentur.
 
 JavaScript non est: catena prototyporum publica, this globale vel liberum, eval, atque JavaScript inclusum desunt. Classes indentatae, constructio, receptores conclusi, new, catena privata extends, super statice resolutum atque => receptorem ligans et tuto effugiens iam adsunt.
 
+    class BoundCounter
+      constructor: (@value) ->
+      callback: ->
+        =>
+          @value = @value + 1
+          @value
 
+    bound_callback = new BoundCounter(40).callback()
+    bound_callback()
 
 # commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
 
@@ -94,6 +98,10 @@ Comparationes conectae medium semel servant atque priore falso breviant.
 
 Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; RFC 0140 sort seriem novam stabilem scalarum finitorum eiusdem generis reddit; RFC 0144 concat duas String aut duas Array immutabiliter coniungit et limites ante allocationem probat; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
 
+    trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
+    contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
+    sort(['中', 'a', '☕']) == ['a', '☕', '中']
+    concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
 
 Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 
@@ -147,126 +155,71 @@ Iteratio seriei etiam indicem a zero numeratum ligare potest: for value, index i
 
 Comprehensio postfix eandem collectionem strictam servat: value * 2 for value in items, vel [value * 2 for value in items].
 
-## Code
-
-````coffee
-class BoundCounter
-  constructor: (@value) ->
-  callback: ->
-    =>
-      @value = @value + 1
-      @value
-
-bound_callback = new BoundCounter(40).callback()
-bound_callback()
-
-
-
-
-
-
-
-trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
-contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
-sort(['中', 'a', '☕']) == ['a', '☕', '中']
-concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-numerus = 7
-quadratum = (x) -> x * x
-shorthand = 'yes'
-[first, {point: [x, y]}] = [0, {point: [20, 22]}]
-scale = ([left, right], {factor}) -> (left + right) * factor
-quadratum(numerus) == 49 and "numerus=#{quadratum(numerus)}" == 'numerus=49' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((caput, y = 2) -> caput + y)(40) == 42 and ((caput, cauda...) -> caput + len(cauda))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
-summa_gradus = 0
-for n in [1..9] by 3 then summa_gradus = summa_gradus + n
-summa_gradus == 12
-len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
-postfixum_duplum = value * 2 for value in [1..3]
-postfixum_duplum == [2, 4, 6]
-numerus_mut = 2
-praefixum_mut = ++numerus_mut
-postfixum_mut = numerus_mut--
-[praefixum_mut, postfixum_mut, numerus_mut] == [3, 3, 3]
-[-7 // 5, -7 %% 5] == [-2, 3]
-[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
-continued = 1 +
-  2 * 3
-continued == 7
-message = "hello
-  world"
-message == 'hello world'
-escaped = "A\\x42\\u{43}"
-escaped == 'ABC'
-folded = (1 + 2 * 3) == 7
-folded
-values = [
-  1
-  2
-]
-values == [1, 2]
-record = {
-  first: 20
-  second: 22
-}
-record.first + record.second == 42
-indented_record =
-  first: 20
-  nested:
-    second: 22
-indented_record.nested.second == 22
-implicit_add = (left, right) -> left + right
-implicit_answer = implicit_add 20, 22
-implicit_answer == 42
-3 not in [1, 2] and 'absens' not of {praesens: 1}
-numerus_circuli = 0
-loop
-  numerus_circuli = numerus_circuli + 1
-  break if numerus_circuli == 3
-numerus_circuli == 3
-additio_nuda = sinister, dexter -> sinister + dexter
-additio_nuda(20, 22) == 42
-numerus_postfixus = 0
-numerus_postfixus = numerus_postfixus + 1 while numerus_postfixus < 3
-numerus_postfixus == 3
-sectio = [0..4][1..3]
-len(sectio) == 3 and sectio[0] == 1 and [0..4][-3...-1][0] == 2
-nil? == false and false? == true and 0? == true
-valor_defectus ?= 42
-valor_defectus == 42
-### fons invalidus ` hic ignoratur
-###
-0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
-json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
-encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
-42 == 42
-````
-
-## Final value
-
-`true`
+    numerus = 7
+    quadratum = (x) -> x * x
+    shorthand = 'yes'
+    [first, {point: [x, y]}] = [0, {point: [20, 22]}]
+    scale = ([left, right], {factor}) -> (left + right) * factor
+    quadratum(numerus) == 49 and "numerus=#{quadratum(numerus)}" == 'numerus=49' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((caput, y = 2) -> caput + y)(40) == 42 and ((caput, cauda...) -> caput + len(cauda))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+    summa_gradus = 0
+    for n in [1..9] by 3 then summa_gradus = summa_gradus + n
+    summa_gradus == 12
+    len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+    postfixum_duplum = value * 2 for value in [1..3]
+    postfixum_duplum == [2, 4, 6]
+    numerus_mut = 2
+    praefixum_mut = ++numerus_mut
+    postfixum_mut = numerus_mut--
+    [praefixum_mut, postfixum_mut, numerus_mut] == [3, 3, 3]
+    [-7 // 5, -7 %% 5] == [-2, 3]
+    [5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+    continued = 1 +
+      2 * 3
+    continued == 7
+    message = "hello
+      world"
+    message == 'hello world'
+    escaped = "A\\x42\\u{43}"
+    escaped == 'ABC'
+    folded = (1 + 2 * 3) == 7
+    folded
+    values = [
+      1
+      2
+    ]
+    values == [1, 2]
+    record = {
+      first: 20
+      second: 22
+    }
+    record.first + record.second == 42
+    indented_record =
+      first: 20
+      nested:
+        second: 22
+    indented_record.nested.second == 22
+    implicit_add = (left, right) -> left + right
+    implicit_answer = implicit_add 20, 22
+    implicit_answer == 42
+    3 not in [1, 2] and 'absens' not of {praesens: 1}
+    numerus_circuli = 0
+    loop
+      numerus_circuli = numerus_circuli + 1
+      break if numerus_circuli == 3
+    numerus_circuli == 3
+    additio_nuda = sinister, dexter -> sinister + dexter
+    additio_nuda(20, 22) == 42
+    numerus_postfixus = 0
+    numerus_postfixus = numerus_postfixus + 1 while numerus_postfixus < 3
+    numerus_postfixus == 3
+    sectio = [0..4][1..3]
+    len(sectio) == 3 and sectio[0] == 1 and [0..4][-3...-1][0] == 2
+    nil? == false and false? == true and 0? == true
+    valor_defectus ?= 42
+    valor_defectus == 42
+    ### fons invalidus ` hic ignoratur
+    ###
+    0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+    json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+    encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
+    42 == 42

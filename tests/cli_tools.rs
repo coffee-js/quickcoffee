@@ -28,9 +28,9 @@ fn bin(name: &str) -> String {
 fn qdocco_renders_escaped_source_and_checks() {
     let temp = std::env::temp_dir().join(format!("qcoffee-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
-    let input = temp.join("demo.qc");
+    let input = temp.join("demo.litcoffee");
     let output = temp.join("demo.html");
-    fs::write(&input, "## <Guide>\n1 + 2\n").unwrap();
+    fs::write(&input, "# <Guide>\n\n    1 + 2\n").unwrap();
     assert!(
         Command::new(bin("qdocco"))
             .args([input.to_str().unwrap(), "-o", output.to_str().unwrap()])
@@ -47,8 +47,8 @@ fn qdocco_renders_escaped_source_and_checks() {
         .unwrap();
     assert_eq!(non_test_document.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&non_test_document.stderr).contains("expected true"));
-    let check_input = temp.join("check.qc");
-    fs::write(&check_input, "true\n").unwrap();
+    let check_input = temp.join("check.litcoffee");
+    fs::write(&check_input, "Passing document.\n\n    true\n").unwrap();
     assert!(
         Command::new(bin("qdocco"))
             .args(["--check", check_input.to_str().unwrap()])
@@ -70,12 +70,12 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let document = fs::read_to_string(&markdown).unwrap();
-    assert!(document.contains("## Notes\n\n<Guide>"));
-    assert!(document.contains("````quickcoffee\n1 + 2\n````"));
+    assert!(document.contains("## Notes\n\n# <Guide>"));
+    assert!(document.contains("````coffee\n1 + 2\n````"));
     assert!(document.contains("## Final value\n\n`3`"));
-    let fenced_input = temp.join("fenced.qc");
+    let fenced_input = temp.join("fenced.litcoffee");
     let fenced_output = temp.join("fenced.md");
-    fs::write(&fenced_input, "## Fence\n# ````\ntrue\n").unwrap();
+    fs::write(&fenced_input, "Fence\n\n    # ````\n    true\n").unwrap();
     assert!(
         Command::new(bin("qdocco"))
             .args([
@@ -89,10 +89,14 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let fenced_document = fs::read_to_string(&fenced_output).unwrap();
-    assert!(fenced_document.contains("`````quickcoffee\n# ````\ntrue\n`````"));
-    let block_input = temp.join("block-comment.qc");
+    assert!(fenced_document.contains("`````coffee\n# ````\ntrue\n`````"));
+    let block_input = temp.join("block-comment.litcoffee");
     let block_output = temp.join("block-comment.html");
-    fs::write(&block_input, "### hidden code ###\ntrue\n").unwrap();
+    fs::write(
+        &block_input,
+        "Code comments remain code.\n\n    ### hidden code ###\n    true\n",
+    )
+    .unwrap();
     assert!(
         Command::new(bin("qdocco"))
             .args([
@@ -120,30 +124,87 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let block_markdown_document = fs::read_to_string(&block_markdown).unwrap();
-    assert!(block_markdown_document.contains("````quickcoffee\n### hidden code ###\ntrue\n````"));
+    assert!(block_markdown_document.contains("````coffee\n### hidden code ###\ntrue\n````"));
     let overwrite = Command::new(bin("qdocco"))
         .args([input.to_str().unwrap(), "-o", input.to_str().unwrap()])
         .output()
         .unwrap();
     assert_eq!(overwrite.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("output path must differ"));
-    assert_eq!(fs::read_to_string(&input).unwrap(), "## <Guide>\n1 + 2\n");
+    assert_eq!(
+        fs::read_to_string(&input).unwrap(),
+        "# <Guide>\n\n    1 + 2\n"
+    );
     let conflict = Command::new(bin("qdocco"))
         .args(["--check", "--markdown", input.to_str().unwrap()])
         .output()
         .unwrap();
     assert_eq!(conflict.status.code(), Some(2));
+    let ordinary = temp.join("ordinary.coffee");
+    fs::write(&ordinary, "true\n").unwrap();
+    let rejected = Command::new(bin("qdocco")).arg(ordinary).output().unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("qdocco expects a .litcoffee document")
+    );
     let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
+fn qcoffee_executes_and_checks_litcoffee_files() {
+    let input = std::env::temp_dir().join(format!(
+        "qcoffee-cli-literate-{}.litcoffee",
+        std::process::id()
+    ));
+    fs::write(
+        &input,
+        "# Executable document\n\n    answer = 40\n    answer + 2\n",
+    )
+    .unwrap();
+    let run = Command::new(bin("qcoffee")).arg(&input).output().unwrap();
+    assert!(run.status.success());
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+    let check = Command::new(bin("qcoffee"))
+        .args(["--check", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(check.status.success());
+    assert!(check.stdout.is_empty());
+    let json = Command::new(bin("qcoffee"))
+        .args(["--json", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&json.stdout),
+        "{\"ok\":true,\"value\":42}\n"
+    );
+    let dump = Command::new(bin("qcoffee"))
+        .args(["--dump-bytecode", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(dump.status.success());
+    assert!(String::from_utf8_lossy(&dump.stdout).contains("Return"));
+    let fingerprint = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(fingerprint.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&fingerprint.stdout).trim().len(),
+        16
+    );
+    let _ = fs::remove_file(input);
 }
 #[test]
 fn qtest_reports_success_and_failure() {
     let ok = Command::new(bin("qtest"))
-        .arg("tests/scripts/arithmetic.qc")
+        .arg("tests/scripts/arithmetic.coffee")
         .output()
         .unwrap();
     assert!(ok.status.success());
     let stats = Command::new(bin("qtest"))
-        .args(["--stats", "tests/scripts/arithmetic.qc"])
+        .args(["--stats", "tests/scripts/arithmetic.coffee"])
         .output()
         .unwrap();
     assert!(stats.status.success());
@@ -152,8 +213,10 @@ fn qtest_reports_success_and_failure() {
     assert!(stats_stderr.contains("qtest stats:"));
     assert!(stats_stderr.contains("instructions="));
     assert!(stats_stderr.contains("fuel_remaining="));
-    let invalid =
-        std::env::temp_dir().join(format!("qcoffee-qtest-invalid-{}.qc", std::process::id()));
+    let invalid = std::env::temp_dir().join(format!(
+        "qcoffee-qtest-invalid-{}.coffee",
+        std::process::id()
+    ));
     fs::write(&invalid, "@\n").unwrap();
     let invalid_stats = Command::new(bin("qtest"))
         .args(["--stats", invalid.to_str().unwrap()])
@@ -173,27 +236,39 @@ fn qtest_reports_success_and_failure() {
     assert!(directory.status.success());
     let directory_stdout = String::from_utf8_lossy(&directory.stdout);
     for fixture in [
-        "tests/scripts/arithmetic.qc",
-        "tests/scripts/collections.qc",
-        "tests/scripts/comprehension.qc",
-        "tests/scripts/control-flow.qc",
-        "tests/scripts/function.qc",
-        "tests/scripts/stdlib.qc",
+        "tests/scripts/arithmetic.coffee",
+        "tests/scripts/collections.coffee",
+        "tests/scripts/comprehension.coffee",
+        "tests/scripts/control-flow.coffee",
+        "tests/scripts/function.coffee",
+        "tests/scripts/stdlib.coffee",
     ] {
         assert!(
             directory_stdout.contains(fixture),
             "qtest skipped {fixture}"
         );
     }
+    let literate = std::env::temp_dir().join(format!(
+        "qcoffee-qtest-literate-{}.litcoffee",
+        std::process::id()
+    ));
+    fs::write(&literate, "Executable test prose.\n\n    true\n").unwrap();
+    let literate_output = Command::new(bin("qtest")).arg(&literate).output().unwrap();
+    assert!(literate_output.status.success());
+    let _ = fs::remove_file(literate);
     let filtered = Command::new(bin("qtest"))
         .args(["--filter", "stdlib", "tests/scripts"])
         .output()
         .unwrap();
     assert!(filtered.status.success());
     assert_eq!(String::from_utf8_lossy(&filtered.stdout).lines().count(), 1);
-    assert!(String::from_utf8_lossy(&filtered.stdout).contains("stdlib.qc"));
+    assert!(String::from_utf8_lossy(&filtered.stdout).contains("stdlib.coffee"));
     let single_file = Command::new(bin("qtest"))
-        .args(["--filter", "arithmetic.qc", "tests/scripts/arithmetic.qc"])
+        .args([
+            "--filter",
+            "arithmetic.coffee",
+            "tests/scripts/arithmetic.coffee",
+        ])
         .output()
         .unwrap();
     assert!(single_file.status.success());
@@ -201,7 +276,7 @@ fn qtest_reports_success_and_failure() {
         String::from_utf8_lossy(&single_file.stdout).lines().count(),
         1
     );
-    assert!(String::from_utf8_lossy(&single_file.stdout).contains("arithmetic.qc"));
+    assert!(String::from_utf8_lossy(&single_file.stdout).contains("arithmetic.coffee"));
     let listed = Command::new(bin("qtest"))
         .args(["--list", "--filter", "stdlib", "tests/scripts"])
         .output()
@@ -209,7 +284,7 @@ fn qtest_reports_success_and_failure() {
     assert!(listed.status.success());
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout),
-        "tests/scripts/stdlib.qc\n"
+        "tests/scripts/stdlib.coffee\n"
     );
     let missing_filter = Command::new(bin("qtest"))
         .args(["--filter", "does-not-exist", "tests/scripts"])
@@ -222,11 +297,12 @@ fn qtest_reports_success_and_failure() {
         .unwrap();
     assert_eq!(list_conflict.status.code(), Some(2));
     let bad = Command::new(bin("qtest"))
-        .arg("tests/fixtures/failure.qc")
+        .arg("tests/fixtures/failure.coffee")
         .output()
         .unwrap();
     assert!(!bad.status.success());
-    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-fuel-{}.qc", std::process::id()));
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-qtest-fuel-{}.coffee", std::process::id()));
     fs::write(&temp, "while true then 1\n").unwrap();
     let exhausted = Command::new(bin("qtest"))
         .args(["--fuel", "10", temp.to_str().unwrap()])
@@ -245,6 +321,38 @@ fn qtest_reports_success_and_failure() {
     let _ = fs::remove_file(temp);
 }
 
+#[test]
+fn qtest_discovers_only_canonical_source_extensions() {
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-qtest-extensions-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    fs::write(temp.join("ordinary.coffee"), "true\n").unwrap();
+    fs::write(
+        temp.join("document.litcoffee"),
+        "Executable prose.\n\n    true\n",
+    )
+    .unwrap();
+    fs::write(temp.join("legacy.qc"), "@\n").unwrap();
+
+    let discovered = Command::new(bin("qtest")).arg(&temp).output().unwrap();
+    assert!(discovered.status.success());
+    let stdout = String::from_utf8_lossy(&discovered.stdout);
+    assert!(stdout.contains("ordinary.coffee"));
+    assert!(stdout.contains("document.litcoffee"));
+    assert!(!stdout.contains("legacy.qc"));
+
+    let explicit_legacy = Command::new(bin("qtest"))
+        .arg(temp.join("legacy.qc"))
+        .output()
+        .unwrap();
+    assert_eq!(explicit_legacy.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&explicit_legacy.stderr)
+            .contains("expected a .coffee or .litcoffee source file")
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
 #[cfg(unix)]
 #[test]
 fn qtest_ignores_recursive_directory_symlinks() {
@@ -252,7 +360,7 @@ fn qtest_ignores_recursive_directory_symlinks() {
 
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-cycle-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
-    fs::write(temp.join("pass.qc"), "true\n").unwrap();
+    fs::write(temp.join("pass.coffee"), "true\n").unwrap();
     symlink(&temp, temp.join("loop")).unwrap();
     let output = Command::new(bin("qtest"))
         .args(["--tap", temp.to_str().unwrap()])
@@ -261,7 +369,10 @@ fn qtest_ignores_recursive_directory_symlinks() {
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        format!("TAP version 13\nok 1 - {}/pass.qc\n1..1\n", temp.display())
+        format!(
+            "TAP version 13\nok 1 - {}/pass.coffee\n1..1\n",
+            temp.display()
+        )
     );
     let _ = fs::remove_dir_all(temp);
 }
@@ -274,8 +385,8 @@ fn qtest_executes_a_file_symlink_only_once() {
     let temp =
         std::env::temp_dir().join(format!("qcoffee-qtest-file-alias-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
-    let actual = temp.join("actual.qc");
-    let alias = temp.join("alias.qc");
+    let actual = temp.join("actual.coffee");
+    let alias = temp.join("alias.coffee");
     fs::write(&actual, "true\n").unwrap();
     symlink(&actual, &alias).unwrap();
     let output = Command::new(bin("qtest"))
@@ -305,7 +416,7 @@ fn every_cli_reports_the_same_package_version() {
 #[test]
 fn qtest_json_output_is_one_stable_record_per_file() {
     let ok = Command::new(bin("qtest"))
-        .args(["--json", "tests/scripts/arithmetic.qc"])
+        .args(["--json", "tests/scripts/arithmetic.coffee"])
         .output()
         .unwrap();
     assert!(ok.status.success());
@@ -313,9 +424,9 @@ fn qtest_json_output_is_one_stable_record_per_file() {
     assert_eq!(stdout.lines().count(), 1);
     assert!(stdout.ends_with("}\n"));
     assert!(stdout.contains("\"ok\":true"));
-    assert!(stdout.contains("\"file\":\"tests/scripts/arithmetic.qc\""));
+    assert!(stdout.contains("\"file\":\"tests/scripts/arithmetic.coffee\""));
     let bad = Command::new(bin("qtest"))
-        .args(["--json", "tests/fixtures/failure.qc"])
+        .args(["--json", "tests/fixtures/failure.coffee"])
         .output()
         .unwrap();
     assert!(!bad.status.success());
@@ -330,15 +441,15 @@ fn qtest_json_output_is_one_stable_record_per_file() {
 fn qtest_tap_output_is_deterministic_and_describes_failures() {
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-tap-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
-    fs::write(temp.join("a-fail.qc"), "1\n").unwrap();
-    fs::write(temp.join("b-pass.qc"), "true\n").unwrap();
+    fs::write(temp.join("a-fail.coffee"), "1\n").unwrap();
+    fs::write(temp.join("b-pass.coffee"), "true\n").unwrap();
     let output = Command::new(bin("qtest"))
         .args(["--tap", temp.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let fail_path = temp.join("a-fail.qc");
-    let pass_path = temp.join("b-pass.qc");
+    let fail_path = temp.join("a-fail.coffee");
+    let pass_path = temp.join("b-pass.coffee");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         format!(
@@ -350,9 +461,9 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     let reversed = Command::new(bin("qtest"))
         .args([
             "--tap",
-            temp.join("b-pass.qc").to_str().unwrap(),
-            temp.join("a-fail.qc").to_str().unwrap(),
-            temp.join("a-fail.qc").to_str().unwrap(),
+            temp.join("b-pass.coffee").to_str().unwrap(),
+            temp.join("a-fail.coffee").to_str().unwrap(),
+            temp.join("a-fail.coffee").to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -483,7 +594,7 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert_eq!(stats_check.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&stats_check.stderr).contains("execution-mode alternatives"));
 
-    let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.qc", std::process::id()));
+    let temp = std::env::temp_dir().join(format!("qcoffee-dump-{}.coffee", std::process::id()));
     fs::write(&temp, "1 + 2\n").unwrap();
     let conflicting_source = Command::new(bin("qcoffee"))
         .args(["-e", "1", "--check", temp.to_str().unwrap()])
@@ -560,7 +671,10 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
 
 #[test]
 fn qcoffee_json_file_errors_include_the_opaque_input_path() {
-    let temp = std::env::temp_dir().join(format!("qcoffee-named-source-{}.qc", std::process::id()));
+    let temp = std::env::temp_dir().join(format!(
+        "qcoffee-named-source-{}.coffee",
+        std::process::id()
+    ));
     fs::write(&temp, "value = 1\n@\n").unwrap();
     let path = temp.to_str().unwrap();
     let output = Command::new(bin("qcoffee"))
@@ -710,7 +824,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     assert!(resource_stdout.ends_with("\"line\":1}\n"));
 
     let missing = Command::new(bin("qcoffee"))
-        .args(["--json", "qcoffee-file-that-does-not-exist.qc"])
+        .args(["--json", "qcoffee-file-that-does-not-exist.coffee"])
         .output()
         .unwrap();
     assert!(!missing.status.success());
@@ -724,7 +838,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     assert!(missing.stderr.is_empty());
 
     let reverse_conflict = Command::new(bin("qcoffee"))
-        .args(["--check", "tests/scripts/arithmetic.qc", "--json"])
+        .args(["--check", "tests/scripts/arithmetic.coffee", "--json"])
         .output()
         .unwrap();
     assert_eq!(reverse_conflict.status.code(), Some(2));
@@ -733,9 +847,10 @@ fn qcoffee_json_reports_values_and_structured_errors() {
 
 #[test]
 fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
-    let temp = std::env::temp_dir().join(format!("qcoffee-fingerprint-{}.qc", std::process::id()));
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-fingerprint-{}.coffee", std::process::id()));
     let other = std::env::temp_dir().join(format!(
-        "qcoffee-fingerprint-other-{}.qc",
+        "qcoffee-fingerprint-other-{}.coffee",
         std::process::id()
     ));
     fs::write(&temp, "print('side effect')\n1 + 2\n").unwrap();
@@ -781,9 +896,9 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     let lib = root.join("lib");
     fs::create_dir_all(&app).unwrap();
     fs::create_dir_all(&lib).unwrap();
-    fs::write(lib.join("math.qc"), "export answer = 21\n").unwrap();
+    fs::write(lib.join("math.coffee"), "export answer = 21\n").unwrap();
     fs::write(
-        app.join("main.qc"),
+        app.join("main.coffee"),
         "import { answer } from '../lib/math'\nexport result = answer * 2\nexport argc = len(argv)\n",
     )
     .unwrap();
@@ -827,7 +942,8 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
         .unwrap();
     assert_eq!(missing_entry.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&missing_entry.stdout).contains("module not found: app/missing.qc")
+        String::from_utf8_lossy(&missing_entry.stdout)
+            .contains("module not found: app/missing.coffee")
     );
 
     let missing_root = root.join("missing-root");
@@ -843,9 +959,9 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     assert_eq!(missing_root.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&missing_root.stdout).contains("module root is unavailable"));
 
-    fs::write(lib.join("broken.qc"), "@\n").unwrap();
+    fs::write(lib.join("broken.coffee"), "@\n").unwrap();
     fs::write(
-        app.join("broken.qc"),
+        app.join("broken.coffee"),
         "import { value } from '../lib/broken'\nexport value = value\n",
     )
     .unwrap();
@@ -855,11 +971,11 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
         .unwrap();
     assert_eq!(broken.status.code(), Some(1));
     let broken_stdout = String::from_utf8_lossy(&broken.stdout);
-    assert!(broken_stdout.contains("\"source\":\"lib/broken.qc\""));
+    assert!(broken_stdout.contains("\"source\":\"lib/broken.coffee\""));
     assert!(broken_stdout.ends_with(",\"line\":1}\n"));
 
     fs::write(
-        app.join("escape.qc"),
+        app.join("escape.coffee"),
         "import { value } from '../../outside'\nexport value = value\n",
     )
     .unwrap();
@@ -873,12 +989,12 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     );
 
     fs::write(
-        app.join("cycle-a.qc"),
+        app.join("cycle-a.coffee"),
         "import { value } from './cycle-b'\nexport value = value\n",
     )
     .unwrap();
     fs::write(
-        app.join("cycle-b.qc"),
+        app.join("cycle-b.coffee"),
         "import { value } from './cycle-a'\nexport value = value\n",
     )
     .unwrap();
@@ -888,10 +1004,10 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
         .unwrap();
     assert_eq!(cycle.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&cycle.stderr).contains(
-        "circular module dependency: app/cycle-a.qc -> app/cycle-b.qc -> app/cycle-a.qc"
+        "circular module dependency: app/cycle-a.coffee -> app/cycle-b.coffee -> app/cycle-a.coffee"
     ));
 
-    fs::write(app.join("fuel.qc"), "loop 1\n").unwrap();
+    fs::write(app.join("fuel.coffee"), "loop 1\n").unwrap();
     let fuel = Command::new(bin("qcoffee"))
         .args(["--fuel", "8", "--module-root", root_text, "app/fuel"])
         .output()
@@ -908,7 +1024,7 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
 
     for args in [
         vec!["--module-root", root_text, "-e", "1"],
-        vec!["--module-root", root_text, "--check", "app/main.qc"],
+        vec!["--module-root", root_text, "--check", "app/main.coffee"],
         vec!["--module-root", root_text, "--interactive", "app/main"],
         vec!["--module-root", root_text, "app/main", "app/escape"],
     ] {
@@ -917,7 +1033,7 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     }
 
     let ordinary_module = Command::new(bin("qcoffee"))
-        .arg(app.join("main.qc"))
+        .arg(app.join("main.coffee"))
         .output()
         .unwrap();
     assert_eq!(ordinary_module.status.code(), Some(1));
@@ -927,9 +1043,9 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     {
         use std::os::unix::fs::symlink;
 
-        let outside = root.with_extension("outside.qc");
+        let outside = root.with_extension("outside.coffee");
         fs::write(&outside, "export value = 1\n").unwrap();
-        symlink(&outside, app.join("escape-link.qc")).unwrap();
+        symlink(&outside, app.join("escape-link.coffee")).unwrap();
         let link = Command::new(bin("qcoffee"))
             .args(["--module-root", root_text, "app/escape-link"])
             .output()

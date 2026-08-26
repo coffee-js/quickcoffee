@@ -69,7 +69,8 @@ impl ModuleLoader for MemoryModuleLoader {
 /// An opt-in filesystem loader confined to one open directory capability.
 ///
 /// Imports must use explicit `./` or `../` specifiers. Module names are
-/// root-relative UTF-8 paths with `/` separators and a `.qc` extension. Both
+/// root-relative UTF-8 paths with `/` separators and a `.coffee` or
+/// `.litcoffee` extension. Both
 /// lexical traversal above the root and symlink targets outside it are
 /// rejected before source is returned to the engine.
 #[derive(Clone, Debug)]
@@ -91,7 +92,7 @@ impl RestrictedFileModuleLoader {
         })
     }
 
-    /// Loads one root-relative entry module, inferring `.qc` when omitted.
+    /// Loads one root-relative entry module, inferring `.coffee` when omitted.
     pub fn load_entry(&self, name: &str) -> Result<ModuleSource, Error> {
         let name = entry_name(name)?;
         self.load_name(&name, name.as_str())
@@ -125,7 +126,11 @@ impl RestrictedFileModuleLoader {
             parts.push(component);
         }
         let canonical_name = parts.join("/");
-        if canonical.extension().and_then(|value| value.to_str()) != Some("qc") {
+        if !canonical
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(is_module_extension)
+        {
             return Err(Error::runtime(format!(
                 "invalid module target: {requested}"
             )));
@@ -236,7 +241,10 @@ fn canonical_referrer(referrer: &str) -> Result<Vec<String>, Error> {
     if parts
         .iter()
         .any(|part| part.is_empty() || part == "." || part == "..")
-        || parts.last().is_none_or(|part| !part.ends_with(".qc"))
+        || parts.last().is_none_or(|part| {
+            part.rsplit_once('.')
+                .is_none_or(|(_, extension)| !is_module_extension(extension))
+        })
     {
         return Err(Error::runtime(format!(
             "invalid module referrer: {referrer}"
@@ -250,15 +258,19 @@ fn add_module_extension(parts: &mut [String], requested: &str, subject: &str) ->
         .last_mut()
         .expect("validated module paths have a final component");
     if let Some((_, extension)) = name.rsplit_once('.') {
-        if extension != "qc" {
+        if !is_module_extension(extension) {
             return Err(Error::runtime(format!(
                 "invalid module {subject}: {requested}"
             )));
         }
     } else {
-        name.push_str(".qc");
+        name.push_str(".coffee");
     }
     Ok(())
+}
+
+fn is_module_extension(extension: &str) -> bool {
+    matches!(extension, "coffee" | "litcoffee")
 }
 
 /// Compiled static imports and named exports for one QuickCoffee module.
@@ -306,8 +318,11 @@ impl Engine {
     /// Compiles one module with static named import/export directives.
     pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
         let name = name.into();
+        let prepared = crate::source::prepare(Some(name.as_str()), source)
+            .map_err(|error| error.with_source_name(name.as_str()))?;
         let syntax =
-            parser::parse_module(source).map_err(|error| error.with_source_name(name.as_str()))?;
+            parser::parse_module_with_columns(&prepared.text, prepared.columns_are_precise)
+                .map_err(|error| error.with_source_name(name.as_str()))?;
         let mut public_names = BTreeSet::new();
         for (public, _, span) in &syntax.exports {
             if !public_names.insert(public.clone()) {

@@ -2388,6 +2388,7 @@ impl Engine {
         self.compile_program_source(None, source)
     }
     /// Compiles named source into cheaply cloneable shared bytecode.
+    /// A name ending in `.litcoffee` enables literate CoffeeScript preprocessing.
     pub fn compile_program_named(&self, source_name: &str, source: &str) -> Result<Program, Error> {
         self.compile_program_source(Some(source_name), source)
     }
@@ -2400,7 +2401,8 @@ impl Engine {
         self.check_program_source(None, source)
     }
     /// Like [`Self::check_program`], while attaching the caller-provided
-    /// opaque source name to every returned diagnostic label.
+    /// opaque source name to every returned diagnostic label. A name ending in
+    /// `.litcoffee` enables literate CoffeeScript preprocessing.
     pub fn check_program_named(&self, source_name: &str, source: &str) -> Result<(), Vec<Error>> {
         self.check_program_source(Some(source_name), source)
     }
@@ -2413,7 +2415,9 @@ impl Engine {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
         };
-        let ast = parser::parse(source).map_err(attach_name)?;
+        let prepared = crate::source::prepare(source_name, source).map_err(attach_name)?;
+        let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
+            .map_err(attach_name)?;
         let (chunk, source_map) = lowering::compile_mapped(&ast).map_err(attach_name)?;
         lowering::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
         Ok(Program::from_compiled(chunk, source_map, source_name))
@@ -2427,7 +2431,9 @@ impl Engine {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
         };
-        let ast = parser::parse_recover(source)
+        let prepared = crate::source::prepare(source_name, source)
+            .map_err(|error| vec![attach_name(error)])?;
+        let ast = parser::parse_recover_with_columns(&prepared.text, prepared.columns_are_precise)
             .map_err(|errors| errors.into_iter().map(attach_name).collect::<Vec<Error>>())?;
         let (chunk, source_map) =
             lowering::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
@@ -2966,7 +2972,8 @@ impl Context {
         self.run_program(&program)
     }
     /// Compiles, verifies, and executes source while attaching an opaque
-    /// host-provided name to compile-time and runtime source labels.
+    /// host-provided name to compile-time and runtime source labels. A name
+    /// ending in `.litcoffee` enables literate CoffeeScript preprocessing.
     pub fn eval_named(&mut self, source_name: &str, source: &str) -> Result<Value, Error> {
         let program = self.engine.compile_program_named(source_name, source)?;
         self.run_program(&program)
@@ -6659,7 +6666,7 @@ mod tests {
 
     fn assert_cached_and_reference(source: &str, fuel: u64) {
         let optimized = Engine::new()
-            .compile_program_named("differential.qc", source)
+            .compile_program_named("differential.coffee", source)
             .expect("differential source must compile");
         let reference = optimized.without_binding_slots();
         assert_eq!(optimized.disassemble(), reference.disassemble());

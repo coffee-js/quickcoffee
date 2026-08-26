@@ -1,7 +1,3 @@
-# QuickCoffee document
-
-## Notes
-
 # QuickCoffee मार्गदर्शिका
 
 
@@ -80,7 +76,15 @@ Context::last_execution() instruction-संख्या तथा अवशि�
 
 JavaScript नास्ति: सार्वजनिक prototype-chain, global/free this, eval, अन्तःस्थ-JavaScript च न सन्ति। Indented class, construction, सीमित-receiver, new, private extends-chain, statically-resolved super तथा सुरक्षिततया निर्गच्छत् receiver-bound => अधुना सन्ति।
 
+    class BoundCounter
+      constructor: (@value) ->
+      callback: ->
+        =>
+          @value = @value + 1
+          @value
 
+    bound_callback = new BoundCounter(40).callback()
+    bound_callback()
 
 # line-comment अस्ति; ### … ### non-nesting block-comment layout तथा parse पूर्वं त्यज्यते।
 
@@ -94,6 +98,10 @@ chained-comparison मध्ये मध्य-मूल्य एकवार�
 
 सामान्य-library साधारण-function रूपेण print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert ददाति; RFC 0139 string-query strict locale-वर्जितः, trim निश्चित-Unicode-White_Space-सारणीं प्रयुङ्क्ते; RFC 0140 sort समान-प्रकार-सीमित-scalar नूतन-stable-array ददाति; RFC 0144 concat द्वौ String अथवा द्वौ Array अपरिवर्तितरूपेण योजयति, allocation-पूर्वं resource-limit परीक्षते; error(code, message, data, cause) sealed Error निर्माति, catch Error गृह्णाति, resource-error न गृह्णाति। Decimal m-प्रत्ययं गृह्णाति; अनन्त-दशमलव-विभागः स्पष्ट-scale-rounding अपेक्षते।
 
+    trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
+    contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
+    sort(['中', 'a', '☕']) == ['a', '☕', '中']
+    concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
 
 कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।
 
@@ -147,128 +155,73 @@ array-for शून्यात् गणितं index अपि बध्न�
 
 postfix-comprehension समानं strict-collection वहति: value * 2 for value in items, अथवा [value * 2 for value in items]।
 
-## Code
-
-````coffee
-class BoundCounter
-  constructor: (@value) ->
-  callback: ->
-    =>
-      @value = @value + 1
-      @value
-
-bound_callback = new BoundCounter(40).callback()
-bound_callback()
-
-
-
-
-
-
-
-trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
-contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
-sort(['中', 'a', '☕']) == ['a', '☕', '中']
-concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-base = 40
-add = (x) -> x + base
-shorthand = 'yes'
-[first, {point: [x, y]}] = [0, {point: [20, 22]}]
-scale = ([left, right], {factor}) -> (left + right) * factor
-add(2) == 42 and "फलम् #{add(2)}" == 'फलम् 42' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((mukha, y = 2) -> mukha + y)(40) == 42 and ((mukha, puchcha...) -> mukha + len(puchcha))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
-पदयोग = 0
-for n in [1..9] by 3 then पदयोग = पदयोग + n
-पदयोग == 12
-len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
-postfix_doubles = value * 2 for value in [1..3]
-postfix_doubles == [2, 4, 6]
-counter_update = 2
-prefix_update = ++counter_update
-postfix_update = counter_update--
-[prefix_update, postfix_update, counter_update] == [3, 3, 3]
-[-7 // 5, -7 %% 5] == [-2, 3]
-[5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
-continued = 1 +
-  2 * 3
-continued == 7
-message = "hello
-  world"
-message == 'hello world'
-escaped = "A\\x42\\u{43}"
-escaped == 'ABC'
-folded = (1 + 2 * 3) == 7
-folded
-values = [
-  1
-  2
-]
-values == [1, 2]
-record = {
-  first: 20
-  second: 22
-}
-record.first + record.second == 42
-indented_record =
-  first: 20
-  nested:
-    second: 22
-indented_record.nested.second == 22
-implicit_add = (left, right) -> left + right
-implicit_answer = implicit_add 20, 22
-implicit_answer == 42
-स्थित = 40
-स्थित + 2 == 42
-3 not in [1, 2] and 'missing' not of {present: 1}
-loop_count = 0
-loop
-  loop_count = loop_count + 1
-  break if loop_count == 3
-loop_count == 3
-bare_add = left, right -> left + right
-bare_add(20, 22) == 42
-postfix_count = 0
-postfix_count = postfix_count + 1 while postfix_count < 3
-postfix_count == 3
-slice_values = [0..4][1..3]
-len(slice_values) == 3 and slice_values[0] == 1 and [0..4][-3...-1][0] == 2
-nil? == false and false? == true and 0? == true
-default_value ?= 42
-default_value == 42
-### invalid ` source अत्र उपेक्षितः
-###
-0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
-json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
-encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
-42 == 42
-````
-
-## Final value
-
-`true`
+    base = 40
+    add = (x) -> x + base
+    shorthand = 'yes'
+    [first, {point: [x, y]}] = [0, {point: [20, 22]}]
+    scale = ([left, right], {factor}) -> (left + right) * factor
+    add(2) == 42 and "फलम् #{add(2)}" == 'फलम् 42' and yes is on and no is off and 1 < 2 < 3 and x + y == 42 and scale([20, 1], {factor: 2}) == 42 and ((mukha, y = 2) -> mukha + y)(40) == 42 and ((mukha, puchcha...) -> mukha + len(puchcha))(40, 1, 2) == 42 and ((items) -> for n in items then if n == 42 then return n)([1, 42]) == 42 and ((-> try return 1 catch error then 2 finally 0)()) == 1 and len([1..3]) == 3 and len([1...3]) == 2 and (nil ? 42) == 42 and (false ? 42) == false and nil?.missing == nil and 2 in [1, 2] and 'name' of {name: 1} and {shorthand}.shorthand == 'yes' and len([1, [2, 3]..., 4]) == 4
+    पदयोग = 0
+    for n in [1..9] by 3 then पदयोग = पदयोग + n
+    पदयोग == 12
+    len(for [left, right] in [[20, 22], [1, 2]] then left + right) == 2
+    postfix_doubles = value * 2 for value in [1..3]
+    postfix_doubles == [2, 4, 6]
+    counter_update = 2
+    prefix_update = ++counter_update
+    postfix_update = counter_update--
+    [prefix_update, postfix_update, counter_update] == [3, 3, 3]
+    [-7 // 5, -7 %% 5] == [-2, 3]
+    [5 & 3, 5 | 2, 5 ^ 1, ~1, 1 << 3, -8 >> 2, -1 >>> 1] == [1, 7, 4, -2, 8, -2, 2147483647]
+    continued = 1 +
+      2 * 3
+    continued == 7
+    message = "hello
+      world"
+    message == 'hello world'
+    escaped = "A\\x42\\u{43}"
+    escaped == 'ABC'
+    folded = (1 + 2 * 3) == 7
+    folded
+    values = [
+      1
+      2
+    ]
+    values == [1, 2]
+    record = {
+      first: 20
+      second: 22
+    }
+    record.first + record.second == 42
+    indented_record =
+      first: 20
+      nested:
+        second: 22
+    indented_record.nested.second == 22
+    implicit_add = (left, right) -> left + right
+    implicit_answer = implicit_add 20, 22
+    implicit_answer == 42
+    स्थित = 40
+    स्थित + 2 == 42
+    3 not in [1, 2] and 'missing' not of {present: 1}
+    loop_count = 0
+    loop
+      loop_count = loop_count + 1
+      break if loop_count == 3
+    loop_count == 3
+    bare_add = left, right -> left + right
+    bare_add(20, 22) == 42
+    postfix_count = 0
+    postfix_count = postfix_count + 1 while postfix_count < 3
+    postfix_count == 3
+    slice_values = [0..4][1..3]
+    len(slice_values) == 3 and slice_values[0] == 1 and [0..4][-3...-1][0] == 2
+    nil? == false and false? == true and 0? == true
+    default_value ?= 42
+    default_value == 42
+    ### invalid ` source अत्र उपेक्षितः
+    ###
+    0.1m + 0.2m == 0.3m and decimal_div(1m, 3m, 2, 'half_even') == 0.33m
+    json_payload = parse_json('{"money":12.30,"large":9007199254740993}')
+    encode_json(json_payload) == '{"large":9007199254740993,"money":12.3}'
+    42 == 42

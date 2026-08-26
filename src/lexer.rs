@@ -203,8 +203,15 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, Error> {
 }
 
 pub(crate) fn lex_spanned(source: &str) -> Result<(Vec<Token>, Vec<TokenSpan>), Error> {
+    lex_spanned_with_columns(source, true)
+}
+
+pub(crate) fn lex_spanned_with_columns(
+    source: &str,
+    source_columns_are_precise: bool,
+) -> Result<(Vec<Token>, Vec<TokenSpan>), Error> {
     let normalized = normalize_indented_maps(&normalize_heredocs(source)?);
-    let preprocessing_preserved_columns = normalized == source;
+    let preprocessing_preserved_columns = source_columns_are_precise && normalized == source;
     let source_lines = source.split('\n').collect::<Vec<_>>();
     let logical_lines = normalize_multiline_strings(&normalized);
     let mut out = LexOutput::new();

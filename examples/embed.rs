@@ -25,7 +25,10 @@ fn main() -> Result<(), Error> {
             Ok(Value::from(left + right))
         });
     // The request owner may call `cancellation.cancel()` from another control path.
-    let value = context.eval_named("virtual://example/embed.qc", "host_add(20, 22) * factor")?;
+    let value = context.eval_named(
+        "virtual://example/embed.coffee",
+        "host_add(20, 22) * factor",
+    )?;
     println!("{value}");
     Ok(())
 }

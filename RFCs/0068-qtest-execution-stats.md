@@ -5,14 +5,14 @@
 
 ## 摘要
 
-`qtest` 增加可选的 `--stats` 开关，为每个成功或失败的 `.qc` 文件将 RFC0066 的执行统计写到标准错误。默认不启用时，既有 stdout、stderr 和退出码保持不变。
+`qtest` 增加可选的 `--stats` 开关，为每个成功或失败的 `.coffee` 或 `.litcoffee` 文件将 RFC0066 的执行统计写到标准错误。默认不启用时，既有 stdout、stderr 和退出码保持不变。
 
 ## 契约
 
 ```text
-qtest --stats tests/scripts/arithmetic.qc
-ok tests/scripts/arithmetic.qc
-qtest stats: tests/scripts/arithmetic.qc instructions=N fuel_remaining=M
+qtest --stats tests/scripts/arithmetic.coffee
+ok tests/scripts/arithmetic.coffee
+qtest stats: tests/scripts/arithmetic.coffee instructions=N fuel_remaining=M
 ```
 
 统计行格式固定为：

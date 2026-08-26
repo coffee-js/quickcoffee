@@ -104,7 +104,7 @@ fn strict_host_value_conversions_are_recursive_and_non_coercing() {
 fn checked_compilation_collects_ordered_named_parse_errors() {
     let engine = Engine::new();
     let errors = engine
-        .check_program_named("virtual://rules.qc", "first = [1 2]\nsecond = [3 4]\n")
+        .check_program_named("virtual://rules.coffee", "first = [1 2]\nsecond = [3 4]\n")
         .expect_err("two independent malformed statements should be reported");
     assert_eq!(errors.len(), 2);
     assert_eq!(
@@ -116,15 +116,57 @@ fn checked_compilation_collects_ordered_named_parse_errors() {
     );
     assert!(errors.iter().all(|error| {
         error.kind() == ErrorKind::Parse
-            && error.labels()[0].span.source_name.as_deref() == Some("virtual://rules.qc")
+            && error.labels()[0].span.source_name.as_deref() == Some("virtual://rules.coffee")
     }));
 
     let first_error = engine
-        .compile_program_named("virtual://rules.qc", "first = [1 2]\nsecond = [3 4]\n")
+        .compile_program_named("virtual://rules.coffee", "first = [1 2]\nsecond = [3 4]\n")
         .expect_err("the existing compile API remains first-error only");
     assert_eq!(
         first_error.position().map(|position| position.line),
         Some(1)
+    );
+}
+
+#[test]
+fn named_litcoffee_sources_execute_and_preserve_physical_diagnostic_lines() {
+    let source = "# Rules\n\n    answer = 40\n    answer + 2\n";
+    assert_eq!(
+        Context::new()
+            .eval_named("virtual://rules.litcoffee", source)
+            .unwrap()
+            .as_number(),
+        Some(42.0)
+    );
+    Engine::new()
+        .check_program_named("virtual://rules.litcoffee", source)
+        .unwrap();
+
+    let error = Context::new()
+        .eval_named(
+            "virtual://broken.litcoffee",
+            "# Broken rule\n\n    missing + 1\n",
+        )
+        .unwrap_err();
+    let position = error.position().expect("runtime error has a position");
+    assert_eq!(position.line, 3);
+    assert_eq!(position.column, None);
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://broken.litcoffee")
+    );
+}
+
+#[test]
+fn litcoffee_rejects_mixed_code_margins_with_a_named_physical_line() {
+    let error = Engine::new()
+        .compile_program_named("virtual://mixed.litcoffee", "    one = 1\n\n\ttwo = 2\n")
+        .unwrap_err();
+    assert_eq!(error.message(), "inconsistent literate code indentation");
+    assert_eq!(error.position().map(|position| position.line), Some(3));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://mixed.litcoffee")
     );
 }
 
@@ -288,7 +330,7 @@ fn classes_cross_the_embedding_boundary_as_opaque_values_with_named_diagnostics(
 
     let program = Engine::new()
         .compile_program_named(
-            "virtual://broken-class.qc",
+            "virtual://broken-class.coffee",
             "class Broken\n  fail: -> missing\nnew Broken().fail()",
         )
         .unwrap();
@@ -296,12 +338,12 @@ fn classes_cross_the_embedding_boundary_as_opaque_values_with_named_diagnostics(
     assert_eq!(error.kind(), ErrorKind::Runtime);
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://broken-class.qc")
+        Some("virtual://broken-class.coffee")
     );
     assert_eq!(error.labels()[0].span.start.line, 2);
     assert!(error.labels().iter().any(|label| {
         label.kind == DiagnosticLabelKind::Secondary
-            && label.span.source_name.as_deref() == Some("virtual://broken-class.qc")
+            && label.span.source_name.as_deref() == Some("virtual://broken-class.coffee")
             && label.span.start.line == 3
     }));
 }
@@ -365,7 +407,7 @@ fn source_diagnostics_expose_primary_labels_and_precise_columns() {
 
 #[test]
 fn named_embedding_sources_preserve_opaque_names_without_changing_anonymous_calls() {
-    const NAME: &str = "virtual://rules/../invoice.qc";
+    const NAME: &str = "virtual://rules/../invoice.coffee";
     let engine = Engine::new();
     let error = engine.compile_named(NAME, "value = 1\n@").unwrap_err();
     assert_eq!(error.labels()[0].span.source_name.as_deref(), Some(NAME));
@@ -388,7 +430,7 @@ fn named_embedding_sources_preserve_opaque_names_without_changing_anonymous_call
 
 #[test]
 fn compiled_program_source_maps_attribute_runtime_and_resource_errors() {
-    const NAME: &str = "virtual://runtime/invoice.qc";
+    const NAME: &str = "virtual://runtime/invoice.coffee";
     let mut context = Context::new();
 
     let top_level = context
@@ -488,20 +530,23 @@ fn compiled_program_source_maps_attribute_runtime_and_resource_errors() {
 
     let mut retained = Context::new();
     retained
-        .eval_named("virtual://definitions.qc", "fail = (value) -> value + 'x'")
+        .eval_named(
+            "virtual://definitions.coffee",
+            "fail = (value) -> value + 'x'",
+        )
         .unwrap();
     let retained_error = retained
-        .eval_named("virtual://caller.qc", "fail(1)")
+        .eval_named("virtual://caller.coffee", "fail(1)")
         .unwrap_err();
     assert_eq!(
         retained_error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://definitions.qc")
+        Some("virtual://definitions.coffee")
     );
 }
 
 #[test]
 fn runtime_errors_keep_ordered_secondary_quickcoffee_call_sites() {
-    const NAME: &str = "virtual://runtime/call-stack.qc";
+    const NAME: &str = "virtual://runtime/call-stack.coffee";
     let error = Context::new()
         .eval_named(NAME, "outer = -> inner()\ninner = -> missing\nouter()")
         .unwrap_err();
@@ -531,19 +576,19 @@ fn runtime_errors_keep_ordered_secondary_quickcoffee_call_sites() {
 
     let mut retained = Context::new();
     retained
-        .eval_named("virtual://definitions.qc", "fail = -> missing")
+        .eval_named("virtual://definitions.coffee", "fail = -> missing")
         .unwrap();
     let cross_eval = retained
-        .eval_named("virtual://caller.qc", "fail()")
+        .eval_named("virtual://caller.coffee", "fail()")
         .unwrap_err();
     assert_eq!(cross_eval.labels().len(), 2);
     assert_eq!(
         cross_eval.labels()[0].span.source_name.as_deref(),
-        Some("virtual://definitions.qc")
+        Some("virtual://definitions.coffee")
     );
     assert_eq!(
         cross_eval.labels()[1].span.source_name.as_deref(),
-        Some("virtual://caller.qc")
+        Some("virtual://caller.coffee")
     );
     assert_eq!(
         cross_eval.labels()[1].kind,
@@ -593,7 +638,7 @@ fn program_source_maps_do_not_change_bytecode_views() {
     let source = "square = (value) -> value * value\nsquare(7)";
     let chunk = Engine::new().compile(source).unwrap();
     let program = Engine::new()
-        .compile_program_named("virtual://square.qc", source)
+        .compile_program_named("virtual://square.coffee", source)
         .unwrap();
     assert_eq!(program.fingerprint(), chunk.fingerprint());
     assert_eq!(program.disassemble(), chunk.disassemble());
@@ -736,7 +781,7 @@ fn json_resource_policy_is_replaceable_labeled_and_uncatchable() {
 
     let error = context
         .eval_named(
-            "virtual://limits.qc",
+            "virtual://limits.coffee",
             "try parse_json('[0]') catch ignored then 42",
         )
         .unwrap_err();
@@ -745,7 +790,7 @@ fn json_resource_policy_is_replaceable_labeled_and_uncatchable() {
     assert!(error.message().contains("value count exceeds 1"));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://limits.qc")
+        Some("virtual://limits.coffee")
     );
     assert_eq!(error.labels()[0].span.start.line, 1);
 
@@ -776,7 +821,7 @@ fn collection_operation_resource_policy_is_replaceable_labeled_and_uncatchable()
     context.eval("items = [3, 2, 1]").unwrap();
     let error = context
         .eval_named(
-            "virtual://collection-limits.qc",
+            "virtual://collection-limits.coffee",
             "try sort(items) catch ignored then [0]",
         )
         .unwrap_err();
@@ -788,7 +833,7 @@ fn collection_operation_resource_policy_is_replaceable_labeled_and_uncatchable()
     assert!(error.message().contains("sort input exceeds 2 items"));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://collection-limits.qc")
+        Some("virtual://collection-limits.coffee")
     );
     assert_eq!(context.eval("items").unwrap().to_string(), "[3, 2, 1]");
 
@@ -810,7 +855,7 @@ fn concat_checks_output_and_operation_limits_before_copying() {
     context.set_resource_limits(defaults.with_max_string_bytes(5).with_max_array_items(3));
     let error = context
         .eval_named(
-            "virtual://concat-limits.qc",
+            "virtual://concat-limits.coffee",
             "try concat(prefix, suffix) catch ignored then 'caught'",
         )
         .unwrap_err();
@@ -819,7 +864,7 @@ fn concat_checks_output_and_operation_limits_before_copying() {
     assert!(error.message().contains("string exceeds 5 bytes"));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://concat-limits.qc")
+        Some("virtual://concat-limits.coffee")
     );
 
     let error = context
@@ -863,7 +908,7 @@ fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
     context.eval("items = [1, 2]").unwrap();
     let error = context
         .eval_named(
-            "virtual://value-limits.qc",
+            "virtual://value-limits.coffee",
             "try items = [1, 2, 3] catch ignored then [0]",
         )
         .unwrap_err();
@@ -872,7 +917,7 @@ fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
     assert!(error.message().contains("array exceeds 2 items"));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://value-limits.qc")
+        Some("virtual://value-limits.coffee")
     );
 
     context.set_resource_limits(defaults);
@@ -1037,12 +1082,12 @@ fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() 
 
     constrained_context.set_global("host_integer", Value::from(8_i64));
     let error = constrained_context
-        .eval_named("virtual://numeric-limits.qc", "host_integer")
+        .eval_named("virtual://numeric-limits.coffee", "host_integer")
         .unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::IntegerBits));
     assert_eq!(
         error.labels()[0].span.source_name.as_deref(),
-        Some("virtual://numeric-limits.qc")
+        Some("virtual://numeric-limits.coffee")
     );
     assert_eq!(
         constrained_context
