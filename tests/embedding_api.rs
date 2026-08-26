@@ -158,6 +158,24 @@ fn contexts_keep_builtin_binding_replacements_isolated() {
 }
 
 #[test]
+fn lazily_promoted_builtins_remain_shadowable_across_shared_programs() {
+    let program = Engine::new().compile_program("len([20, 22])").unwrap();
+    let mut replaced = Context::new();
+    assert_eq!(
+        replaced.run_program(&program).unwrap().as_number(),
+        Some(2.)
+    );
+    replaced.add_native("len", |_| Ok(Value::from(7_f64)));
+    assert_eq!(
+        replaced.run_program(&program).unwrap().as_number(),
+        Some(7.)
+    );
+
+    let mut fresh = Context::new();
+    assert_eq!(fresh.run_program(&program).unwrap().as_number(), Some(2.));
+}
+
+#[test]
 fn public_values_and_native_errors_are_structured() {
     let mut context = Context::new();
     context.set_global(

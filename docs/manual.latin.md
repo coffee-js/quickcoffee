@@ -46,7 +46,7 @@ Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatio
 yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
 ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 Comparationes conectae medium semel servant atque priore falso breviant.
-Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
+Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
 Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.
@@ -87,6 +87,8 @@ class BoundCounter
 
 bound_callback = new BoundCounter(40).callback()
 bound_callback()
+trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
+contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
 numerus = 7
 quadratum = (x) -> x * x
 shorthand = 'yes'

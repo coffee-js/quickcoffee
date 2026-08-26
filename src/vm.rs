@@ -2200,9 +2200,10 @@ pub struct Context {
 }
 
 thread_local! {
-    // Native builtin functions are immutable. Sharing their template avoids
-    // rebuilding names and closures while each Context still owns its slots.
-    static BUILTIN_ENVIRONMENT: EnvironmentSnapshot = {
+    // Native builtin functions are immutable. Sharing them through a read-only
+    // parent keeps Context construction independent of standard-library size;
+    // each Context owns a writable child that can shadow any builtin.
+    static BUILTIN_ENVIRONMENT: Env = {
         let global = env(None);
         let mut context = Context {
             engine: Engine::new(),
@@ -2214,7 +2215,7 @@ thread_local! {
             last_execution: ExecutionStats::default(),
         };
         context.install_builtins();
-        global.borrow().snapshot()
+        global
     };
     // Keeping the pool outside `Context`, `Vm`, and `Vm::run` preserves the
     // layout of unrelated dispatch paths. Borrows never cross a script call.
@@ -2223,6 +2224,25 @@ thread_local! {
 
 fn one_value_allocation(_: &Value) -> u64 {
     1
+}
+
+// Unicode White_Space, pinned explicitly so `trim` does not inherit locale or
+// Unicode-table changes from the host Rust toolchain.
+fn is_pinned_unicode_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'..='\u{000D}'
+            | '\u{0020}'
+            | '\u{0085}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+    )
 }
 
 fn array_and_element_allocations(value: &Value) -> u64 {
@@ -2323,10 +2343,7 @@ impl Default for Context {
 impl Context {
     /// Creates a context with standard library builtins and the default fuel budget.
     pub fn new() -> Self {
-        let global = env(None);
-        BUILTIN_ENVIRONMENT.with(|builtins| {
-            global.borrow_mut().restore(builtins.clone());
-        });
+        let global = BUILTIN_ENVIRONMENT.with(|builtins| env(Some(builtins.clone())));
         Self {
             engine: Engine::new(),
             global,
@@ -2620,6 +2637,48 @@ impl Context {
             },
             one_value_allocation,
         );
+        self.add_builtin(
+            "trim",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("trim expects one string argument"));
+                }
+                let Value::String(input) = &xs[0] else {
+                    return Err(Error::runtime("trim expects a string"));
+                };
+                Ok(Value::String(Rc::from(
+                    input.trim_matches(is_pinned_unicode_whitespace),
+                )))
+            },
+            one_value_allocation,
+        );
+        self.add_native("contains", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("contains expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(needle)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("contains expects strings"));
+            };
+            Ok(Value::Bool(input.contains(needle.as_ref())))
+        });
+        self.add_native("starts_with", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("starts_with expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(prefix)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("starts_with expects strings"));
+            };
+            Ok(Value::Bool(input.starts_with(prefix.as_ref())))
+        });
+        self.add_native("ends_with", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("ends_with expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(suffix)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("ends_with expects strings"));
+            };
+            Ok(Value::Bool(input.ends_with(suffix.as_ref())))
+        });
         self.install_json_builtins();
         self.add_builtin(
             "integer",
@@ -2929,7 +2988,8 @@ fn lookup_environment<const SHARED: bool>(
     cached: Option<&Cell<Option<usize>>>,
     name: &str,
 ) -> Option<Value> {
-    let environment = environment.borrow();
+    let current = environment;
+    let environment = current.borrow();
     if let Some(slot) = cached.and_then(Cell::get) {
         let value = if SHARED {
             environment.get_shared_cached(name, slot)
@@ -2948,7 +3008,26 @@ fn lookup_environment<const SHARED: bool>(
     }
     let parent = environment.parent.clone();
     drop(environment);
-    parent.and_then(|parent| lookup(&parent, name))
+    parent.and_then(|parent| lookup_parent_environment(current, parent, cached, name))
+}
+#[cold]
+#[inline(never)]
+fn lookup_parent_environment(
+    current: &Env,
+    parent: Env,
+    cached: Option<&Cell<Option<usize>>>,
+    name: &str,
+) -> Option<Value> {
+    let is_builtin_parent = BUILTIN_ENVIRONMENT.with(|builtins| Rc::ptr_eq(&parent, builtins));
+    if is_builtin_parent {
+        let value = parent.borrow().get_local(name)?;
+        let slot = current.borrow_mut().set_local(name, value.clone());
+        if let Some(cached) = cached {
+            cached.set(Some(slot));
+        }
+        return Some(value);
+    }
+    lookup(&parent, name)
 }
 fn store_environment<const SHARED: bool>(
     environment: &Env,

@@ -46,7 +46,7 @@ Unicode XID-नामानि संयोजक-चिह्नानि ग�
 yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
 ! strict-Bool not-पर्यायः अस्ति; != strict-असाम्यमेव तिष्ठति।
 chained-comparison मध्ये मध्य-मूल्य एकवारं, पूर्व-false चेत् short-circuit भवति।
-सामान्य-library साधारण-function रूपेण print, len, type, error, range, str, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert ददाति; error(code, message, data, cause) sealed Error निर्माति, catch Error गृह्णाति, resource-error न गृह्णाति। Decimal m-प्रत्ययं गृह्णाति; अनन्त-दशमलव-विभागः स्पष्ट-scale-rounding अपेक्षते।
+सामान्य-library साधारण-function रूपेण print, len, type, error, range, str, trim, contains, starts_with, ends_with, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert ददाति; RFC 0139 string-query strict locale-वर्जितः, trim निश्चित-Unicode-White_Space-सारणीं प्रयुङ्क्ते; error(code, message, data, cause) sealed Error निर्माति, catch Error गृह्णाति, resource-error न गृह्णाति। Decimal m-प्रत्ययं गृह्णाति; अनन्त-दशमलव-विभागः स्पष्ट-scale-rounding अपेक्षते।
 कार्यं lexical-environment गृह्णाति; y = 2 omitting अथवा nil दत्ते कार्यस्य अन्तरे default भवति; अन्तिमः rest-parameter tail... इति लिख्यते।
 bare-name lambda left, right -> left + right भवति; default, rest, pattern तु parentheses गृह्णन्ति।
 return expression केवलं वर्तमान-कार्यं समाप्तं करोति; केवलः return nil फलति, loop शुद्धीकरोति, finally च चलयति।
@@ -87,6 +87,8 @@ class BoundCounter
 
 bound_callback = new BoundCounter(40).callback()
 bound_callback()
+trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
+contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
 base = 40
 add = (x) -> x + base
 shorthand = 'yes'

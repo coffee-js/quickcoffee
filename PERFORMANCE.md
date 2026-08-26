@@ -678,6 +678,12 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 标准库数值路径由四个负载覆盖：`stdlib-abs` 测量单值绝对值，`stdlib-sum` 测量小数组聚合，`stdlib-min-max` 测量严格最小/最大值，`stdlib-range-sum` 测量 `range` 与 `sum` 的组合。四者同时存在于 `qbench --json` 与 `cargo bench --bench core`，并检查最终值 `42`、`10`、`4`、`4950`。
 
+## RFC 0139 确定性 Unicode 字符串查询
+
+`stdlib-string-queries` 同时覆盖固定 White_Space 表的 `trim`，以及大小写敏感、无 normalization 的 `contains`、`starts_with`、`ends_with`。负载混合 ASCII 与多字节 Unicode，最终值护栏为 `true`；它同时存在于 `qbench --json` 与 `cargo bench --bench core`。该 slice 不增长输出，profile 必须保持一次托管 String 分配、零脚本 callback，并沿用普通 builtin fuel/call 计数。
+
+标准库函数存放在每线程只读父环境中，每个 `Context` 只创建可写子环境并可局部 shadow 任意 builtin；首次解析某 builtin 时只把该绑定提升到当前 Context 的稳定 slot，后续热调用不重复穿越父环境。因此扩展标准库不会让 `Context::new` 线性复制整张名称索引和 slot 表，也不会用重复父级查询交换启动成本。隔离测试保证一个 Context 的替换不污染其他 Context，base/head 报告则继续把 Context 构造包含在 execute 阶段内，防止标准库扩展重新引入固定启动回退。
+
 复现机器可读记录：
 
 ```sh
