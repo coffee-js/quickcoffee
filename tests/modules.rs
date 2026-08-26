@@ -43,6 +43,8 @@ fn named_static_imports_and_exports_keep_module_globals_private() {
     assert!(stats.calls > 0);
     assert!(stats.value_allocations > 0);
     assert!(stats.environment_allocations > 0);
+    assert!(stats.managed_objects_allocated > 0);
+    assert!(stats.managed_bytes_allocated > 0);
 }
 
 #[test]

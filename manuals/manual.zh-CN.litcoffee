@@ -8,7 +8,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qcoffee --quit` 创建一个 Context 后静默退出，不能与源码或其他执行选项组合。
 
-`qcoffee --stats` 将指令数、剩余燃料及查名、调用、容器、迭代、异常、托管值分配与词法环境分配计数写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
+`qcoffee --stats` 将指令数、剩余燃料及查名、调用、容器、迭代、异常、既有分配事件、逻辑托管对象和规范化 payload bytes 计数写入标准错误，同时保持程序标准输出不变；后两项不是 RSS、存活量或峰值。qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
 
 嵌入模块可写 import { public as local } from 'name' 与 export；`Engine::compile_module` 和 `Context::run_module` 只经宿主 `ModuleLoader` 取源码，模块全局私有且整张图共享 fuel。
 
@@ -56,7 +56,7 @@ Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.r
 
 `make fuzz-smoke` 使用独立固定-nightly 的 cargo-fuzz 包，以固定 seed 有界运行 parser 与 verifier target；确认的 crash 要最小化并转为普通回归测试。
 
-每条 qbench 记录的 profile_* 字段来自一次不计时执行，给出热点与分配事件，不乘以 `--iterations` 或 `--repeat`。
+每条 qbench 记录的 profile_* 字段来自一次不计时执行，给出热点、既有分配事件及确定性的托管对象/逻辑 byte delta，不乘以 `--iterations` 或 `--repeat`。
 
 `qbench --compare-qjs PATH` 分别报告双方的启动、编译、预编译热执行与端到端 CLI 总耗时。正式报告宜用 `--repeat` 11；每个阶段都有中位数和 *_mad_ns。
 

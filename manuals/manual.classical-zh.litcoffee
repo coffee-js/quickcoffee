@@ -34,7 +34,7 @@
 
 `qcoffee --quit` 初置一 Context 而默退，不得兼源码与他行法。
 
-`qcoffee --stats` 则书所试指令、余燃料及查名、调用、容器、迭、异常、托管值分配与词法环境分配之数于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
+`qcoffee --stats` 则书所试指令、余燃料、诸热径、旧分配事件、逻辑托管对象与规范载荷字节之数于标准错误，程序之标准输出不改；末二者非 RSS、存活或峰值。每次惟一源码输入，执行模式相冲则报用法之误。
 
 嵌入之模块可名 import/export；`Engine::compile_module`、`Context::run_module` 惟由宿主 `ModuleLoader` 得其文，模块全局私有，而全图共其 fuel。
 
@@ -74,7 +74,7 @@
 
 `qbench --json` 每负载出一计时录，皆有语义护栏；`--iterations` 定其试数。
 
-每 qbench 录之 profile_* 皆取一次不入计时之执行，记热点与分配事件，不乘 `--iterations` 或 `--repeat`。
+每 qbench 录之 profile_* 皆取一次不入计时之执行，记热点、旧分配事件及确定之托管对象、逻辑字节增量，不乘 `--iterations` 或 `--repeat`。
 
 `qbench --compare-qjs PATH` 别计两端启动、编译、预编热行与 CLI 全程。正报宜 `--repeat` 11；各段皆有中数与 *_mad_ns。
 

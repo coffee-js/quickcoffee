@@ -18,7 +18,7 @@
 
 `qcoffee --quit` एकं Context निर्माय निःशब्दं निर्गच्छति; स्रोत-अन्यexecution-विकल्पैः सह न योज्यम्।
 
-`qcoffee --stats` instruction-संख्या, अवशिष्ट-fuel, hot-path, managed-value-allocation, lexical-environment-allocation च standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
+`qcoffee --stats` instruction-संख्या, अवशिष्ट-fuel, hot-path, पुरातन-allocation-event, logical-managed-object, normalized-payload-byte च standard error मध्ये लिखति, stdout अपरिवर्तितं स्थापयति; अन्तिमौ RSS, retention, peak-memory वा न स्तः। एकमेव source ग्राह्यः, विरोधि execution-mode तु usage-दोषं जनयति।
 
 अन्तःस्थ-module नामयुक्त import/export प्रयुङ्क्ते; `Engine::compile_module` तथा `Context::run_module` host-`ModuleLoader` द्वारा एव source गृह्णीतः, module-global गोप्यं fuel च सर्व-graph मध्ये संयुक्तम्।
 
@@ -58,7 +58,7 @@ host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्श�
 
 `qbench --json` प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; `--iterations` नमूना-सङ्ख्यां नियच्छति।
 
-प्रत्येक qbench-फलस्य profile_* क्षेत्राणि एकस्मात् अकालित-निष्पादनात् hot-path तथा allocation-event लिखन्ति; `--iterations` अथवा `--repeat` गुणनं न भवति।
+प्रत्येक qbench-फलस्य profile_* क्षेत्राणि एकस्मात् अकालित-निष्पादनात् hot-path, पुरातन-allocation-event, deterministic-managed-object/logical-byte-delta च लिखन्ति; `--iterations` अथवा `--repeat` गुणनं न भवति।
 
 `qbench --compare-qjs PATH` उभयोः startup, compilation, precompiled hot execution, end-to-end CLI समयं च पृथक् ददाति। औपचारिक-प्रतिवेदने `--repeat` 11 भवेत्; प्रत्येक-भागे median तथा *_mad_ns स्तः।
 

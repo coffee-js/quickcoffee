@@ -715,6 +715,8 @@ fn execution_stats_count_managed_value_and_environment_allocations() {
     let stats = context.last_execution();
     assert_eq!(stats.value_allocations, 2);
     assert_eq!(stats.environment_allocations, 1);
+    assert_eq!(stats.managed_objects_allocated, 3);
+    assert_eq!(stats.managed_bytes_allocated, 16);
 
     context.add_native("host_array", |_| Ok(Value::array(vec![Value::from(1_f64)])));
     assert_eq!(
@@ -728,6 +730,8 @@ fn execution_stats_count_managed_value_and_environment_allocations() {
     let stats = context.last_execution();
     assert_eq!(stats.value_allocations, 0);
     assert_eq!(stats.environment_allocations, 0);
+    assert_eq!(stats.managed_objects_allocated, 0);
+    assert_eq!(stats.managed_bytes_allocated, 0);
 
     assert_eq!(
         context
@@ -737,7 +741,73 @@ fn execution_stats_count_managed_value_and_environment_allocations() {
             .map(<[Value]>::len),
         Some(2)
     );
-    assert_eq!(context.last_execution().value_allocations, 3);
+    let stats = context.last_execution();
+    assert_eq!(stats.value_allocations, 3);
+    assert_eq!(stats.managed_objects_allocated, 3);
+    assert_eq!(stats.managed_bytes_allocated, 18);
+}
+
+#[test]
+fn managed_allocation_telemetry_is_deterministic_across_value_kinds_and_runs() {
+    let mut context = Context::new();
+
+    assert_eq!(
+        context
+            .eval("integer(256) + integer(1)")
+            .unwrap()
+            .to_string(),
+        "257n"
+    );
+    let exact = context.last_execution();
+    assert_eq!(exact.value_allocations, 2);
+    assert_eq!(exact.managed_objects_allocated, 3);
+    assert_eq!(exact.managed_bytes_allocated, 5);
+
+    assert_eq!(
+        context
+            .eval("try throw 'boom' catch error then error.code")
+            .unwrap()
+            .to_string(),
+        "throw"
+    );
+    let caught = context.last_execution();
+    assert_eq!(caught.managed_objects_allocated, 2);
+    assert_eq!(caught.managed_bytes_allocated, 66);
+
+    let class_source = "class Point\n  constructor: (@x) ->\nnew Point(1)";
+    assert_eq!(
+        context.eval(class_source).unwrap().to_string(),
+        "<Point instance>"
+    );
+    let class = context.last_execution();
+    assert_eq!(class.managed_objects_allocated, 4);
+    assert_eq!(class.managed_bytes_allocated, 54);
+
+    let defaults = "outer = (value = ['x']) -> value\nouter()";
+    assert_eq!(context.eval(defaults).unwrap().to_string(), "[x]");
+    let first = context.last_execution();
+    assert_eq!(first.managed_objects_allocated, 2);
+    assert_eq!(first.managed_bytes_allocated, 8);
+    assert_eq!(context.eval(defaults).unwrap().to_string(), "[x]");
+    assert_eq!(context.last_execution(), first);
+}
+
+#[test]
+fn managed_allocation_telemetry_survives_errors_and_pattern_rollback() {
+    let mut context = Context::new();
+    assert!(context.eval("created = [len('x')]\nmissing").is_err());
+    let failed = context.last_execution();
+    assert_eq!(failed.managed_objects_allocated, 1);
+    assert_eq!(failed.managed_bytes_allocated, 8);
+
+    let rollback =
+        "try\n  [head, tail...] = [1]\n  [required, missing] = [1]\ncatch error\n  error.code";
+    assert_eq!(context.eval(rollback).unwrap().to_string(), "runtime");
+    let first = context.last_execution();
+    assert!(first.managed_objects_allocated > 0);
+    assert!(first.managed_bytes_allocated > 0);
+    assert_eq!(context.eval(rollback).unwrap().to_string(), "runtime");
+    assert_eq!(context.last_execution(), first);
 }
 
 #[test]

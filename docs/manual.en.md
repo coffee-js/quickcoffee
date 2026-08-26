@@ -12,7 +12,7 @@ Source is parsed, compiled to verified bytecode, and executed with a fuel budget
 
 `qcoffee --quit` initializes one Context and exits silently; it cannot be combined with source or execution options.
 
-`qcoffee --stats` writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
+`qcoffee --stats` writes instruction, remaining-fuel, hot-path, legacy allocation-event, logical managed-object, and normalized payload-byte counters to stderr while preserving program stdout; the last two are not RSS, retention, or peak memory. qcoffee accepts one source input and rejects conflicting execution modes.
 
 Embedded modules may use named import/export; `Engine::compile_module` and `Context::run_module` obtain source only through a host `ModuleLoader`, keep module globals private, and share fuel across the graph.
 
@@ -58,7 +58,7 @@ Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource pl
 
 `make fuzz-smoke` uses a separate pinned-nightly cargo-fuzz package to run bounded parser and verifier fuzz targets with a fixed seed; confirmed crashes become minimized ordinary regression tests.
 
-Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by `--iterations` or `--repeat`.
+Each qbench record's profile_* fields come from one untimed execution and report hot paths, legacy allocation events, and deterministic managed-object/logical-byte deltas without scaling by `--iterations` or `--repeat`.
 
 `qbench --compare-qjs PATH` separates startup, compilation, precompiled hot execution, and end-to-end CLI time for both runtimes. Reports should use `--repeat` 11; each phase has a median and *_mad_ns.
 
