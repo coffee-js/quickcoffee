@@ -135,6 +135,8 @@ QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode �
 
 这些数字用于本仓库的回归判断，不是跨机器或跨语言的通用排名。测量协议、历史证据和解释边界见[性能报告](PERFORMANCE.md)，最新优化进度见 [#66](https://github.com/coffee-js/quickcoffee/issues/66)。
 
+前端与 verifier 另有独立的 cargo-fuzz 基线：`make fuzz-smoke` 使用固定 nightly、确定 seed 和有界 runs 运行 parser/verifier target。它不进入发布 crate 或每个 PR 的稳定工具链门禁；发现的 crash 必须最小化并转为普通回归测试。详见 [fuzz README](fuzz/README.md)。
+
 项目禁止 `unsafe`。修改源码后可运行：
 
 ```sh
@@ -156,4 +158,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0142](RFCs/0142-strict-embedding-value-conversions.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0143](RFCs/0143-fuzz-smoke-baseline.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

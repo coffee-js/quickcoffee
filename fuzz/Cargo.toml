@@ -1,0 +1,26 @@
+[package]
+name = "quickcoffee-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.12"
+quickcoffee = { path = ".." }
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verifier"
+path = "fuzz_targets/verifier.rs"
+test = false
+doc = false
+bench = false

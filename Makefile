@@ -1,4 +1,4 @@
-.PHONY: fmt test release-test examples package-metadata package qbench-check clippy api-doc docs doc-check check bench qbench
+.PHONY: fmt test release-test examples package-metadata package qbench-check fuzz-smoke clippy api-doc docs doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -54,3 +54,7 @@ qbench:
 
 qbench-check:
 	cargo run --locked --quiet --release --bin qbench -- --json --iterations 1 --repeat 3 >/dev/null
+
+fuzz-smoke:
+	cargo +nightly-2025-03-28 fuzz run parser -- -runs=1024 -seed=1
+	cargo +nightly-2025-03-28 fuzz run verifier -- -runs=1024 -seed=1

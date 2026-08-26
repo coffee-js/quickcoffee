@@ -80,3 +80,5 @@ Implicit calls are supported on one logical line: `print value`, `add 20, 22`, `
 ## Benchmark statistics
 
 `qbench --json --repeat 11` reports the upper median and a `*_mad_ns` (median absolute deviation) dispersion value for compilation, verification, and execution. `qbench --compare-qjs PATH` reports separate medians and MAD values for startup, compilation, precompiled hot execution, and CLI-total time for both runtimes.
+
+The separate `fuzz/` cargo-fuzz package pins its nightly toolchain and exposes parser and verifier targets. `make fuzz-smoke` runs each with a fixed seed and bounded run count; confirmed crashes are minimized and promoted to normal regression tests.
