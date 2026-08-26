@@ -136,6 +136,14 @@ issue #149 再加入 `class-inherited-super-dispatch`：`Child` 覆盖父方法�
 
 issue #150 加入 `class-bound-callback`：实例方法创建并返回一个 receiver-bound `=>`，随后在 100 轮热循环中脱离原方法调用并更新捕获字段，结果必须为 `5050`。单次 profile 锁定 102 次调用（构造器、回调工厂各一次及绑定闭包 100 次）、302 次 class/instance 容器操作、7 次托管值分配事件和 102 个调用环境事件；负载同时进入 qbench 与 `cargo bench --bench core`，用于隔离接收者捕获和逸出回调调度成本。
 
+### issue #157 字节码帧值栈复用
+
+在 `417f35b` 上隔离 qcompare `function-loop` 的预编译纯 VM 热执行后，Apple arm64 release 采样得到 11,325 个主线程样本：`Vec<Value>::grow_one` 占 7.3% inclusive，`Frame` 析构占 12.5%。每次字节码调用原先都从空 `Vec<Value>` 建立 callee 栈并在返回时释放；250,000 次顺序调用会重复同一小容量的分配/释放。
+
+issue #157 仅复用已正常返回或因可捕获错误退栈的 callee 值栈：值先清空，线程本地只保留一个缓冲，容量硬限 64；顶层帧不进入池，递归层级也不会各自长期保留缓冲。它不改变 `Vm`/`Frame` 公开布局、字节码、fuel/cancellation 检查、错误、调用深度或确定性 profile 计数，且不同 Context 只能复用已清空容量，不能观察值。
+
+同机 2,000 iterations / repeat 11 初测中，`call-containing-local-loop` execute 从 `45.667 ms` 降至 `42.005 ms`（改善 **8.0%**）；独立 qcompare 11 样本的 `function-loop` hot 从 `111.940 ms` 降至 `98.887 ms`（改善 **11.7%**），其他 qcompare collection/Unicode 路径无目标性变化。相同 100-run 采样的总样本从 11,325 降至 10,246，`grow_one` 不再进入前 30 个 inclusive 热点，`Frame` 析构降至 6.8%，新增回收本身为 1.6%。这些本地结果仍须由 PR 的 Linux AB/BA 报告确认；任何可重复的非目标回退都阻止保留该优化。
+
 `scripts/qbench_compare.py` 要求每个负载恰好包含一组 AB 与一组 BA、序号连续、pair 完整且迭代数/样本数/期望值一致。每个 phase 先分别计算两组 candidate-base 效应，再以配对中位数作为审阅效应。只有聚合效应以及 AB、BA 两个方向各自都超过 `max(5% × baseline, 3 × (base MAD + candidate MAD), 0.1 ms)` 才产生 warning；配对差值 MAD、AB/BA 全局中位数、未配对 side 中位数及正向负载数用于诊断，不从单项结果中扣除，因此不会隐藏真实的全局回退。
 
 绝对下限避免把亚毫秒 verify 等阶段的几十微秒 runner 抖动放大成告警；它不替代相对与 MAD 门槛。warning **不阻塞** PR；workflow job 本身也设置 `continue-on-error`，因为共享 runner 数据仍用于建立噪声模型，不能当成稳定发布阈值。解析错误、删除既有负载或配对契约失配仍让该实验 job 显式报错，避免把缺失数据当成“无回归”。版本化 ordered JSONL、两边原始 runs、candidate-only 记录、paired comparison JSON，以及包含 base/head revision、UTC 时间、runner、平台、Python、`rustc -Vv` 和实际命令的 metadata JSON 保留 30 天；Markdown step summary 展示告警、全部 phase 明细和 compile/execute 顺序偏差摘要。跨 runner、跨平台或历史 artifact 不直接套用这个阈值；在 A/A 校准不再显示持久方向偏差前，报告继续保持非阻断。
