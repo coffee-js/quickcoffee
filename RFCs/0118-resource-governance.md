@@ -37,6 +37,13 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. 操作在复制输入或分配比较键之前检查边界。该策略限制单次 builtin 内隐藏的工作规模，但不替代一般容器长度、输出增长、总内存或 retained-memory 策略。
 3. Decimal 集合操作继续同时遵守 coefficient-bit 与 scale 策略；集合项数允许并不授权比较过程构造超限的精确数值中间量。
 
+## 2026-08-26：通用语言值大小策略
+
+1. `ResourceLimits` 增加 `max_string_bytes`、`max_array_items` 与 `max_map_entries`，默认分别为 1,000,000 UTF-8 bytes、100,000 items 与 100,000 entries；`StringBytes`、`ArrayItems` 与 `MapEntries` 是稳定、不可捕获的 `ResourceLimit` 原因。这些字段约束普通 QuickCoffee 值，不复用 JSON 专用字段。
+2. 同一 `Program`、裸字节码和宿主构造的 `Value` 不保存某个 Context 的策略。常量、名称读取、native 返回、成员读取与模块子 Context 在值进入脚本时按当前策略递归复核；不同 Context 可以确定性地以不同限制复用同一 Program 或宿主值。
+3. Array/Map 字面量、range、array spread/append、Map spread、string interpolation/concat/stringify、slice 与 class 实例/静态字段写入在结果可见或赋值提交前检查其边界。超限不执行随后 store，资源错误不能被 `try`/`catch` 吞掉。
+4. 这仍不是总分配或 retained-memory 账本：一次失败路径可以有局部临时分配，且模块图、源码/bytecode、managed object 数、生命周期/cycle 与总 Context 预算继续由 issue #76 的后续切片定义。
+
 ## 验收
 
-`tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。
+`tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。
