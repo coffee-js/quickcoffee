@@ -864,6 +864,22 @@ fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
 }
 
 #[test]
+fn member_reads_recheck_non_scalar_values_against_current_resource_limits() {
+    let mut context = Context::new();
+    context
+        .eval("class Entry\n  constructor: (@text) ->\nentry = new Entry('oversized')")
+        .unwrap();
+    context.set_resource_limits(ResourceLimits::default().with_max_string_bytes(3));
+
+    let error = context
+        .eval("try entry.text catch ignored then 'caught'")
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    assert!(error.message().contains("string exceeds 3 bytes"));
+}
+
+#[test]
 fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() {
     let defaults = ResourceLimits::default();
     let constrained = defaults
