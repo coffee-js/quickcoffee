@@ -4816,6 +4816,54 @@ fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> 
     call_with_context(vm, frames, callee, args, None)
 }
 
+// Most class calls have at most two explicit arguments. Keep receiver
+// prepending off the allocator path for those calls while leaving uncommon
+// larger arities on a straightforward fallback.
+fn call_with_receiver(
+    vm: &mut Vm,
+    frames: &mut Vec<Frame>,
+    function: Rc<Function>,
+    receiver: &Value,
+    args: &[Value],
+    method_context: Option<MethodContext>,
+) -> Result<(), Error> {
+    match args {
+        [] => call_with_context(
+            vm,
+            frames,
+            Value::Function(function),
+            std::slice::from_ref(receiver),
+            method_context,
+        ),
+        [first] => call_with_context(
+            vm,
+            frames,
+            Value::Function(function),
+            &[receiver.clone(), first.clone()],
+            method_context,
+        ),
+        [first, second] => call_with_context(
+            vm,
+            frames,
+            Value::Function(function),
+            &[receiver.clone(), first.clone(), second.clone()],
+            method_context,
+        ),
+        _ => {
+            let mut bound_args = Vec::with_capacity(args.len() + 1);
+            bound_args.push(receiver.clone());
+            bound_args.extend_from_slice(args);
+            call_with_context(
+                vm,
+                frames,
+                Value::Function(function),
+                &bound_args,
+                method_context,
+            )
+        }
+    }
+}
+
 fn call_with_context(
     vm: &mut Vm,
     frames: &mut Vec<Frame>,
@@ -4863,18 +4911,14 @@ fn call_with_context(
                 function: method,
                 receiver,
                 context,
-            } => {
-                let mut bound_args = Vec::with_capacity(args.len() + 1);
-                bound_args.push(receiver.clone());
-                bound_args.extend_from_slice(args);
-                call_with_context(
-                    vm,
-                    frames,
-                    Value::Function(method.clone()),
-                    &bound_args,
-                    Some(context.clone()),
-                )?;
-            }
+            } => call_with_receiver(
+                vm,
+                frames,
+                method.clone(),
+                receiver,
+                args,
+                Some(context.clone()),
+            )?,
             FunctionKind::UnboundMethod { owner, name } => {
                 return Err(Error::runtime(format!(
                     "method {owner}.{name} requires a receiver; call it through member syntax"
@@ -5010,14 +5054,12 @@ fn call_with_context(
                 captured_receiver,
             } => {
                 if let Some(receiver) = captured_receiver {
-                    let mut bound_args = Vec::with_capacity(args.len() + 1);
-                    bound_args.push(receiver.clone());
-                    bound_args.extend_from_slice(args);
-                    call_with_context(
+                    call_with_receiver(
                         vm,
                         frames,
-                        Value::Function(function.clone()),
-                        &bound_args,
+                        function.clone(),
+                        receiver,
+                        args,
                         method_context,
                     )?;
                 } else {
