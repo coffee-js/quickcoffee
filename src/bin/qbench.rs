@@ -104,6 +104,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "101",
     },
     Workload {
+        name: "stdlib-concat",
+        source: "joined = concat([0...50], [50...100])\njoined[0] + joined[99]",
+        expected: "99",
+    },
+    Workload {
         name: "closures-and-ranges",
         source: "base = 1\nadd = (n) -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
         expected: "1274",

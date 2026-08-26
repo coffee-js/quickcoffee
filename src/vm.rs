@@ -2536,6 +2536,14 @@ fn array_and_element_allocations(value: &Value) -> u64 {
     }
 }
 
+fn concat_allocations(value: &Value) -> u64 {
+    match value {
+        Value::String(_) => 1,
+        Value::Array(values) => values.len() as u64 + 1,
+        _ => 0,
+    }
+}
+
 fn json_value_allocations(value: &Value) -> u64 {
     match value {
         Value::Integer(_) | Value::Decimal(_) | Value::String(_) => 1,
@@ -2696,6 +2704,50 @@ fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
         }
     };
     Ok(Value::Array(Rc::new(sorted)))
+}
+
+fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 2 {
+        return Err(Error::runtime("concat expects two arguments"));
+    }
+    match (&xs[0], &xs[1]) {
+        (Value::String(left), Value::String(right)) => {
+            let output_len = left.len().checked_add(right.len()).ok_or_else(|| {
+                Error::resource(
+                    ResourceLimit::StringBytes,
+                    format!("string exceeds {} bytes", limits.max_string_bytes()),
+                )
+            })?;
+            check_string_len_resource(output_len, limits)?;
+            let mut output = String::with_capacity(output_len);
+            output.push_str(left);
+            output.push_str(right);
+            Ok(Value::String(Rc::from(output)))
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            let output_len = left.len().checked_add(right.len()).ok_or_else(|| {
+                Error::resource(
+                    ResourceLimit::ArrayItems,
+                    format!("array exceeds {} items", limits.max_array_items()),
+                )
+            })?;
+            let operation_limit = limits.max_collection_operation_items();
+            if output_len > operation_limit {
+                return Err(Error::resource(
+                    ResourceLimit::CollectionOperationItems,
+                    format!("concat input exceeds {operation_limit} items"),
+                ));
+            }
+            check_array_resource(output_len, limits)?;
+            let mut output = Vec::with_capacity(output_len);
+            output.extend(left.iter().cloned());
+            output.extend(right.iter().cloned());
+            Ok(Value::Array(Rc::new(output)))
+        }
+        _ => Err(Error::runtime(
+            "concat expects two strings or two arrays of the same type",
+        )),
+    }
 }
 
 fn valid_error_code(code: &str) -> bool {
@@ -3077,6 +3129,7 @@ impl Context {
             Ok(Value::Bool(input.ends_with(suffix.as_ref())))
         });
         self.add_resource_builtin("sort", sort_builtin, array_and_element_allocations);
+        self.add_resource_builtin("concat", concat_builtin, concat_allocations);
         self.install_json_builtins();
         self.add_builtin(
             "integer",

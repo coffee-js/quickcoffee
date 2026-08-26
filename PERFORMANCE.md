@@ -706,6 +706,10 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 `stdlib-stable-sort` 对 100 个逆序 Number 执行不可变稳定排序，并以首尾之和 `101` 作为最终值护栏；它同时存在于 `qbench --json` 与 `cargo bench --bench core`。负载隔离 native stable-sort、输入复制与输出 Array 分配成本；profile 应保持 102 次托管值分配事件（输入 range 一次，返回数组及其 100 项共 101 次）。`max_collection_operation_items` 在复制前限制单次隐藏的 `O(n log n)` 工作，性能优化不得改为不稳定排序、修改输入或绕过 Decimal 数值策略。
 
+## RFC 0144 资源有界不可变连接
+
+`stdlib-concat` 分别建立两个 50 项 Number Array，再以 `concat` 连接并读取首尾，最终值护栏为 `99`；它同时存在于 `qbench --json` 与 `cargo bench --bench core`。负载隔离普通 resource builtin 调度、两段不可变 Value 克隆及单个 100 项输出 Array 分配，profile 应保持 103 次托管值分配事件（两个输入 range 各一次，结果 Array 及 100 项共 101 次）。`max_collection_operation_items` 与 `max_array_items` 都在复制前检查；性能优化不得修改输入、改变顺序或在失败时构造可观察的部分结果。
+
 标准库函数存放在每线程只读父环境中，每个 `Context` 只创建可写子环境并可局部 shadow 任意 builtin；首次解析某 builtin 时只把该绑定提升到当前 Context 的稳定 slot，后续热调用不重复穿越父环境。因此扩展标准库不会让 `Context::new` 线性复制整张名称索引和 slot 表，也不会用重复父级查询交换启动成本。隔离测试保证一个 Context 的替换不污染其他 Context，base/head 报告则继续把 Context 构造包含在 execute 阶段内，防止标准库扩展重新引入固定启动回退。
 
 复现机器可读记录：

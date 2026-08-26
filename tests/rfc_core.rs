@@ -2003,6 +2003,44 @@ fn stable_scalar_sort_is_immutable_strict_and_deterministic() {
     assert_eq!(context.last_execution().value_allocations, 4);
 }
 #[test]
+fn concat_is_immutable_strict_and_deterministic() {
+    assert_eq!(eval("concat('coffee ', '☕')").to_string(), "coffee ☕");
+    assert_eq!(eval("concat([1, 2], [3, 4])").to_string(), "[1, 2, 3, 4]");
+    assert_eq!(eval("concat('', '')").to_string(), "");
+    assert_eq!(eval("concat([], [])").to_string(), "[]");
+    assert_eq!(
+        eval("left = [1, 2]\nright = [3]\nout = concat(left, right)\nleft == [1, 2] and right == [3] and out == [1, 2, 3]")
+            .to_string(),
+        "true"
+    );
+
+    for source in [
+        "concat()",
+        "concat('one')",
+        "concat('one', 'two', 'three')",
+        "concat('one', ['two'])",
+        "concat({one: 1}, {two: 2})",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+
+    let mut context = Context::new();
+    context.eval("left = [1, 2]\nright = [3]").unwrap();
+    assert_eq!(
+        context.eval("concat(left, right)").unwrap().to_string(),
+        "[1, 2, 3]"
+    );
+    assert_eq!(context.last_execution().value_allocations, 4);
+    assert_eq!(
+        context.eval("concat('coffee', '☕')").unwrap().to_string(),
+        "coffee☕"
+    );
+    assert_eq!(context.last_execution().value_allocations, 1);
+}
+#[test]
 fn array_destructuring_is_strict_and_has_an_explicit_ignore_name() {
     assert_eq!(
         eval("left, right = [20, 22]\nleft + right").as_number(),

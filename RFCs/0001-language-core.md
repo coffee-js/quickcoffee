@@ -39,7 +39,7 @@ UTF-8 文本，以换行或分号分隔语句。缩进可形成 `if`、`unless`�
 
 RFC 0095 扩展字符串 `for` 也可使用 `by` 步长；RFC 0100 规定其支持非零有限有符号整数并以负步长倒序；RFC 0097 规定 `do (name) -> ...` 从同名外层变量转发立即调用实参。
 
-预置函数是普通名称，不是对象原型方法：`print(value...)`、`len(value)`、`type(value)`、`range(start, end)`、`str(value)`、`trim(text)`、`contains(text, needle)`、`starts_with(text, prefix)`、`ends_with(text, suffix)`、`sort(array)`、`abs(number)`、`sum(array)`、`min(array)`、`max(array)`、`keys(map)`、`values(map)`、`join(array, separator)`、`split(string, separator)`、`assert(bool, message?)`。数值聚合只接受有限数；空数组的 `sum` 为 `0`，`min`/`max` 要求非空。RFC 0139 的字符串查询严格、大小写敏感且不读取 locale；`trim` 使用 RFC 固定的 Unicode White_Space 表。RFC 0140 的 `sort` 返回新数组，只接受同质的有限 Number、Integer、Decimal 或 String，并使用稳定的数值或 Unicode scalar 字典序。不存在 `console`、`Object.prototype`、`Array.prototype` 或 String prototype。
+预置函数是普通名称，不是对象原型方法：`print(value...)`、`len(value)`、`type(value)`、`range(start, end)`、`str(value)`、`trim(text)`、`contains(text, needle)`、`starts_with(text, prefix)`、`ends_with(text, suffix)`、`sort(array)`、`concat(left, right)`、`abs(number)`、`sum(array)`、`min(array)`、`max(array)`、`keys(map)`、`values(map)`、`join(array, separator)`、`split(string, separator)`、`assert(bool, message?)`。数值聚合只接受有限数；空数组的 `sum` 为 `0`，`min`/`max` 要求非空。RFC 0139 的字符串查询严格、大小写敏感且不读取 locale；`trim` 使用 RFC 固定的 Unicode White_Space 表。RFC 0140 的 `sort` 返回新数组，只接受同质的有限 Number、Integer、Decimal 或 String，并使用稳定的数值或 Unicode scalar 字典序。RFC 0144 的 `concat` 只连接两个同为 String 或同为 Array 的值，在分配前检查输出与集合操作边界。不存在 `console`、`Object.prototype`、`Array.prototype` 或 String prototype。
 
 ### 后续契约修订
 

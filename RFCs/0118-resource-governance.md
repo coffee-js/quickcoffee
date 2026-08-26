@@ -44,6 +44,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 3. Array/Map 字面量、range、array spread/append、Map spread、string interpolation/concat/stringify、slice 与 class 实例/静态字段写入在结果可见或赋值提交前检查其边界。超限不执行随后 store，资源错误不能被 `try`/`catch` 吞掉。
 4. 这仍不是总分配或 retained-memory 账本：一次失败路径可以有局部临时分配，且模块图、源码/bytecode、managed object 数、生命周期/cycle 与总 Context 预算继续由 issue #76 的后续切片定义。
 
+## 2026-08-26：输出增长型连接
+
+1. RFC 0144 的 `concat` 在分配新 buffer 前以 checked arithmetic 计算 String UTF-8 byte 数或 Array item 数，并复用 `StringBytes` / `ArrayItems` 通用输出边界；算术溢出也映射到对应稳定资源类别。
+2. Array 连接还以左右输入项数总和复用 `CollectionOperationItems`，在复制任一元素之前拒绝超限工作。该操作边界与结果 `ArrayItems` 边界独立，宿主可分别收紧。
+3. 失败不修改输入且不返回部分结果；资源错误仍不可被脚本捕获。String 连接不读取 locale 或宿主 Unicode 表，Array 连接只按不可变 Value 语义克隆现有项。
+
 ## 验收
 
 `tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。

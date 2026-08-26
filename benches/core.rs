@@ -54,6 +54,12 @@ fn main() {
             expected: "101",
         },
         Workload {
+            name: "stdlib-concat",
+            source: "joined = concat([0...50], [50...100])\njoined[0] + joined[99]",
+            iterations: 10_000,
+            expected: "99",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,

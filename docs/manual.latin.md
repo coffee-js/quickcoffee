@@ -46,7 +46,7 @@ Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatio
 yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
 ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 Comparationes conectae medium semel servant atque priore falso breviant.
-Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; RFC 0140 sort seriem novam stabilem scalarum finitorum eiusdem generis reddit; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
+Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; RFC 0140 sort seriem novam stabilem scalarum finitorum eiusdem generis reddit; RFC 0144 concat duas String aut duas Array immutabiliter coniungit et limites ante allocationem probat; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
 Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
 Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 return expressio functionem praesentem finit; nudum return nil dat, iterata purgat, et finally circumstantia peragit.
@@ -90,6 +90,7 @@ bound_callback()
 trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
 contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
 sort(['中', 'a', '☕']) == ['a', '☕', '中']
+concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
 numerus = 7
 quadratum = (x) -> x * x
 shorthand = 'yes'
