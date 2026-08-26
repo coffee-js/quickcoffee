@@ -4697,7 +4697,9 @@ impl Vm {
                     Instruction::Member(name) => {
                         let target = pop(frame)?;
                         let value = member_value(target, name, false)?;
-                        check_value_resources(&value, self.resource_limits)?;
+                        if self.value_limits_active && value_needs_resource_check(&value) {
+                            check_value_resources(&value, self.resource_limits)?;
+                        }
                         if matches!(value, Value::Function(_)) {
                             self.record_value_allocations(1);
                         }
