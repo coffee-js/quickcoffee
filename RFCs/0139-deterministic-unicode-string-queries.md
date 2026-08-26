@@ -21,6 +21,8 @@ QuickCoffee 增加四个普通纯函数：`trim(text)`、`contains(text, needle)
 
 四个函数严格检查 arity 与 String 类型，失败产生普通可捕获 Runtime error，不返回部分值。它们沿用普通 builtin 调用的 fuel/call 计数；内部没有脚本 callback，不能绕过 call depth、异常传播或 capability 边界。三个 predicate 返回 Bool，不产生托管值分配；`trim` 返回一个新托管 String，并记一个 `ExecutionStats.value_allocations` 事件。
 
+Builtin 函数值驻留在每线程只读父环境中，每个 `Context` 持有独立可写子环境；`set_global` 与脚本赋值可在当前 Context shadow 同名 builtin，但不能修改其他 Context 或共享父环境。该布局使 Context 构造成本不随标准库条目数量线性复制，同时保留既有宿主隔离语义。
+
 本 slice 不增长输出：`trim` 的 UTF-8 byte 长度不超过输入，predicate 不返回容器或 String。因此它不先行定义 #76 的一般 String/container size policy。后续 `replace`、拼接和 immutable update 必须在输出追加前接入该策略。
 
 ## 延后工作

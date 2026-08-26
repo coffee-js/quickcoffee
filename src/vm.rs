@@ -2200,9 +2200,10 @@ pub struct Context {
 }
 
 thread_local! {
-    // Native builtin functions are immutable. Sharing their template avoids
-    // rebuilding names and closures while each Context still owns its slots.
-    static BUILTIN_ENVIRONMENT: EnvironmentSnapshot = {
+    // Native builtin functions are immutable. Sharing them through a read-only
+    // parent keeps Context construction independent of standard-library size;
+    // each Context owns a writable child that can shadow any builtin.
+    static BUILTIN_ENVIRONMENT: Env = {
         let global = env(None);
         let mut context = Context {
             engine: Engine::new(),
@@ -2214,7 +2215,7 @@ thread_local! {
             last_execution: ExecutionStats::default(),
         };
         context.install_builtins();
-        global.borrow().snapshot()
+        global
     };
     // Keeping the pool outside `Context`, `Vm`, and `Vm::run` preserves the
     // layout of unrelated dispatch paths. Borrows never cross a script call.
@@ -2342,10 +2343,7 @@ impl Default for Context {
 impl Context {
     /// Creates a context with standard library builtins and the default fuel budget.
     pub fn new() -> Self {
-        let global = env(None);
-        BUILTIN_ENVIRONMENT.with(|builtins| {
-            global.borrow_mut().restore(builtins.clone());
-        });
+        let global = BUILTIN_ENVIRONMENT.with(|builtins| env(Some(builtins.clone())));
         Self {
             engine: Engine::new(),
             global,
