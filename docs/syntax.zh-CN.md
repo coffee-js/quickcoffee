@@ -18,7 +18,7 @@
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。
 
-标准库是普通函数：`print`、`len`、`type`、`error`、`range`、`str`、`parse_json`、`encode_json`、`integer`、`number`、`decimal`、`decimal_div`、`round_decimal`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。聚合只收同质的有限 Number、Integer 或 Decimal 数组；`sum([])` 为 Number `0`，`min([])` 与 `max([])` 报错。
+标准库是普通函数：`print`、`len`、`type`、`error`、`range`、`str`、`trim`、`contains`、`starts_with`、`ends_with`、`parse_json`、`encode_json`、`integer`、`number`、`decimal`、`decimal_div`、`round_decimal`、`abs`、`sum`、`min`、`max`、`keys`、`values`、`join`、`split` 与 `assert`。聚合只收同质的有限 Number、Integer 或 Decimal 数组；`sum([])` 为 Number `0`，`min([])` 与 `max([])` 报错。字符串 predicate 严格、大小写敏感且不做 normalization；`trim` 只移除 RFC 0139 固定的 Unicode White_Space scalar，不读取 locale 或宿主 Unicode 表。
 
 `123n`、`0xffn`、`0b101n`、`0o755n` 是任意精度 Integer；它与 IEEE-754 Number 严格分型，不做混合算术或排序。Integer 支持精确算术、有符号位运算（不含 `>>>`）、range、索引/切片和 `by`；`integer(value)` 与 `number(value)` 提供显式转换，其中 Integer 转 Number 只接受安全整数范围。`ResourceLimits::max_integer_bits` 在常量、全局/native 返回、运算、聚合及 JSON 被脚本观察前检查，越界为不可捕获的 `IntegerBits`。完整契约见 RFC 0135。
 

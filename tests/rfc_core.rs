@@ -1880,6 +1880,53 @@ fn redesigned_standard_library_is_function_based_not_prototype_based() {
     assert!(Context::new().eval("assert(false, 'expected')").is_err());
 }
 #[test]
+fn unicode_string_predicates_and_trim_are_strict_and_pinned() {
+    assert_eq!(
+        eval("trim('\\u{00A0}\\u{2003}coffee ☕\\u{202F}\\u{3000}')").as_str(),
+        Some("coffee ☕")
+    );
+    assert_eq!(
+        eval("len(trim('\\u{200B}x\\u{200B}'))").as_number(),
+        Some(3.)
+    );
+    assert_eq!(
+        eval(r"len(trim('\u{0009}\u{000A}\u{000B}\u{000C}\u{000D}\u{0020}\u{0085}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}x\u{3000}\u{205F}\u{202F}\u{2029}\u{2028}\u{200A}\u{2009}\u{2008}\u{2007}\u{2006}\u{2005}\u{2004}\u{2003}\u{2002}\u{2001}\u{2000}\u{1680}\u{00A0}\u{0085}\u{0020}\u{000D}\u{000C}\u{000B}\u{000A}\u{0009}'))")
+            .as_number(),
+        Some(1.)
+    );
+    assert_eq!(
+        eval("[contains('a☕中', '☕'), contains('a☕中', ''), starts_with('a☕中', 'a☕'), ends_with('a☕中', '☕中')]")
+            .to_string(),
+        "[true, true, true, true]"
+    );
+    assert_eq!(
+        eval("[contains('a☕中', '中a'), starts_with('a☕中', '☕'), ends_with('a☕中', 'a')]")
+            .to_string(),
+        "[false, false, false]"
+    );
+
+    for source in [
+        "trim()",
+        "trim(1)",
+        "contains('text')",
+        "contains('text', 1)",
+        "starts_with([], '')",
+        "ends_with('text', '', '')",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+
+    let mut context = Context::new();
+    assert_eq!(
+        context.eval("trim(' text ')").unwrap().as_str(),
+        Some("text")
+    );
+    assert_eq!(context.last_execution().value_allocations, 1);
+}
+#[test]
 fn numeric_standard_library_is_strict_and_total() {
     assert_eq!(eval("abs(-3)").as_number(), Some(3.));
     assert_eq!(eval("sum([])").as_number(), Some(0.));

@@ -2225,6 +2225,25 @@ fn one_value_allocation(_: &Value) -> u64 {
     1
 }
 
+// Unicode White_Space, pinned explicitly so `trim` does not inherit locale or
+// Unicode-table changes from the host Rust toolchain.
+fn is_pinned_unicode_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'..='\u{000D}'
+            | '\u{0020}'
+            | '\u{0085}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+    )
+}
+
 fn array_and_element_allocations(value: &Value) -> u64 {
     match value {
         Value::Array(values) => values.len() as u64 + 1,
@@ -2620,6 +2639,48 @@ impl Context {
             },
             one_value_allocation,
         );
+        self.add_builtin(
+            "trim",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("trim expects one string argument"));
+                }
+                let Value::String(input) = &xs[0] else {
+                    return Err(Error::runtime("trim expects a string"));
+                };
+                Ok(Value::String(Rc::from(
+                    input.trim_matches(is_pinned_unicode_whitespace),
+                )))
+            },
+            one_value_allocation,
+        );
+        self.add_native("contains", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("contains expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(needle)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("contains expects strings"));
+            };
+            Ok(Value::Bool(input.contains(needle.as_ref())))
+        });
+        self.add_native("starts_with", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("starts_with expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(prefix)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("starts_with expects strings"));
+            };
+            Ok(Value::Bool(input.starts_with(prefix.as_ref())))
+        });
+        self.add_native("ends_with", |xs| {
+            if xs.len() != 2 {
+                return Err(Error::runtime("ends_with expects two string arguments"));
+            }
+            let (Value::String(input), Value::String(suffix)) = (&xs[0], &xs[1]) else {
+                return Err(Error::runtime("ends_with expects strings"));
+            };
+            Ok(Value::Bool(input.ends_with(suffix.as_ref())))
+        });
         self.install_json_builtins();
         self.add_builtin(
             "integer",

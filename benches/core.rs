@@ -42,6 +42,12 @@ fn main() {
             expected: "4950",
         },
         Workload {
+            name: "stdlib-string-queries",
+            source: "text = trim('\\u{3000}coffee ☕ beans\\u{3000}')\ncontains(text, '☕') and starts_with(text, 'coffee') and ends_with(text, 'beans') and not contains(text, 'tea')",
+            iterations: 20_000,
+            expected: "true",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,

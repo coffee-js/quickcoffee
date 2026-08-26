@@ -94,6 +94,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "4950",
     },
     Workload {
+        name: "stdlib-string-queries",
+        source: "text = trim('\\u{3000}coffee ☕ beans\\u{3000}')\ncontains(text, '☕') and starts_with(text, 'coffee') and ends_with(text, 'beans') and not contains(text, 'tea')",
+        expected: "true",
+    },
+    Workload {
         name: "closures-and-ranges",
         source: "base = 1\nadd = (n) -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
         expected: "1274",

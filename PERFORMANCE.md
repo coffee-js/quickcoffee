@@ -678,6 +678,10 @@ rest 绑定会复制剩余元素到新的不可变数组，以保持宿主存储
 
 标准库数值路径由四个负载覆盖：`stdlib-abs` 测量单值绝对值，`stdlib-sum` 测量小数组聚合，`stdlib-min-max` 测量严格最小/最大值，`stdlib-range-sum` 测量 `range` 与 `sum` 的组合。四者同时存在于 `qbench --json` 与 `cargo bench --bench core`，并检查最终值 `42`、`10`、`4`、`4950`。
 
+## RFC 0139 确定性 Unicode 字符串查询
+
+`stdlib-string-queries` 同时覆盖固定 White_Space 表的 `trim`，以及大小写敏感、无 normalization 的 `contains`、`starts_with`、`ends_with`。负载混合 ASCII 与多字节 Unicode，最终值护栏为 `true`；它同时存在于 `qbench --json` 与 `cargo bench --bench core`。该 slice 不增长输出，profile 必须保持一次托管 String 分配、零脚本 callback，并沿用普通 builtin fuel/call 计数。
+
 复现机器可读记录：
 
 ```sh
