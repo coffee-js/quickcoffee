@@ -775,6 +775,176 @@ fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
 }
 
 #[test]
+fn qcoffee_modules_require_an_explicit_restricted_root() {
+    let root = std::env::temp_dir().join(format!("qcoffee-cli-modules-{}", std::process::id()));
+    let app = root.join("app");
+    let lib = root.join("lib");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(lib.join("math.qc"), "export answer = 21\n").unwrap();
+    fs::write(
+        app.join("main.qc"),
+        "import { answer } from '../lib/math'\nexport result = answer * 2\nexport argc = len(argv)\n",
+    )
+    .unwrap();
+
+    let root_text = root.to_str().unwrap();
+    let run = Command::new(bin("qcoffee"))
+        .args(["--module-root", root_text, "app/main", "--", "one", "two"])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("result: 42"));
+    assert!(stdout.contains("argc: 2"));
+    assert!(run.stderr.is_empty());
+
+    let json = Command::new(bin("qcoffee"))
+        .args(["--json", "--module-root", root_text, "app/main"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&json.stdout),
+        "{\"ok\":true,\"exports\":{\"argc\":0,\"result\":42}}\n"
+    );
+    assert!(json.stderr.is_empty());
+
+    let stats = Command::new(bin("qcoffee"))
+        .args(["--stats", "--module-root", root_text, "app/main"])
+        .output()
+        .unwrap();
+    assert!(stats.status.success());
+    assert!(String::from_utf8_lossy(&stats.stderr).contains("qcoffee stats: instructions="));
+
+    let missing_entry = Command::new(bin("qcoffee"))
+        .args(["--json", "--module-root", root_text, "app/missing"])
+        .output()
+        .unwrap();
+    assert_eq!(missing_entry.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing_entry.stdout).contains("module not found: app/missing.qc")
+    );
+
+    let missing_root = root.join("missing-root");
+    let missing_root = Command::new(bin("qcoffee"))
+        .args([
+            "--json",
+            "--module-root",
+            missing_root.to_str().unwrap(),
+            "app/main",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(missing_root.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&missing_root.stdout).contains("module root is unavailable"));
+
+    fs::write(lib.join("broken.qc"), "@\n").unwrap();
+    fs::write(
+        app.join("broken.qc"),
+        "import { value } from '../lib/broken'\nexport value = value\n",
+    )
+    .unwrap();
+    let broken = Command::new(bin("qcoffee"))
+        .args(["--json", "--module-root", root_text, "app/broken"])
+        .output()
+        .unwrap();
+    assert_eq!(broken.status.code(), Some(1));
+    let broken_stdout = String::from_utf8_lossy(&broken.stdout);
+    assert!(broken_stdout.contains("\"source\":\"lib/broken.qc\""));
+    assert!(broken_stdout.ends_with(",\"line\":1}\n"));
+
+    fs::write(
+        app.join("escape.qc"),
+        "import { value } from '../../outside'\nexport value = value\n",
+    )
+    .unwrap();
+    let escape = Command::new(bin("qcoffee"))
+        .args(["--module-root", root_text, "app/escape"])
+        .output()
+        .unwrap();
+    assert_eq!(escape.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&escape.stderr).contains("module path escapes configured root")
+    );
+
+    fs::write(
+        app.join("cycle-a.qc"),
+        "import { value } from './cycle-b'\nexport value = value\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("cycle-b.qc"),
+        "import { value } from './cycle-a'\nexport value = value\n",
+    )
+    .unwrap();
+    let cycle = Command::new(bin("qcoffee"))
+        .args(["--module-root", root_text, "app/cycle-a"])
+        .output()
+        .unwrap();
+    assert_eq!(cycle.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&cycle.stderr).contains(
+        "circular module dependency: app/cycle-a.qc -> app/cycle-b.qc -> app/cycle-a.qc"
+    ));
+
+    fs::write(app.join("fuel.qc"), "loop 1\n").unwrap();
+    let fuel = Command::new(bin("qcoffee"))
+        .args(["--fuel", "8", "--module-root", root_text, "app/fuel"])
+        .output()
+        .unwrap();
+    assert_eq!(fuel.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&fuel.stderr).contains("fuel exhausted"));
+
+    let no_entry = Command::new(bin("qcoffee"))
+        .args(["--module-root", root_text])
+        .output()
+        .unwrap();
+    assert_eq!(no_entry.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&no_entry.stderr).contains("requires an entry module"));
+
+    for args in [
+        vec!["--module-root", root_text, "-e", "1"],
+        vec!["--module-root", root_text, "--check", "app/main.qc"],
+        vec!["--module-root", root_text, "--interactive", "app/main"],
+        vec!["--module-root", root_text, "app/main", "app/escape"],
+    ] {
+        let conflict = Command::new(bin("qcoffee")).args(args).output().unwrap();
+        assert_eq!(conflict.status.code(), Some(2));
+    }
+
+    let ordinary_module = Command::new(bin("qcoffee"))
+        .arg(app.join("main.qc"))
+        .output()
+        .unwrap();
+    assert_eq!(ordinary_module.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&ordinary_module.stderr).contains("module"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let outside = root.with_extension("outside.qc");
+        fs::write(&outside, "export value = 1\n").unwrap();
+        symlink(&outside, app.join("escape-link.qc")).unwrap();
+        let link = Command::new(bin("qcoffee"))
+            .args(["--module-root", root_text, "app/escape-link"])
+            .output()
+            .unwrap();
+        assert_eq!(link.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&link.stderr).contains("module path escapes configured root")
+        );
+        let _ = fs::remove_file(outside);
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn qbench_json_is_guarded_and_machine_readable() {
     let json = Command::new(bin("qbench"))
         .args(["--json", "--iterations", "1"])
