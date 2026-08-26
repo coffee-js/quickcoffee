@@ -3879,6 +3879,12 @@ impl Vm {
         self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value));
     }
 
+    fn record_stack_managed_allocation(&mut self, frame: &Frame) {
+        self.record_managed_allocation(shallow_managed_allocation(
+            frame.stack.last().expect("managed numeric result"),
+        ));
+    }
+
     fn record_environment_allocation(&mut self) {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
@@ -4514,127 +4520,155 @@ impl Vm {
                         frame.stack.push(Value::Bool(!matches!(value, Value::Nil)))
                     }
                     Instruction::Increment => {
-                        if let Some(allocation) =
-                            numeric_update(frame, true, &self.resource_limits)?
-                        {
-                            self.record_managed_allocation(allocation);
+                        if numeric_update(frame, true, &self.resource_limits)? {
+                            self.record_stack_managed_allocation(frame);
                         }
                     }
                     Instruction::Decrement => {
-                        if let Some(allocation) =
-                            numeric_update(frame, false, &self.resource_limits)?
-                        {
-                            self.record_managed_allocation(allocation);
+                        if numeric_update(frame, false, &self.resource_limits)? {
+                            self.record_stack_managed_allocation(frame);
                         }
                     }
-                    Instruction::Add
-                    | Instruction::Sub
-                    | Instruction::Mul
-                    | Instruction::Div
-                    | Instruction::FloorDiv
-                    | Instruction::Rem
-                    | Instruction::Modulo
-                    | Instruction::Pow => {
-                        let allocation = match op {
-                            Instruction::Add => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a + b,
-                                |a, b, _| Ok(a + b),
-                                decimal_add,
-                            )?,
-                            Instruction::Sub => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a - b,
-                                |a, b, _| Ok(a - b),
-                                decimal_sub,
-                            )?,
-                            Instruction::Mul => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a * b,
-                                integer_mul_resource,
-                                decimal_mul,
-                            )?,
-                            Instruction::Div => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a / b,
-                                |a, b, _| integer_div(a, b),
-                                decimal_exact_div,
-                            )?,
-                            Instruction::FloorDiv => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| (a / b).floor(),
-                                |a, b, _| integer_floor_div(a, b),
-                                decimal_floor_div,
-                            )?,
-                            Instruction::Rem => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a % b,
-                                |a, b, _| integer_rem(a, b),
-                                decimal_rem,
-                            )?,
-                            Instruction::Modulo => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| (a % b + b) % b,
-                                |a, b, _| integer_modulo(a, b),
-                                decimal_modulo,
-                            )?,
-                            Instruction::Pow => numeric_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a.powf(b),
-                                integer_pow,
-                                decimal_pow,
-                            )?,
-                            _ => unreachable!("grouped numeric instruction"),
-                        };
-                        if let Some(allocation) = allocation {
-                            self.record_managed_allocation(allocation);
-                        }
-                    }
-                    Instruction::BitAnd | Instruction::BitOr | Instruction::BitXor => {
-                        let allocation = match op {
-                            Instruction::BitAnd => numeric_bit_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a & b,
-                                |a, b| a & b,
-                            )?,
-                            Instruction::BitOr => numeric_bit_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a | b,
-                                |a, b| a | b,
-                            )?,
-                            Instruction::BitXor => numeric_bit_binary(
-                                frame,
-                                &self.resource_limits,
-                                |a, b| a ^ b,
-                                |a, b| a ^ b,
-                            )?,
-                            _ => unreachable!("grouped bitwise instruction"),
-                        };
-                        if let Some(allocation) = allocation {
-                            self.record_managed_allocation(allocation);
-                        }
-                    }
-                    Instruction::ShiftLeft | Instruction::ShiftRight => {
-                        if let Some(allocation) = numeric_shift(
+                    Instruction::Add => {
+                        if numeric_binary(
                             frame,
-                            matches!(op, Instruction::ShiftRight),
                             &self.resource_limits,
+                            |a, b| a + b,
+                            |a, b, _| Ok(a + b),
+                            decimal_add,
                         )? {
-                            self.record_managed_allocation(allocation);
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Sub => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a - b,
+                            |a, b, _| Ok(a - b),
+                            decimal_sub,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Mul => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a * b,
+                            integer_mul_resource,
+                            decimal_mul,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Div => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a / b,
+                            |a, b, _| integer_div(a, b),
+                            decimal_exact_div,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::FloorDiv => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| (a / b).floor(),
+                            |a, b, _| integer_floor_div(a, b),
+                            decimal_floor_div,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Rem => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a % b,
+                            |a, b, _| integer_rem(a, b),
+                            decimal_rem,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Modulo => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| (a % b + b) % b,
+                            |a, b, _| integer_modulo(a, b),
+                            decimal_modulo,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitAnd => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a & b,
+                            |a, b| a & b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitOr => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a | b,
+                            |a, b| a | b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitXor => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a ^ b,
+                            |a, b| a ^ b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::ShiftLeft => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_shift(frame, false, &self.resource_limits)?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::ShiftRight => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_shift(frame, true, &self.resource_limits)?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
                         }
                     }
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
+                    }
+                    Instruction::Pow => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a.powf(b),
+                            integer_pow,
+                            decimal_pow,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
                     }
                     Instruction::Eq => compare(frame, equal)?,
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
@@ -6173,11 +6207,7 @@ fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<
 }
 // Keep the full host policy borrowed across generic Number operations. Copying
 // ResourceLimits here penalizes the scalar hot path even when no exact value is involved.
-fn numeric_update(
-    f: &mut Frame,
-    increment: bool,
-    limits: &ResourceLimits,
-) -> Result<Option<ManagedAllocation>, Error> {
+fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<bool, Error> {
     let managed = match pop(f)? {
         Value::Number(value) => {
             f.stack.push(Value::Number(if increment {
@@ -6213,7 +6243,7 @@ fn numeric_update(
             ));
         }
     };
-    Ok(managed.then(|| shallow_managed_allocation(f.stack.last().expect("numeric update result"))))
+    Ok(managed)
 }
 fn numeric_binary(
     f: &mut Frame,
@@ -6221,7 +6251,7 @@ fn numeric_binary(
     number_op: impl FnOnce(f64, f64) -> f64,
     integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
     decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
-) -> Result<Option<ManagedAllocation>, Error> {
+) -> Result<bool, Error> {
     let b = pop(f)?;
     let a = pop(f)?;
     let managed = match (a, b) {
@@ -6252,7 +6282,7 @@ fn numeric_binary(
             ));
         }
     };
-    Ok(managed.then(|| shallow_managed_allocation(f.stack.last().expect("numeric binary result"))))
+    Ok(managed)
 }
 fn integer_div(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
     if b.is_zero() {
@@ -6331,19 +6361,17 @@ fn numeric_bit_binary(
     limits: &ResourceLimits,
     number_op: impl FnOnce(i32, i32) -> i32,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
-) -> Result<Option<ManagedAllocation>, Error> {
+) -> Result<(), Error> {
     let b = pop(f)?;
     let a = pop(f)?;
-    let managed = match (a, b) {
+    match (a, b) {
         (Value::Number(a), Value::Number(b)) => {
             let a = bit_integer(Value::Number(a))?;
             let b = bit_integer(Value::Number(b))?;
             f.stack.push(Value::Number(number_op(a, b) as f64));
-            false
         }
         (Value::Integer(a), Value::Integer(b)) => {
             push_integer(f, integer_op(a.inner(), b.inner()), *limits)?;
-            true
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
             return Err(Error::runtime("cannot mix number and integer operands"));
@@ -6353,11 +6381,8 @@ fn numeric_bit_binary(
                 "bitwise operands must have the same numeric type",
             ));
         }
-    };
-    Ok(
-        managed
-            .then(|| shallow_managed_allocation(f.stack.last().expect("numeric bitwise result"))),
-    )
+    }
+    Ok(())
 }
 fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     let shift = bit_integer(pop(f)?)?;
@@ -6370,14 +6395,10 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
-fn numeric_shift(
-    f: &mut Frame,
-    right: bool,
-    limits: &ResourceLimits,
-) -> Result<Option<ManagedAllocation>, Error> {
+fn numeric_shift(f: &mut Frame, right: bool, limits: &ResourceLimits) -> Result<(), Error> {
     let shift = pop(f)?;
     let value = pop(f)?;
-    let managed = match (value, shift) {
+    match (value, shift) {
         (Value::Number(value), Value::Number(shift)) => {
             let shift = bit_integer(Value::Number(shift))?;
             if !(0..32).contains(&shift) {
@@ -6392,7 +6413,6 @@ fn numeric_shift(
                 value.wrapping_shl(shift as u32)
             };
             f.stack.push(Value::Number(result as f64));
-            false
         }
         (Value::Integer(value), Value::Integer(shift)) => {
             let shift = shift.inner().to_usize().ok_or_else(|| {
@@ -6426,7 +6446,6 @@ fn numeric_shift(
                 },
                 *limits,
             )?;
-            true
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
             return Err(Error::runtime("cannot mix number and integer operands"));
@@ -6436,8 +6455,8 @@ fn numeric_shift(
                 "shift operands must have the same numeric type",
             ));
         }
-    };
-    Ok(managed.then(|| shallow_managed_allocation(f.stack.last().expect("numeric shift result"))))
+    }
+    Ok(())
 }
 fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Error> {
     let b = pop(f)?;
