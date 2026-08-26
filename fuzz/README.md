@@ -7,8 +7,8 @@ crate or the Rust 1.85/stable workspace checks. The pinned nightly in
 Run one bounded target locally:
 
 ```sh
-cargo fuzz run parser -- -max_total_time=30 -seed=1
-cargo fuzz run verifier -- -max_total_time=30 -seed=1
+cargo +nightly-2025-03-28 fuzz run parser -- -max_total_time=30 -seed=1
+cargo +nightly-2025-03-28 fuzz run verifier -- -max_total_time=30 -seed=1
 ```
 
 `make fuzz-smoke` uses the same deterministic seed with a short duration. A
