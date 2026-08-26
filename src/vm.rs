@@ -4761,19 +4761,20 @@ impl Vm {
                                     .chars()
                                     .map(|character| Value::String(Rc::from(character.to_string())))
                                     .collect();
-                                let iterable = Value::Array(Rc::new(values));
-                                self.record_deep_value_allocation(
-                                    value.chars().count() as u64 + 1,
-                                    &iterable,
-                                );
-                                let Value::Array(values) = iterable else {
-                                    unreachable!("string iterator builds an array")
-                                };
+                                let character_count = values.len();
+                                self.record_managed_allocation(ManagedAllocation {
+                                    legacy_value_allocations: (character_count as u64)
+                                        .saturating_add(1),
+                                    objects: (character_count as u64).saturating_add(1),
+                                    bytes: (character_count as u64)
+                                        .saturating_mul(LOGICAL_REFERENCE_BYTES)
+                                        .saturating_add(value.len() as u64),
+                                });
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
-                                        values,
+                                        values: Rc::new(values),
                                         position: if step < 0 {
-                                            value.chars().count().saturating_sub(1)
+                                            character_count.saturating_sub(1)
                                         } else {
                                             0
                                         },
