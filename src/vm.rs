@@ -1579,6 +1579,12 @@ enum FunctionKind {
         owner: Rc<str>,
         name: Rc<str>,
     },
+    // Keep uncommon receiver binding out of the ordinary bytecode function
+    // layout and call path.
+    ReceiverBound {
+        function: Rc<Function>,
+        captured_receiver: Option<Value>,
+    },
 }
 #[derive(Clone)]
 struct MethodContext {
@@ -1876,10 +1882,12 @@ impl ProgramExecutionPlan {
         // functions carry the environment captured where they were created,
         // and native functions receive values only. Keep spread calls out of
         // this first extension while their argument carrier is investigated.
-        let shared_environment = chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::MakeFunction(_)));
+        let shared_environment = chunk.code.iter().any(|instruction| {
+            matches!(
+                instruction,
+                Instruction::MakeFunction(_) | Instruction::MakeBoundFunction(_)
+            )
+        });
         let isolated_frame = !chunk.code.iter().any(|instruction| {
             matches!(
                 instruction,
@@ -1888,6 +1896,7 @@ impl ProgramExecutionPlan {
                     | Instruction::Try { .. }
                     | Instruction::EndTry
                     | Instruction::MakeFunction(_)
+                    | Instruction::MakeBoundFunction(_)
                     | Instruction::CallSpread
             )
         });
@@ -4193,7 +4202,7 @@ impl Vm {
                         };
                         return self.super_call(frame, args.as_ref().clone());
                     }
-                    Instruction::MakeFunction(i) => match frame
+                    Instruction::MakeFunction(i) | Instruction::MakeBoundFunction(i) => match frame
                         .chunk
                         .constants
                         .get(*i)
@@ -4204,8 +4213,26 @@ impl Vm {
                             required,
                             rest,
                             receiver,
+                            receiver_bound,
                             chunk,
                         } => {
+                            let captured_receiver = if matches!(
+                                op,
+                                Instruction::MakeBoundFunction(_)
+                            ) {
+                                if !frame.receiver_initialized {
+                                    return Err(Error::runtime(
+                                        "derived constructor cannot capture its receiver before super",
+                                    ));
+                                }
+                                Some(frame.receiver.clone().ok_or_else(|| {
+                                    Error::runtime(
+                                        "bound function creation outside class receiver context",
+                                    )
+                                })?)
+                            } else {
+                                None
+                            };
                             let debug_info = frame.debug_info.clone();
                             let fast_parameters = frame
                                 .execution_plan
@@ -4214,7 +4241,7 @@ impl Vm {
                                 .and_then(|slots| {
                                     slots.fast_parameter_slots(params, *required, rest.as_deref())
                                 });
-                            frame.stack.push(Value::Function(Rc::new(Function {
+                            let function = Rc::new(Function {
                                 inner: FunctionKind::Bytecode {
                                     params: params.clone(),
                                     required: *required,
@@ -4226,7 +4253,19 @@ impl Vm {
                                     fast_parameters,
                                     env: frame.env.clone(),
                                 },
-                            })));
+                            });
+                            let function = if *receiver_bound {
+                                Rc::new(Function {
+                                    inner: FunctionKind::ReceiverBound {
+                                        function,
+                                        captured_receiver,
+                                    },
+                                })
+                            } else {
+                                debug_assert!(captured_receiver.is_none());
+                                function
+                            };
+                            frame.stack.push(Value::Function(function));
                             self.record_value_allocations(1);
                         }
                         _ => return Err(Error::runtime("value used as function template")),
@@ -4398,6 +4437,10 @@ fn bound_method(function: Rc<Function>, receiver: Value, context: MethodContext)
     }))
 }
 
+fn receiver_bound(function: &Function) -> bool {
+    matches!(function.inner, FunctionKind::ReceiverBound { .. })
+}
+
 fn find_constructor(class: &Rc<Class>) -> Option<(Rc<Class>, Rc<Function>)> {
     let mut current = Some(class.clone());
     while let Some(class) = current {
@@ -4417,6 +4460,7 @@ fn function_uses_super(function: &Function) -> bool {
                 Instruction::SuperCall(_) | Instruction::SuperCallSpread
             )
         }),
+        FunctionKind::ReceiverBound { function, .. } => function_uses_super(function),
         _ => false,
     }
 }
@@ -4490,7 +4534,7 @@ fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, E
                         instance.class.name
                     ))
                 })?;
-            if bind_method {
+            if bind_method || receiver_bound(&function) {
                 Ok(bound_method(
                     function,
                     Value::Instance(instance),
@@ -4514,7 +4558,7 @@ fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, E
                     class.name
                 ))
             })?;
-            if bind_method {
+            if bind_method || receiver_bound(&function) {
                 Ok(bound_method(
                     function,
                     Value::Class(class),
@@ -4631,6 +4675,7 @@ fn call_with_context(
                 execution_plan,
                 fast_parameters,
                 env: captured,
+                ..
             } => {
                 if vm.call_depth >= vm.max_call_depth {
                     return Err(Error::resource(
@@ -4744,6 +4789,31 @@ fn call_with_context(
                 });
                 vm.call_depth += 1;
                 vm.call_depth_peak = vm.call_depth_peak.max(vm.call_depth);
+            }
+            FunctionKind::ReceiverBound {
+                function,
+                captured_receiver,
+            } => {
+                if let Some(receiver) = captured_receiver {
+                    let mut bound_args = Vec::with_capacity(args.len() + 1);
+                    bound_args.push(receiver.clone());
+                    bound_args.extend_from_slice(args);
+                    call_with_context(
+                        vm,
+                        frames,
+                        Value::Function(function.clone()),
+                        &bound_args,
+                        method_context,
+                    )?;
+                } else {
+                    call_with_context(
+                        vm,
+                        frames,
+                        Value::Function(function.clone()),
+                        args,
+                        method_context,
+                    )?;
+                }
             }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
@@ -6009,7 +6079,7 @@ mod tests {
                 matches!(
                     constant,
                     Constant::Function { chunk, .. }
-                        if chunk.code.iter().any(|instruction| matches!(instruction, Instruction::MakeFunction(_)))
+                        if chunk.code.iter().any(|instruction| matches!(instruction, Instruction::MakeFunction(_) | Instruction::MakeBoundFunction(_)))
                 )
             })
             .expect("capturing function template")

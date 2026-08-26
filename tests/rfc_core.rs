@@ -1,5 +1,6 @@
 use quickcoffee::{
-    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Program, Value, compile,
+    Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Program, ResourceLimit,
+    Value, compile,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -907,7 +908,7 @@ fn function_and_lexical_capture() {
         Some(42.)
     );
     assert_eq!(
-        eval("twice = (x) => x * 2\ntwice(21)").as_number(),
+        eval("twice = (x) -> x * 2\ntwice(21)").as_number(),
         Some(42.)
     );
     let mut cx = Context::new();
@@ -1766,6 +1767,89 @@ fn classes_inherit_privately_and_resolve_super_from_the_defining_class() {
     }
 }
 #[test]
+fn fat_arrows_capture_only_valid_class_receivers_and_escape_safely() {
+    assert_eq!(
+        eval("class Counter\n  constructor: (@value) ->\n  callback: (step) ->\n    (extra) =>\n      @value = @value + step + extra\n      @value\nc = new Counter(10)\ncallback = c.callback(5)\n[callback(1), callback(2), c.value]")
+            .to_string(),
+        "[16, 23, 23]"
+    );
+    assert_eq!(
+        eval("class Counter\n  constructor: (@value) ->\n  tick: =>\n    @value = @value + 1\n    @value\nc = new Counter(40)\ntick = c.tick\n[tick(), tick()]")
+            .to_string(),
+        "[41, 42]"
+    );
+    assert_eq!(
+        eval("class Base\n  value: -> 41\nclass Child extends Base\n  value: => super() + 1\ncallback = new Child().value\ncallback()")
+            .as_number(),
+        Some(42.)
+    );
+    assert_eq!(
+        eval("class Registry\n  @make: ->\n    @value = 40\n    =>\n      @value = @value + 1\n      @value\n  @tick: =>\n    @value = @value + 1\n    @value\nfrom_method = Registry.make()\ndetached = Registry.tick\n[from_method(), detached(), Registry.value]")
+            .to_string(),
+        "[41, 42, 42]"
+    );
+    assert_eq!(
+        eval("class Base\n  constructor: (@value) ->\nclass Child extends Base\n  constructor: (value) ->\n    super(value)\n    @callback = => @value\nchild = new Child(42)\nchild.callback()")
+            .as_number(),
+        Some(42.)
+    );
+
+    for source in [
+        "=> this",
+        "callback = (value) => value",
+        "make = -> => 1\nmake()",
+        "class Bad\n  method: (callback = => this) -> callback()",
+        "class Bad\n  method: ->\n    callback = -> this\n    callback()\nnew Bad().method()",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+    let before_super = Context::new()
+        .eval("class Base\n  constructor: ->\nclass Child extends Base\n  constructor: ->\n    callback = => this\n    super()\nnew Child()")
+        .unwrap_err();
+    assert!(before_super.message().contains("before super"));
+
+    let error = Engine::new()
+        .compile_named("bound-arrow.qc", "value = 1\ncallback = => value")
+        .unwrap_err();
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("bound-arrow.qc")
+    );
+    assert_eq!(error.labels()[0].span.start.line, 2);
+    assert_eq!(error.labels()[0].span.start.column, Some(12));
+
+    let chunk = compile(
+        "class Counter\n  constructor: (@value) ->\n  callback: -> => @value\nnew Counter(42).callback()",
+    )
+    .unwrap();
+    chunk.verify().unwrap();
+    assert!(format!("{chunk:?}").contains("MakeBoundFunction"));
+
+    let mut context = Context::new();
+    let callback = context
+        .eval("class Counter\n  constructor: (@value) ->\n  callback: -> => @value\nnew Counter(42).callback()")
+        .unwrap();
+    context.set_global("callback", callback);
+    assert_eq!(context.eval("callback()").unwrap().as_number(), Some(42.));
+    let stats = context.last_execution();
+    assert!(stats.calls > 0);
+    assert!(stats.environment_allocations > 0);
+
+    let depth_error = Context::new()
+        .with_max_call_depth(8)
+        .eval("class Recursive\n  run: => @run()\ncallback = new Recursive().run\ncallback()")
+        .unwrap_err();
+    assert_eq!(depth_error.resource_limit(), Some(ResourceLimit::CallDepth));
+    let fuel_error = Context::new()
+        .with_fuel(25)
+        .eval("class Busy\n  run: => loop 1\ncallback = new Busy().run\ncallback()")
+        .unwrap_err();
+    assert_eq!(fuel_error.resource_limit(), Some(ResourceLimit::Fuel));
+}
+#[test]
 fn double_quoted_strings_interpolate_quickcoffee_expressions() {
     assert_eq!(
         eval("name = 'Coffee'\n\"Hello #{name}, #{2 + 3}!\"").as_str(),
@@ -2052,6 +2136,7 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             required: 0,
             rest: None,
             receiver: false,
+            receiver_bound: false,
             chunk: Rc::new(invalid_inner),
         }],
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
@@ -2078,6 +2163,7 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             required: 1,
             rest: None,
             receiver: true,
+            receiver_bound: false,
             chunk: valid_function_body.clone(),
         }],
         code: vec![Instruction::MakeFunction(0), Instruction::Return],
@@ -2090,6 +2176,7 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             required: 1,
             rest: None,
             receiver: true,
+            receiver_bound: false,
             chunk: Rc::new(Chunk {
                 constants: vec![],
                 code: vec![Instruction::SuperCall(0), Instruction::Return],
@@ -2115,6 +2202,7 @@ fn verifier_rejects_untrusted_bad_bytecode() {
             required: 0,
             rest: None,
             receiver: false,
+            receiver_bound: false,
             chunk: valid_function_body,
         }],
         code: vec![
@@ -2130,6 +2218,22 @@ fn verifier_rejects_untrusted_bad_bytecode() {
         ],
     };
     assert!(non_receiver_class_member.verify().is_err());
+
+    let forged_bound_function = Chunk {
+        constants: vec![Constant::Function {
+            params: vec![Pattern::Bind("\0quickcoffee.receiver".into())],
+            required: 1,
+            rest: None,
+            receiver: true,
+            receiver_bound: true,
+            chunk: Rc::new(Chunk {
+                constants: vec![Constant::Value(Value::Nil)],
+                code: vec![Instruction::Constant(0), Instruction::Return],
+            }),
+        }],
+        code: vec![Instruction::MakeBoundFunction(0), Instruction::Return],
+    };
+    assert!(forged_bound_function.verify().is_err());
 
     let mut deeply_nested = Pattern::Ignore;
     for _ in 0..300 {

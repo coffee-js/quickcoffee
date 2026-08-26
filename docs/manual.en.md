@@ -37,7 +37,7 @@ A host can branch on Value::kind() and use Value::is_nil() without inspecting in
 Cargo package metadata points embedding users to the repository, docs.rs API, README, and license.
 Context::last_execution() exposes instruction and remaining-fuel counters without VM frames.
 Arguments after -- are exposed as the ordinary string array argv.
-This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. Indented classes support constructors, instance/static methods, confined receivers, new, private extends chains, and statically resolved super; receiver-bound => remains a later RFC 0134 stage.
+This is not JavaScript: public prototypes, global/free this, eval, and embedded JavaScript do not exist. Indented classes support constructors, instance/static methods, confined receivers, new, private extends chains, statically resolved super, and receiver-bound => methods or nested closures that can escape safely.
 # is a line comment; ### … ### is a non-nesting block comment removed before layout and parsing.
 Identifiers use Unicode XID rules; combining marks may continue a name and no normalization occurs.
 yes/on and no/off are Boolean aliases; is/isnt preserve strict equality.
@@ -83,6 +83,15 @@ Parameters may use strict nested array/map patterns; defaults and rest stay name
 
 ````quickcoffee
 
+class BoundCounter
+  constructor: (@value) ->
+  callback: ->
+    =>
+      @value = @value + 1
+      @value
+
+bound_callback = new BoundCounter(40).callback()
+bound_callback()
 class ManualPoint
   constructor: (@x, @y = 2) ->
   sum: -> @x + @y

@@ -54,6 +54,9 @@ pub(crate) enum Expr {
     Try(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
     Throw(Box<Expr>),
     Do(Box<Expr>),
+    // Keep new variants at the end so existing discriminants and hot match
+    // layouts remain stable across language additions.
+    BoundFunction(Box<Expr>, TokenSpan),
 }
 impl Expr {
     pub(crate) fn unspanned(&self) -> &Self {
@@ -99,6 +102,7 @@ pub(crate) struct Param {
 pub(crate) struct ClassMember {
     pub name: String,
     pub is_static: bool,
+    pub receiver_bound: bool,
     pub params: Vec<Param>,
     pub rest: Option<String>,
     pub body: Expr,

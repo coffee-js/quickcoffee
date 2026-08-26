@@ -40,7 +40,7 @@ Host `Value::kind()` द्वारा प्रकारं विभजति
 Cargo-वस्तु-विवरणानि अन्तःस्थापकान् repository, docs.rs-API, README, licence च प्रति नयन्ति।
 Context::last_execution() instruction-संख्या तथा अवशिष्ट-fuel दर्शयति, VM-frame न प्रकाशयति।
 -- पश्चात् argumentाः साधारण-string-array argv रूपेण दीयन्ते।
-JavaScript नास्ति: सार्वजनिक prototype-chain, global/free this, eval, अन्तःस्थ-JavaScript च न सन्ति। Indented class, construction, सीमित-receiver, new, private extends-chain तथा statically-resolved super अधुना सन्ति; receiver-bound => परवर्ती अवस्थायाम्।
+JavaScript नास्ति: सार्वजनिक prototype-chain, global/free this, eval, अन्तःस्थ-JavaScript च न सन्ति। Indented class, construction, सीमित-receiver, new, private extends-chain, statically-resolved super तथा सुरक्षिततया निर्गच्छत् receiver-bound => अधुना सन्ति।
 # line-comment अस्ति; ### … ### non-nesting block-comment layout तथा parse पूर्वं त्यज्यते।
 Unicode XID-नामानि संयोजक-चिह्नानि गृह्णन्ति, अतः स्थित इत्यादि नाम executable अस्ति।
 yes/on true, no/off false; is/isnt strict-साम्यम् स्तः।
@@ -78,6 +78,15 @@ postfix-comprehension समानं strict-collection वहति: value * 2 
 
 ````quickcoffee
 
+class BoundCounter
+  constructor: (@value) ->
+  callback: ->
+    =>
+      @value = @value + 1
+      @value
+
+bound_callback = new BoundCounter(40).callback()
+bound_callback()
 base = 40
 add = (x) -> x + base
 shorthand = 'yes'

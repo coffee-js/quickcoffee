@@ -357,6 +357,13 @@ struct LoopContext {
     continue_target: usize,
     owns_iterator: bool,
 }
+#[derive(Clone, Copy, Default)]
+struct FunctionContext {
+    receiver: bool,
+    super_context: bool,
+    receiver_bound: bool,
+    capture_receiver: bool,
+}
 #[derive(Clone)]
 struct ReturnCleanup {
     end_try: bool,
@@ -1020,6 +1027,28 @@ impl Compiler {
             Expr::Function(params, rest, body) => {
                 self.function(params, rest.as_ref(), body)?;
             }
+            Expr::BoundFunction(function, arrow_span) => {
+                if !self.receiver_context {
+                    return Err(Error::parse(
+                        "receiver-binding => is valid only in a class receiver context",
+                    )
+                    .at_span(arrow_span.into_source_span()));
+                }
+                let Expr::Function(params, rest, body) = function.unspanned() else {
+                    return Err(Error::verify("bound function wrapper has no function"));
+                };
+                self.function_inner(
+                    params,
+                    rest.as_ref(),
+                    body,
+                    FunctionContext {
+                        receiver: true,
+                        receiver_bound: true,
+                        capture_receiver: true,
+                        ..Default::default()
+                    },
+                )?;
+            }
             Expr::Class(name, parent, members) => {
                 self.class(name, parent.as_deref(), members)?;
                 self.emit(Instruction::Store(name.clone()));
@@ -1130,6 +1159,18 @@ impl Compiler {
                             _ => None,
                         })
                         .collect::<Option<Vec<_>>>(),
+                    Expr::BoundFunction(function, _) => match function.unspanned() {
+                        Expr::Function(params, rest, _) if rest.is_none() => params
+                            .iter()
+                            .map(|param| match &param.pattern {
+                                AstPattern::Bind(name) if param.default.is_none() => {
+                                    Some(name.clone())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Option<Vec<_>>>(),
+                        _ => Some(vec![]),
+                    },
                     _ => Some(vec![]),
                 };
                 let names = forwarded.ok_or_else(|| {
@@ -1183,7 +1224,7 @@ impl Compiler {
         rest: Option<&String>,
         body: &Expr,
     ) -> Result<(), Error> {
-        self.function_inner(params, rest, body, false, false)
+        self.function_inner(params, rest, body, FunctionContext::default())
     }
     fn class(
         &mut self,
@@ -1208,8 +1249,12 @@ impl Compiler {
                 &constructor.params,
                 constructor.rest.as_ref(),
                 &constructor.body,
-                true,
-                parent.is_some(),
+                FunctionContext {
+                    receiver: true,
+                    super_context: parent.is_some(),
+                    receiver_bound: constructor.receiver_bound,
+                    capture_receiver: false,
+                },
             )?;
             self.current_span = previous;
         }
@@ -1219,8 +1264,12 @@ impl Compiler {
                 &member.params,
                 member.rest.as_ref(),
                 &member.body,
-                true,
-                parent.is_some(),
+                FunctionContext {
+                    receiver: true,
+                    super_context: parent.is_some(),
+                    receiver_bound: member.receiver_bound,
+                    capture_receiver: false,
+                },
             )?;
             self.current_span = previous;
         }
@@ -1244,13 +1293,12 @@ impl Compiler {
         params: &[Param],
         rest: Option<&String>,
         body: &Expr,
-        receiver: bool,
-        super_context: bool,
+        context: FunctionContext,
     ) -> Result<(), Error> {
         let mut inner = Compiler {
             in_function: true,
-            receiver_context: receiver,
-            super_context,
+            receiver_context: context.receiver,
+            super_context: context.super_context,
             record_source_map: self.record_source_map,
             ..Default::default()
         };
@@ -1276,7 +1324,7 @@ impl Compiler {
             inner.emit(Instruction::Pop);
             inner.patch_jump(done);
         }
-        if receiver {
+        if context.receiver {
             for param in params.iter().filter(|param| param.receiver) {
                 let AstPattern::Bind(name) = &param.pattern else {
                     return Err(Error::parse(
@@ -1291,8 +1339,8 @@ impl Compiler {
         inner.expr(body)?;
         inner.emit(Instruction::Return);
         let idx = self.chunk.constants.len();
-        let mut compiled_params = Vec::with_capacity(params.len() + usize::from(receiver));
-        if receiver {
+        let mut compiled_params = Vec::with_capacity(params.len() + usize::from(context.receiver));
+        if context.receiver {
             compiled_params.push(Pattern::Bind(RECEIVER_NAME.to_owned()));
         }
         compiled_params.extend(
@@ -1314,16 +1362,21 @@ impl Compiler {
         }
         self.chunk.constants.push(Constant::Function {
             params: compiled_params,
-            required: usize::from(receiver)
+            required: usize::from(context.receiver)
                 + params
                     .iter()
                     .take_while(|param| param.default.is_none())
                     .count(),
             rest: rest.cloned(),
-            receiver,
+            receiver: context.receiver,
+            receiver_bound: context.receiver_bound,
             chunk: function_chunk,
         });
-        self.emit(Instruction::MakeFunction(idx));
+        self.emit(if context.capture_receiver {
+            Instruction::MakeBoundFunction(idx)
+        } else {
+            Instruction::MakeFunction(idx)
+        });
         Ok(())
     }
     /// Compiles plain items directly. If any item splats, each ordinary item is
