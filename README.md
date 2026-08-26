@@ -1,79 +1,158 @@
 # QuickCoffee
 
-QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的字节码脚本引擎。它保留紧凑、可读的表达式语法，却不兼容 JavaScript：没有公开原型链、全局/自由 `this`、`eval` 或嵌入 JavaScript；RFC 0134 另为 class 内部定义受限接收者、构造与继承。
+> 实验性 0.1 · Rust 1.85+ · MIT OR Apache-2.0
 
-当前实现遵循 [RFCs/0000-project-scope.md](RFCs/0000-project-scope.md) 至 [RFCs/0140-resource-bounded-stable-scalar-sort.md](RFCs/0140-resource-bounded-stable-scalar-sort.md)；RFC 0134 的 class 构造、受限接收者、私有继承/`super` 与接收者绑定 `=>` 已完整实现，RFC 0139–0140 已交付固定 Unicode 字符串查询及资源有界的稳定标量排序。
-构建要求 Rust 1.85 或更新版本（Edition 2024）；CI 同时验证 MSRV 与 stable 工具链。
-后续大需求、里程碑和拆分规则见 [ROADMAP.md](ROADMAP.md)。
-当前业务适用范围、语言缺口与 QuickJS 性能对照见 [docs/readiness.zh-CN.md](docs/readiness.zh-CN.md)。
-与 CoffeeScript 1.12.7 官方语言参考的逐项差异见 [特性矩阵](docs/coffeescript-2016-matrix.md)。
+QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的紧凑字节码脚本引擎。它适合把**确定性的业务规则、校验、数据整形和受限插件逻辑**嵌入应用；也提供一个单文件 CLI，便于直接运行和检查脚本。
 
-内部前端边界保持显式：`lexer` 生成带范围的 token，`parser` 只负责语法与恢复并产出 `ast`，`lowering` 把 AST 降为字节码及不参与编码的 source-map sidecar，`bytecode` 只负责指令表示、验证、指纹与反汇编，最后由 `vm` 执行。该拆分不改变公开 API、字节码编码/指纹、fuel 或诊断输出。
+它不是 JavaScript 运行时，也不试图兼容浏览器、Node.js 或 CoffeeScript 的全部历史行为。没有公开原型链、全局或自由 `this`、`eval`、反引号 JavaScript，以及隐式文件、网络或时钟权限。class 本身是完整的受限语言能力：支持 `new`、`extends`、`super`、实例/静态方法及 class 内 `this`/`@`，但这些接收者能力不会泄露到 class 外。
 
-```coffee
-square = (x) -> x * x
-if square(7) == 49 then print('ok') else print('failed')
-```
+## 快速开始
 
-也可使用 CoffeeScript 风格的空格缩进块：
-
-```coffee
-double = (x) ->
-  next = x + 1
-  next * 2
-```
+从源码试用需要 Rust 1.85 或更新版本：
 
 ```sh
+git clone https://github.com/coffee-js/quickcoffee.git
+cd quickcoffee
 cargo run -- -e "print(range(1, 4))"
-cargo run -- - < program.qc
-cargo run -- --interactive
-cargo run -- --quit
-cargo run -- example.qc -- first second
-cargo run -- --check example.qc
-cargo run -- --dump-bytecode example.qc
-cargo run -- --fingerprint example.qc
-cargo run -- --json -e "{answer: 42}"
-cargo run --release --bin qbench -- --json --iterations 100
-cargo run --release --bin qbench -- --json --iterations 100 --repeat 3
-cargo run --release --bin qbench -- --list
-cargo run --release --bin qbench -- --only map-spread --json --iterations 100
-cargo build --release --bins && qbench --compare-qjs /path/to/qjs --compare-iterations 1 --repeat 11 --json
-cargo run --locked --quiet --release --bin qbench -- --json --iterations 1 --repeat 3
-cargo run --example embed
-cargo run --example modules
-cargo run --bin qdocco -- example.qc -o example.html
-cargo run --bin qdocco -- --markdown example.qc -o example.md
-cargo run --bin qtest -- tests/scripts
-cargo run --bin qtest -- --json tests/scripts
-cargo run --bin qtest -- --tap tests/scripts
-cargo run --bin qtest -- --version
-cargo run --bin qdocco -- --version
-cargo run --bin qbench -- --version
 ```
 
-`qbench` 把 `Engine::compile` 的普通编译记录为 `compile_*`，并用新增的 `prepare_*` 单独记录 `Engine::compile_program` 的端到端准备成本（含源码映射、验证与私有执行 sidecar）；二者都遵循 `--iterations` / `--repeat` 的中位数与 MAD 口径。每条记录还包含一次不计时执行的 `profile_*` 计数，用于比较指令热点、调用深度、托管值分配和词法环境分配；这些计数不乘以 `--iterations` 或 `--repeat`。
-
-`qbench --compare-qjs` 的 `quickcoffee_startup_*` / `quickjs_startup_*`、`*_compile_*` 与 `*_hot_*` 分别报告启动、编译和预编译热执行；既有 `*_cli_*` 继续表示端到端子进程总耗时。各阶段均输出中位数与 MAD，正式报告宜使用 `--repeat 11`。
-
-Pull request 的 `Performance report` workflow 会在同一 runner 上按 ABBA/BAAB 为每个共有负载运行两组 base/head 完整 11 样本 qbench，保存带顺序与 pair 标识的原始 JSONL 和机器/工具链元数据。只有两个运行方向都越过 5% 相对下限、3 倍组合 MAD 与 0.1 ms 绝对下限时才生成非阻塞 warning；全局 common-mode 只报告而不从单项效应中扣除。该报告是 review 信号，不是跨机器或发布阻塞阈值；比较策略及本地命令见 [PERFORMANCE.md](PERFORMANCE.md#issue-107-同-runner-非阻塞回归报告)。
-
-`qcoffee --interactive`（或 `-i`）提供持久上下文的交互会话；`:help` 显示命令，`:quit`/`:exit` 离开。管道输入时不会输出提示，适合脚本驱动；加 `--stats` 可为每个成功执行或运行时失败的非空输入行输出统计，解析错误不生成新记录。
-
-嵌入宿主可用 `compile_named`、`compile_program_named` 或 `Context::eval_named` 把虚拟文档名原样附到结构化错误 label；匿名 API 保持不变。`Engine::check_program*` 只作静态检查，并在安全的顶层边界收集多个 parser error；`qcoffee --check FILE` 将它们按源序写到标准错误而不执行。经 `Program` 编译的顶层、嵌套函数、默认参数和模块运行期/verification 错误保留 source map，运行期调用链追加有序 secondary label；宿主手工构造的裸 `Chunk` 不虚构来源。`qcoffee --json FILE` 的错误在位置已有来源时额外输出可选 `source` 字段。
-
-模块文件权限保持显式：嵌入宿主可构造 `RestrictedFileModuleLoader`，把 `./` / `../` 导入限制在一个规范根目录及 `.qc` UTF-8 文件内，并拒绝词法越界与符号链接逃逸。普通编译、求值和 `qcoffee` 单文件模式不会自动读取依赖文件。
-
-## 验收
-
-`make check` 运行格式检查、debug 与 release 两套全部测试（含外部嵌入 API 集成测试和 1,024 条确定性编译压力语料）、零警告 Clippy 和五份可执行手册校验；`make docs` 从文学编程源重新生成 HTML；`make bench` 运行 release 基准。项目禁止 `unsafe`。
-
-手册源在 `manuals/`，每份都是可执行的 Docco 输入。生成 HTML：
+要把 CLI 安装到本机：
 
 ```sh
-for source in manuals/*.qc; do
-  locale="${source#manuals/manual.}"; locale="${locale%.qc}"
-  cargo run --bin qdocco -- "$source" -o "docs/manual.$locale.html"
-done
+cargo install --path .
+qcoffee --version
 ```
 
-生成的手册：[中文](docs/manual.zh-CN.html)、[宋代官话古文](docs/manual.classical-zh.html)、[English](docs/manual.en.html)、[Latine](docs/manual.latin.html)、[天城文](docs/manual.devanagari-sa.html)。源文本见 [manuals](manuals)，语法范围见 [中文](docs/syntax.zh-CN.md) 与 [English](docs/syntax.en.md)。
+创建 `invoice.qc`：
+
+```coffee
+discount = (amount) ->
+  if amount >= 100 then amount * 0.9 else amount
+
+print discount(120)
+```
+
+运行它：
+
+```sh
+qcoffee invoice.qc
+# 108
+```
+
+class 使用 CoffeeScript 风格的缩进成员体，同时保持接收者边界：
+
+```coffee
+class Counter
+  constructor: (@value = 0) ->
+  increment: ->
+    @value = @value + 1
+    @value
+
+counter = new Counter()
+print counter.increment()
+```
+
+## 你可以用它做什么
+
+| 场景 | 当前状态 | 说明 |
+|---|---|---|
+| 规则计算、定价、资格校验 | 适合 | 严格数值、函数、异常、`switch` 和 fuel 都已具备。 |
+| 配置归并、表单/事件数据整形 | 适合 | 有不可变数组/Map、spread、解构、推导、Unicode 字符串和精确 JSON。 |
+| class 形式的业务模型 | 适合 | 支持构造、继承、覆盖、`super` 和安全逸出的 receiver-bound `=>`。 |
+| 受控嵌入式策略/插件 | 条件适合 | 宿主可注入全局值/原生函数，并设置 fuel、调用深度、数据资源限制和取消。 |
+| 多文件 CLI 应用 | 尚不适合 | 模块仅通过嵌入 API 显式加载；CLI 不会解析或加载模块依赖。 |
+| HTTP、文件 I/O、异步任务、定时调度 | 尚不适合 | 语言没有隐式环境能力、事件循环或异步语法；这些应由宿主以明确 capability 提供。 |
+| 直接替换 JavaScript/CoffeeScript 项目 | 不适合 | 语义刻意不同，且缺少正则、日期时间、字节/流、生成器等能力。 |
+
+完整的业务适用性、边界和规划请看[业务就绪度评估](docs/readiness.zh-CN.md)。CoffeeScript 1.12.7 的逐项“实现 / 改写 / 拒绝”对照在[特性矩阵](docs/coffeescript-2016-matrix.md)。
+
+## 当前语言与运行时
+
+QuickCoffee 已提供：
+
+- 严格的 Bool 条件与数值运算；`Number`、任意精度 `Integer` 与精确 `Decimal` 彼此分型，转换必须显式。
+- 数组、无原型 Map、spread、严格递归解构、范围、切片、列表推导，以及 Unicode 标量级字符串索引和遍历。
+- 函数、默认参数、rest 参数、闭包、`try` / `catch` / `finally`、`throw`、`return`、循环与 `switch`。
+- JSON 编解码、稳定标量排序、`trim` / `contains` / `starts_with` 等确定性标准库函数；JSON 保留 Integer/Decimal 精度。
+- 受限 class：`constructor`、实例/静态方法、`new`、私有继承链、静态解析的 `super`，以及只在合法 class 成员内可用的 `this`、`@` 和 `=>`。
+- 编译检查、结构化诊断、字节码反汇编/指纹，以及可复用的 `Program` 嵌入 API。
+
+请把这些差异当作语言设计，而不是待补的 JavaScript 兼容性：没有隐式类型转换、`undefined`、公开 `prototype` / `__proto__`、任意函数构造、自由 `this` 或 `eval`。class 外使用 `this`、`super` 或 receiver-bound `=>` 是编译错误。
+
+完整语法和标准库边界见[中文语法索引](docs/syntax.zh-CN.md)与[English syntax index](docs/syntax.en.md)。
+
+## CLI 速查
+
+| 目的 | 命令 |
+|---|---|
+| 执行表达式 | `qcoffee -e "print(1 + 2)"` |
+| 执行文件并传参 | `qcoffee script.qc -- first second`（脚本中读取 `argv`） |
+| 从标准输入执行 | `qcoffee - < script.qc` |
+| 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
+| 只检查、不执行 | `qcoffee --check script.qc` |
+| 稳定 JSON 输出 | `qcoffee --json script.qc` |
+| 限制本次执行 fuel | `qcoffee --fuel 100000 script.qc` |
+| 检查编译结果 | `qcoffee --dump-bytecode script.qc` 或 `qcoffee --fingerprint script.qc` |
+
+`qtest` 用于目录脚本测试，`qdocco` 用于生成文档，`qbench` 用于可重复的基准和 QuickJS 同机对照。它们是项目工具，不是部署时的必需组件。
+
+## 嵌入 Rust 应用
+
+最小嵌入只需创建一个 `Context` 并执行源码：
+
+```rust
+use quickcoffee::{Context, Error};
+
+fn evaluate_rule() -> Result<(), Error> {
+    let value = Context::new()
+        .with_fuel(100_000)
+        .eval_named("rules/discount.qc", "amount = 120; amount * 0.9")?;
+    println!("{value}");
+    Ok(())
+}
+```
+
+生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载见[模块示例](examples/modules.rs)。
+
+## 当前状态与已知缺口
+
+QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode 基元、CLI 诊断和基础嵌入 API 已实现，并由 RFC 与测试锁定。项目持续针对 VM 分配、调用和局部变量路径做性能优化；最近的 class 调用优化显著减少了临时绑定方法对象。
+
+但它仍处于实验性 0.1：
+
+- CLI 模式没有模块包、模块图指纹或模块加载；受限文件模块 loader 仅供嵌入宿主使用。
+- 尚无完整内存预算、生命周期隔离或稳定的 capability table；这些由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 和 [#77](https://github.com/coffee-js/quickcoffee/issues/77) 跟踪。
+- 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
+- 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
+- 语言和嵌入 API 会继续通过 RFC 演进；需要长期稳定接口的项目应先锁定版本并运行自己的语义与资源测试。
+
+动态优先级与完成状态在 [路线图](ROADMAP.md)和 GitHub tracking issues 中维护：[#65](https://github.com/coffee-js/quickcoffee/issues/65)（业务语言就绪）、[#66](https://github.com/coffee-js/quickcoffee/issues/66)（VM 性能）、[#81](https://github.com/coffee-js/quickcoffee/issues/81)（CLI、发布和性能门禁）。
+
+## 性能与质量
+
+`qbench` 分别报告普通编译、`Program` 准备、验证与执行，并可记录指令、调用、容器操作和托管值分配。`qbench --compare-qjs /path/to/qjs --compare-iterations 1 --repeat 11 --json` 可在同一机器上将启动、编译、预编译热执行和 CLI 总时长分开比较。
+
+这些数字用于本仓库的回归判断，不是跨机器或跨语言的通用排名。测量协议、历史证据和解释边界见[性能报告](PERFORMANCE.md)，最新优化进度见 [#66](https://github.com/coffee-js/quickcoffee/issues/66)。
+
+项目禁止 `unsafe`。修改源码后可运行：
+
+```sh
+make check
+```
+
+该命令覆盖格式、debug/release 测试、示例、Clippy、公开 API 文档、crate 打包检查、确定性 qbench 护栏和全部可执行手册检查。
+
+## 文档与规范
+
+| 你想了解什么 | 入口 |
+|---|---|
+| 当前语法、标准库和 CLI 边界 | [中文语法索引](docs/syntax.zh-CN.md) · [English syntax index](docs/syntax.en.md) |
+| 业务适用范围、性能判断和未完成能力 | [业务就绪度评估](docs/readiness.zh-CN.md) |
+| CoffeeScript 兼容性差异 | [特性矩阵](docs/coffeescript-2016-matrix.md) |
+| class / `this` / `new` / `extends` / `super` 的安全边界 | [RFC 0134](RFCs/0134-class-receivers-and-inheritance.md) |
+| 项目范围与不变设计原则 | [RFC 0000](RFCs/0000-project-scope.md) |
+| 性能测量与历史基线 | [PERFORMANCE.md](PERFORMANCE.md) |
+| 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
+| 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
+
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0140](RFCs/0140-resource-bounded-stable-scalar-sort.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
