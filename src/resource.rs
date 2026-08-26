@@ -27,6 +27,12 @@ pub enum ResourceLimit {
     DecimalScale,
     /// One collection operation exceeded its configured input item boundary.
     CollectionOperationItems,
+    /// A general QuickCoffee string exceeded its configured UTF-8 byte boundary.
+    StringBytes,
+    /// A general QuickCoffee array exceeded its configured item boundary.
+    ArrayItems,
+    /// A general QuickCoffee map exceeded its configured entry boundary.
+    MapEntries,
 }
 
 /// Deterministic data-size boundaries applied by an execution [`crate::Context`].
@@ -47,6 +53,9 @@ pub struct ResourceLimits {
     max_decimal_coefficient_bits: u64,
     max_decimal_scale: u32,
     max_collection_operation_items: usize,
+    max_string_bytes: usize,
+    max_array_items: usize,
+    max_map_entries: usize,
 }
 
 impl Default for ResourceLimits {
@@ -62,6 +71,9 @@ impl Default for ResourceLimits {
             max_decimal_coefficient_bits: 1_000_000,
             max_decimal_scale: 100_000,
             max_collection_operation_items: 100_000,
+            max_string_bytes: 1_000_000,
+            max_array_items: 100_000,
+            max_map_entries: 100_000,
         }
     }
 }
@@ -183,6 +195,39 @@ impl ResourceLimits {
     /// Returns a policy with the maximum collection-operation item count replaced.
     pub fn with_max_collection_operation_items(mut self, limit: usize) -> Self {
         self.max_collection_operation_items = limit;
+        self
+    }
+
+    /// Returns the maximum UTF-8 bytes in one general QuickCoffee string value.
+    pub fn max_string_bytes(&self) -> usize {
+        self.max_string_bytes
+    }
+
+    /// Returns a policy with the maximum general string byte count replaced.
+    pub fn with_max_string_bytes(mut self, limit: usize) -> Self {
+        self.max_string_bytes = limit;
+        self
+    }
+
+    /// Returns the maximum items in one general QuickCoffee array value.
+    pub fn max_array_items(&self) -> usize {
+        self.max_array_items
+    }
+
+    /// Returns a policy with the maximum general array item count replaced.
+    pub fn with_max_array_items(mut self, limit: usize) -> Self {
+        self.max_array_items = limit;
+        self
+    }
+
+    /// Returns the maximum entries in one general QuickCoffee map value.
+    pub fn max_map_entries(&self) -> usize {
+        self.max_map_entries
+    }
+
+    /// Returns a policy with the maximum general map entry count replaced.
+    pub fn with_max_map_entries(mut self, limit: usize) -> Self {
+        self.max_map_entries = limit;
         self
     }
 }

@@ -5,7 +5,7 @@
 ## qcoffee --quit initializes one Context and exits silently; it cannot be combined with source or execution options.
 ## qcoffee --stats writes instruction, remaining-fuel, hot-path, managed-value-allocation, and lexical-environment-allocation counters to stderr while preserving program stdout; qcoffee accepts one source input and rejects conflicting execution modes.
 ## Embedded modules may use named import/export; Engine::compile_module and Context::run_module obtain source only through a host ModuleLoader, keep module globals private, and share fuel across the graph.
-## Embedders may set Context ResourceLimits for JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, operations, and valid JSON numbers cross the numeric policy before scripts observe them. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
+## Embedders may set Context ResourceLimits for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
 ## qcoffee --check FILE parses, compiles, and verifies without executing FILE.
 ## qcoffee --interactive (or -i) keeps one Context for a line-oriented session; :help and :quit are built-in commands.
 ## qcoffee --interactive --stats writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
@@ -19,7 +19,7 @@
 ## qtest --filter TEXT selects matching paths, while qtest --list enumerates selected files without executing them.
 
 ## qcoffee --json emits one JSON value or structured error for a single execution, suitable for CI and hosts.
-## Rust embedding errors expose ErrorKind::Parse, Verify, Runtime, or Resource plus a display-independent message; error.resource_limit() distinguishes fuel, call depth, cancellation, JSON boundaries, IntegerBits, DecimalCoefficientBits, DecimalScale, and CollectionOperationItems. Host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
+## Rust embedding errors expose ErrorKind::Parse, Verify, Runtime, or Resource plus a display-independent message; error.resource_limit() distinguishes fuel, call depth, cancellation, JSON boundaries, StringBytes, ArrayItems, MapEntries, IntegerBits, DecimalCoefficientBits, DecimalScale, and CollectionOperationItems. Host callbacks may return Error::runtime("message"), and error.position() may give a one-based source line.
 ## Engine::compile_program verifies once; Context::run_program reuses the immutable verified bytecode for repeated embedding calls.
 ## Program::fingerprint provides a deterministic u64 bytecode cache key without changing execution.
 ## qcoffee --fingerprint FILE prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.

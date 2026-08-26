@@ -733,6 +733,70 @@ fn collection_operation_resource_policy_is_replaceable_labeled_and_uncatchable()
 }
 
 #[test]
+fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
+    let defaults = ResourceLimits::default();
+    let constrained = defaults
+        .with_max_string_bytes(3)
+        .with_max_array_items(2)
+        .with_max_map_entries(1);
+    assert_eq!(constrained.max_string_bytes(), 3);
+    assert_eq!(constrained.max_array_items(), 2);
+    assert_eq!(constrained.max_map_entries(), 1);
+
+    let mut context = Context::new().with_resource_limits(constrained);
+    context.eval("items = [1, 2]").unwrap();
+    let error = context
+        .eval_named(
+            "virtual://value-limits.qc",
+            "try items = [1, 2, 3] catch ignored then [0]",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::ArrayItems));
+    assert!(error.message().contains("array exceeds 2 items"));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://value-limits.qc")
+    );
+
+    context.set_resource_limits(defaults);
+    assert_eq!(context.eval("items").unwrap().to_string(), "[1, 2]");
+
+    context.set_resource_limits(constrained);
+    let error = context
+        .eval("try 'four' catch ignored then 'ok'")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    let error = context
+        .eval("try {a: 1, b: 2} catch ignored then nil")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::MapEntries));
+    let error = context
+        .eval("try join([1, 2], '--') catch ignored then nil")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+
+    context.set_resource_limits(defaults.with_max_string_bytes(5).with_max_array_items(2));
+    let error = context
+        .eval("try split('a,b,c', ',') catch ignored then nil")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::ArrayItems));
+
+    let mut host_value = Context::new()
+        .with_resource_limits(constrained)
+        .with_global(
+            "host_items",
+            Value::array(vec![
+                Value::from(1_i64),
+                Value::from(2_i64),
+                Value::from(3_i64),
+            ]),
+        );
+    let error = host_value.eval("host_items").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::ArrayItems));
+}
+
+#[test]
 fn exact_numeric_resource_policy_covers_constants_globals_operations_and_json() {
     let defaults = ResourceLimits::default();
     let constrained = defaults

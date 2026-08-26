@@ -9,7 +9,7 @@ qcoffee - 可从标准输入读取 QuickCoffee 程序。
 qcoffee --quit 创建一个 Context 后静默退出，不能与源码或其他执行选项组合。
 qcoffee --stats 将指令数、剩余燃料及查名、调用、容器、迭代、异常、托管值分配与词法环境分配计数写入标准错误，同时保持程序标准输出不变；qcoffee 每次只接受一个源码输入，冲突执行模式会报用法错误。
 嵌入模块可写 import { public as local } from 'name' 与 export；Engine::compile_module 和 Context::run_module 只经宿主 ModuleLoader 取源码，模块全局私有且整张图共享 fuel。
-嵌入宿主可用 Context::with_fuel、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、运算及合法 JSON 数字都在脚本观察前经过数值策略。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。
+嵌入宿主可用 Context::with_fuel、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。
 qcoffee --check FILE 只解析、编译并验证 FILE，不执行它。
 qcoffee --interactive（或 -i）逐行复用同一 Context；:help 显示命令，:quit 退出。
 qcoffee --interactive --stats 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
@@ -23,7 +23,7 @@ qtest --json 为每份文档输出一行稳定 JSON，便于 CI；--stats 仍写
 qtest --tap 输出 TAP 13 及确定编号的记录；--json 与 --tap 互斥。
 qtest --filter TEXT 按路径筛选；qtest --list 只列出筛选后的文件而不执行。
 qcoffee --json 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
-Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime、Resource；error.resource_limit() 可分辨 fuel、调用深度、取消、JSON 六类边界、IntegerBits、DecimalCoefficientBits 与 DecimalScale，宿主回调仍可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
+Rust 嵌入错误有 ErrorKind::Parse、Verify、Runtime、Resource；error.resource_limit() 可分辨 fuel、调用深度、取消、JSON 六类边界、StringBytes、ArrayItems、MapEntries、IntegerBits、DecimalCoefficientBits 与 DecimalScale，宿主回调仍可返回 Error::runtime("message")，error.position() 可给出从 1 开始的源码行。
 Engine::compile_program 创建时验证一次；Context::run_program 重复执行时复用不可变的已验证字节码。
 Program::fingerprint 提供确定性的 u64 字节码缓存键，不改变执行语义。
 qcoffee --fingerprint FILE 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。

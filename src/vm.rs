@@ -1173,8 +1173,16 @@ impl From<&str> for Value {
     }
 }
 
-fn numeric_limits_active(limits: ResourceLimits) -> bool {
-    integer_bit_limit(limits) < MAX_INTEGER_BITS || decimal_limits_active(limits)
+fn value_limits_active(_: ResourceLimits) -> bool {
+    // General String/Array/Map defaults are real Context boundaries, unlike the
+    // numeric absolute implementation ceilings. Loading an existing value must
+    // therefore always recheck the current Context policy.
+    true
+}
+
+#[inline]
+fn value_needs_resource_check(value: &Value) -> bool {
+    !matches!(value, Value::Nil | Value::Bool(_) | Value::Number(_))
 }
 
 fn decimal_limits_active(limits: ResourceLimits) -> bool {
@@ -1182,18 +1190,66 @@ fn decimal_limits_active(limits: ResourceLimits) -> bool {
         || decimal_scale_limit(limits) < MAX_DECIMAL_SCALE
 }
 
-fn check_value_numeric_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+fn check_string_resource(value: &str, limits: ResourceLimits) -> Result<(), Error> {
+    check_string_len_resource(value.len(), limits)
+}
+
+fn check_string_len_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+    if len > limits.max_string_bytes() {
+        return Err(Error::resource(
+            ResourceLimit::StringBytes,
+            format!("string exceeds {} bytes", limits.max_string_bytes()),
+        ));
+    }
+    Ok(())
+}
+
+fn check_array_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+    if len > limits.max_array_items() {
+        return Err(Error::resource(
+            ResourceLimit::ArrayItems,
+            format!("array exceeds {} items", limits.max_array_items()),
+        ));
+    }
+    Ok(())
+}
+
+fn check_map_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+    if len > limits.max_map_entries() {
+        return Err(Error::resource(
+            ResourceLimit::MapEntries,
+            format!("map exceeds {} entries", limits.max_map_entries()),
+        ));
+    }
+    Ok(())
+}
+
+fn check_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
         match value {
             Value::Integer(value) => check_integer_resource(value.inner(), limits)?,
             Value::Decimal(value) => check_decimal_resource(value, limits)?,
-            Value::Array(values) => pending.extend(values.iter()),
-            Value::Map(values) => pending.extend(values.values()),
+            Value::String(value) => check_string_resource(value, limits)?,
+            Value::Array(values) => {
+                check_array_resource(values.len(), limits)?;
+                pending.extend(values.iter());
+            }
+            Value::Map(values) => {
+                check_map_resource(values.len(), limits)?;
+                for (key, value) in values.iter() {
+                    check_string_resource(key, limits)?;
+                    pending.push(value);
+                }
+            }
             Value::Error(error) => {
+                check_string_resource(&error.code, limits)?;
+                check_string_resource(&error.message, limits)?;
                 pending.push(&error.data);
                 let mut cause = error.cause.as_deref();
                 while let Some(error) = cause {
+                    check_string_resource(&error.code, limits)?;
+                    check_string_resource(&error.message, limits)?;
                     pending.push(&error.data);
                     cause = error.cause.as_deref();
                 }
@@ -1201,7 +1257,6 @@ fn check_value_numeric_resources(value: &Value, limits: ResourceLimits) -> Resul
             Value::Nil
             | Value::Bool(_)
             | Value::Number(_)
-            | Value::String(_)
             | Value::Class(_)
             | Value::Instance(_)
             | Value::Function(_) => {}
@@ -2652,7 +2707,7 @@ impl Context {
             instructions: 0,
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
-            numeric_limits_active: numeric_limits_active(self.resource_limits),
+            value_limits_active: value_limits_active(self.resource_limits),
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
@@ -2735,13 +2790,13 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "range",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 2 {
                     return Err(Error::runtime("range expects two arguments"));
                 }
-                range_values(xs[0].clone(), xs[1].clone(), false)
+                range_values(xs[0].clone(), xs[1].clone(), false, limits)
             },
             one_value_allocation,
         );
@@ -2983,15 +3038,16 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "keys",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 1 {
                     return Err(Error::runtime("keys expects one argument"));
                 }
                 let Value::Map(map) = &xs[0] else {
                     return Err(Error::runtime("keys expects a map"));
                 };
+                check_array_resource(map.len(), limits)?;
                 Ok(Value::Array(Rc::new(
                     map.keys()
                         .map(|key| Value::String(Rc::from(key.as_str())))
@@ -3000,22 +3056,23 @@ impl Context {
             },
             array_and_element_allocations,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "values",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 1 {
                     return Err(Error::runtime("values expects one argument"));
                 }
                 let Value::Map(map) = &xs[0] else {
                     return Err(Error::runtime("values expects a map"));
                 };
+                check_array_resource(map.len(), limits)?;
                 Ok(Value::Array(Rc::new(map.values().cloned().collect())))
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "join",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 2 {
                     return Err(Error::runtime("join expects array and separator"));
                 }
@@ -3025,19 +3082,30 @@ impl Context {
                 let Value::String(separator) = &xs[1] else {
                     return Err(Error::runtime("join separator must be string"));
                 };
-                Ok(Value::String(Rc::from(
-                    values
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(separator),
-                )))
+                let mut output = String::new();
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        let length =
+                            output.len().checked_add(separator.len()).ok_or_else(|| {
+                                Error::resource(ResourceLimit::StringBytes, "string is too large")
+                            })?;
+                        check_string_len_resource(length, limits)?;
+                        output.push_str(separator);
+                    }
+                    let value = string_value(value);
+                    let length = output.len().checked_add(value.len()).ok_or_else(|| {
+                        Error::resource(ResourceLimit::StringBytes, "string is too large")
+                    })?;
+                    check_string_len_resource(length, limits)?;
+                    output.push_str(&value);
+                }
+                Ok(Value::String(Rc::from(output)))
             },
             one_value_allocation,
         );
-        self.add_builtin(
+        self.add_resource_builtin(
             "split",
-            |xs| {
+            |xs, limits| {
                 if xs.len() != 2 {
                     return Err(Error::runtime("split expects string and separator"));
                 }
@@ -3047,6 +3115,7 @@ impl Context {
                 let Value::String(separator) = &xs[1] else {
                     return Err(Error::runtime("split separator must be string"));
                 };
+                check_array_resource(input.split(separator.as_ref()).count(), limits)?;
                 let parts: Vec<_> = input
                     .split(separator.as_ref())
                     .map(|part| Value::String(Rc::from(part)))
@@ -3266,7 +3335,7 @@ struct Vm {
     instructions: u64,
     max_call_depth: usize,
     resource_limits: ResourceLimits,
-    numeric_limits_active: bool,
+    value_limits_active: bool,
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
@@ -3694,7 +3763,7 @@ impl Vm {
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
-            numeric_limits_active: self.numeric_limits_active,
+            value_limits_active: self.value_limits_active,
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
@@ -3803,8 +3872,8 @@ impl Vm {
                         .ok_or_else(|| Error::runtime("invalid constant"))?
                     {
                         Constant::Value(v) => {
-                            if self.numeric_limits_active {
-                                check_value_numeric_resources(v, self.resource_limits)?;
+                            if self.value_limits_active && value_needs_resource_check(v) {
+                                check_value_resources(v, self.resource_limits)?;
                             }
                             frame.stack.push(v.clone())
                         }
@@ -3815,15 +3884,15 @@ impl Vm {
                     Instruction::Load(n) => {
                         let value = lookup_frame(frame, instruction_pc, n)
                             .ok_or_else(|| Error::runtime(format!("unknown name '{n}'")))?;
-                        if self.numeric_limits_active {
-                            check_value_numeric_resources(&value, self.resource_limits)?;
+                        if self.value_limits_active && value_needs_resource_check(&value) {
+                            check_value_resources(&value, self.resource_limits)?;
                         }
                         frame.stack.push(value);
                     }
                     Instruction::LoadOrNil(n) => {
                         let value = lookup_frame(frame, instruction_pc, n).unwrap_or(Value::Nil);
-                        if self.numeric_limits_active {
-                            check_value_numeric_resources(&value, self.resource_limits)?;
+                        if self.value_limits_active && value_needs_resource_check(&value) {
+                            check_value_resources(&value, self.resource_limits)?;
                         }
                         frame.stack.push(value);
                     }
@@ -4282,6 +4351,7 @@ impl Vm {
                             .ok_or_else(|| Error::runtime("iterator stack underflow"))?;
                     }
                     Instruction::MakeArray(n) => {
+                        check_array_resource(*n, self.resource_limits)?;
                         let v = take(frame, *n)?;
                         frame.stack.push(Value::Array(Rc::new(v)));
                         self.record_value_allocations(1);
@@ -4291,6 +4361,10 @@ impl Vm {
                         let Value::Array(mut values) = pop(frame)? else {
                             return Err(Error::runtime("append expects an array"));
                         };
+                        let next_len = values.len().checked_add(1).ok_or_else(|| {
+                            Error::resource(ResourceLimit::ArrayItems, "array is too large")
+                        })?;
+                        check_array_resource(next_len, self.resource_limits)?;
                         let cloned_backing = Rc::strong_count(&values) > 1;
                         Rc::make_mut(&mut values).push(value);
                         if cloned_backing {
@@ -4300,6 +4374,16 @@ impl Vm {
                     }
                     Instruction::MergeArrays(n) => {
                         let segments = take(frame, *n)?;
+                        let mut total = 0usize;
+                        for segment in &segments {
+                            let Value::Array(segment) = segment else {
+                                return Err(Error::runtime("splat expects an array"));
+                            };
+                            total = total.checked_add(segment.len()).ok_or_else(|| {
+                                Error::resource(ResourceLimit::ArrayItems, "array is too large")
+                            })?;
+                        }
+                        check_array_resource(total, self.resource_limits)?;
                         let mut values = vec![];
                         for segment in segments {
                             let Value::Array(segment) = segment else {
@@ -4323,16 +4407,26 @@ impl Vm {
                                     .map(|(key, value)| (key.clone(), value.clone())),
                             );
                         }
+                        check_map_resource(values.len(), self.resource_limits)?;
                         frame.stack.push(Value::Map(Rc::new(values)));
                         self.record_value_allocations(1);
                     }
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
                         let start = pop(frame)?;
-                        frame.stack.push(range_values(start, end, *inclusive)?);
+                        frame.stack.push(range_values(
+                            start,
+                            end,
+                            *inclusive,
+                            self.resource_limits,
+                        )?);
                         self.record_value_allocations(1);
                     }
                     Instruction::MakeMap(keys) => {
+                        check_map_resource(keys.len(), self.resource_limits)?;
+                        for key in keys {
+                            check_string_resource(key, self.resource_limits)?;
+                        }
                         let v = take(frame, keys.len())?;
                         frame
                             .stack
@@ -4341,9 +4435,9 @@ impl Vm {
                     }
                     Instruction::Stringify => {
                         let value = pop(frame)?;
-                        frame
-                            .stack
-                            .push(Value::String(Rc::from(string_value(&value))));
+                        let value = string_value(&value);
+                        check_string_resource(&value, self.resource_limits)?;
+                        frame.stack.push(Value::String(Rc::from(value)));
                         self.record_value_allocations(1);
                     }
                     Instruction::Concat(n) => {
@@ -4353,6 +4447,14 @@ impl Vm {
                             let Value::String(value) = value else {
                                 return Err(Error::runtime("concat received non-string"));
                             };
+                            let length =
+                                output.len().checked_add(value.len()).ok_or_else(|| {
+                                    Error::resource(
+                                        ResourceLimit::StringBytes,
+                                        "string is too large",
+                                    )
+                                })?;
+                            check_string_len_resource(length, self.resource_limits)?;
                             output.push_str(&value);
                         }
                         frame.stack.push(Value::String(Rc::from(output)));
@@ -4367,13 +4469,19 @@ impl Vm {
                         let end = pop(frame)?;
                         let start = pop(frame)?;
                         let target = pop(frame)?;
-                        frame
-                            .stack
-                            .push(slice(self, target, start, end, *inclusive)?)
+                        frame.stack.push(slice(
+                            self,
+                            target,
+                            start,
+                            end,
+                            *inclusive,
+                            self.resource_limits,
+                        )?)
                     }
                     Instruction::Member(name) => {
                         let target = pop(frame)?;
                         let value = member_value(target, name, false)?;
+                        check_value_resources(&value, self.resource_limits)?;
                         if matches!(value, Value::Function(_)) {
                             self.record_value_allocations(1);
                         }
@@ -4389,7 +4497,7 @@ impl Vm {
                         let target = frame.receiver.clone().ok_or_else(|| {
                             Error::runtime("receiver field write outside class member")
                         })?;
-                        set_receiver_member(target, name, value.clone())?;
+                        set_receiver_member(target, name, value.clone(), self.resource_limits)?;
                         frame.stack.push(value);
                     }
                     Instruction::MemberCall { name, count } => {
@@ -4866,17 +4974,34 @@ fn member_value(target: Value, name: &str, bind_method: bool) -> Result<Value, E
     }
 }
 
-fn set_receiver_member(target: Value, name: &str, value: Value) -> Result<(), Error> {
+fn set_receiver_member(
+    target: Value,
+    name: &str,
+    value: Value,
+    limits: ResourceLimits,
+) -> Result<(), Error> {
+    check_value_resources(&value, limits)?;
     match target {
         Value::Instance(instance) => {
-            instance.fields.borrow_mut().insert(name.to_owned(), value);
+            let mut fields = instance.fields.borrow_mut();
+            if !fields.contains_key(name) {
+                let next_len = fields.len().checked_add(1).ok_or_else(|| {
+                    Error::resource(ResourceLimit::MapEntries, "map is too large")
+                })?;
+                check_map_resource(next_len, limits)?;
+            }
+            fields.insert(name.to_owned(), value);
             Ok(())
         }
         Value::Class(class) => {
-            class
-                .static_fields
-                .borrow_mut()
-                .insert(name.to_owned(), value);
+            let mut fields = class.static_fields.borrow_mut();
+            if !fields.contains_key(name) {
+                let next_len = fields.len().checked_add(1).ok_or_else(|| {
+                    Error::resource(ResourceLimit::MapEntries, "map is too large")
+                })?;
+                check_map_resource(next_len, limits)?;
+            }
+            fields.insert(name.to_owned(), value);
             Ok(())
         }
         _ => Err(Error::runtime(
@@ -4951,8 +5076,8 @@ fn call_with_context(
                 allocation_profile,
             } => {
                 let value = function(args)?;
-                if vm.numeric_limits_active {
-                    check_value_numeric_resources(&value, vm.resource_limits)?;
+                if vm.value_limits_active && value_needs_resource_check(&value) {
+                    check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_value_allocations(allocation_profile(&value));
@@ -4968,8 +5093,8 @@ fn call_with_context(
                 allocation_profile,
             } => {
                 let value = function(args, vm.resource_limits)?;
-                if vm.numeric_limits_active {
-                    check_value_numeric_resources(&value, vm.resource_limits)?;
+                if vm.value_limits_active && value_needs_resource_check(&value) {
+                    check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_value_allocations(allocation_profile(&value));
@@ -5333,7 +5458,12 @@ fn string_value(value: &Value) -> String {
         value => value.to_string(),
     }
 }
-fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> {
+fn numeric_range(
+    start: f64,
+    end: f64,
+    inclusive: bool,
+    limits: ResourceLimits,
+) -> Result<Value, Error> {
     if !start.is_finite()
         || !end.is_finite()
         || start.fract() != 0.
@@ -5359,15 +5489,21 @@ fn numeric_range(start: f64, end: f64, inclusive: bool) -> Result<Value, Error> 
     if count > MAX_RANGE_ITEMS {
         return Err(Error::runtime("range is too large"));
     }
+    check_array_resource(count as usize, limits)?;
     Ok(Value::Array(Rc::new(
         (0..count as usize)
             .map(|offset| Value::Number((start_i + offset as i128 * direction) as f64))
             .collect(),
     )))
 }
-fn range_values(start: Value, end: Value, inclusive: bool) -> Result<Value, Error> {
+fn range_values(
+    start: Value,
+    end: Value,
+    inclusive: bool,
+    limits: ResourceLimits,
+) -> Result<Value, Error> {
     match (start, end) {
-        (Value::Number(start), Value::Number(end)) => numeric_range(start, end, inclusive),
+        (Value::Number(start), Value::Number(end)) => numeric_range(start, end, inclusive, limits),
         (Value::Integer(start), Value::Integer(end)) => {
             let ascending = start <= end;
             let mut count = if ascending {
@@ -5382,6 +5518,7 @@ fn range_values(start: Value, end: Value, inclusive: bool) -> Result<Value, Erro
                 .to_usize()
                 .filter(|count| *count <= MAX_RANGE_ITEMS as usize)
                 .ok_or_else(|| Error::runtime("range is too large"))?;
+            check_array_resource(count, limits)?;
             let mut current = start.inner().clone();
             let mut values = Vec::with_capacity(count);
             for _ in 0..count {
@@ -6110,6 +6247,7 @@ fn slice(
     start: Value,
     end: Value,
     inclusive: bool,
+    limits: ResourceLimits,
 ) -> Result<Value, Error> {
     match target {
         Value::Array(values) => {
@@ -6123,6 +6261,7 @@ fn slice(
             if start > end || end > values.len() {
                 return Err(Error::runtime("slice bounds out of range"));
             }
+            check_array_resource(end - start, limits)?;
             let value = Value::Array(Rc::new(values[start..end].to_vec()));
             vm.record_value_allocations(1);
             Ok(value)
@@ -6147,6 +6286,7 @@ fn slice(
                 .char_indices()
                 .nth(end)
                 .map_or(text.len(), |(offset, _)| offset);
+            check_string_len_resource(end_byte - start_byte, limits)?;
             let value = Value::String(Rc::from(&text[start_byte..end_byte]));
             vm.record_value_allocations(1);
             Ok(value)

@@ -12,7 +12,7 @@
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
 
-内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，指纹使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、数据大小和取消，资源错误不能由脚本 `catch` 吞掉，也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。
+内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，指纹使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉，也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。
 
 `qbench --compare-qjs PATH --compare-iterations 1 --repeat 11 --json` 输出独立的 `quickcoffee.qcompare.v1` 同机对比；PATH 完全由调用者提供，记录覆盖标量循环、函数调用、数组构造/索引/遍历、映射读取/不可变更新和 Unicode 标量遍历/索引，并分别包含启动、编译、预编译热执行与端到端 CLI 总耗时，不能与进程内 `qbench.v1` 混比。JavaScript 的字符串下标是 UTF-16 code unit；Unicode 索引负载以 `Array.from` 预解码标量来匹配 QuickCoffee 的结果语义，此适配不表示底层操作同构。
 
