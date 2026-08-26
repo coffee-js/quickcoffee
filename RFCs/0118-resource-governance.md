@@ -40,7 +40,7 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 ## 2026-08-26：通用语言值大小策略
 
 1. `ResourceLimits` 增加 `max_string_bytes`、`max_array_items` 与 `max_map_entries`，默认分别为 1,000,000 UTF-8 bytes、100,000 items 与 100,000 entries；`StringBytes`、`ArrayItems` 与 `MapEntries` 是稳定、不可捕获的 `ResourceLimit` 原因。这些字段约束普通 QuickCoffee 值，不复用 JSON 专用字段。
-2. 同一 `Program`、裸字节码和宿主构造的 `Value` 不保存某个 Context 的策略。常量、名称读取、native 返回、成员读取与模块子 Context 在值进入脚本时按当前策略递归复核；不同 Context 可以确定性地以不同限制复用同一 Program 或宿主值。
+2. 同一 `Program`、裸字节码和宿主构造的 `Value` 不保存某个 Context 的策略。常量、名称读取、native 返回、成员读取与模块子 Context 在值进入脚本时按当前策略递归复核；不同 Context 可以确定性地以不同限制复用同一 Program 或宿主值。`nil`、Bool 和 Number 不携带该组可配置的大小状态，成员读取可跳过其空遍历；String、Array、Map、精确数值及错误值仍完整复核，特别是既有 class instance field 在 Context 限制收紧后首次读取时。
 3. Array/Map 字面量、range、array spread/append、Map spread、string interpolation/concat/stringify、slice 与 class 实例/静态字段写入在结果可见或赋值提交前检查其边界。超限不执行随后 store，资源错误不能被 `try`/`catch` 吞掉。
 4. 这仍不是总分配或 retained-memory 账本：一次失败路径可以有局部临时分配，且模块图、源码/bytecode、managed object 数、生命周期/cycle 与总 Context 预算继续由 issue #76 的后续切片定义。
 
