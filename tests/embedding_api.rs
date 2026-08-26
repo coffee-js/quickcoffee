@@ -800,6 +800,55 @@ fn collection_operation_resource_policy_is_replaceable_labeled_and_uncatchable()
 }
 
 #[test]
+fn concat_checks_output_and_operation_limits_before_copying() {
+    let defaults = ResourceLimits::default();
+    let mut context = Context::new();
+    context
+        .eval("left = [1, 2]\nright = [3, 4]\nprefix = 'abc'\nsuffix = 'def'")
+        .unwrap();
+
+    context.set_resource_limits(defaults.with_max_string_bytes(5).with_max_array_items(3));
+    let error = context
+        .eval_named(
+            "virtual://concat-limits.qc",
+            "try concat(prefix, suffix) catch ignored then 'caught'",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    assert!(error.message().contains("string exceeds 5 bytes"));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://concat-limits.qc")
+    );
+
+    let error = context
+        .eval("try concat(left, right) catch ignored then []")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::ArrayItems));
+    assert_eq!(context.eval("left").unwrap().to_string(), "[1, 2]");
+    assert_eq!(context.eval("right").unwrap().to_string(), "[3, 4]");
+
+    context.set_resource_limits(
+        defaults
+            .with_max_array_items(4)
+            .with_max_collection_operation_items(3),
+    );
+    let error = context.eval("concat(left, right)").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::CollectionOperationItems)
+    );
+    assert!(error.message().contains("concat input exceeds 3 items"));
+
+    context.set_resource_limits(defaults);
+    assert_eq!(
+        context.eval("concat(left, right)").unwrap().to_string(),
+        "[1, 2, 3, 4]"
+    );
+}
+
+#[test]
 fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
     let defaults = ResourceLimits::default();
     let constrained = defaults

@@ -158,4 +158,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0143](RFCs/0143-fuzz-smoke-baseline.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0144](RFCs/0144-resource-bounded-immutable-concat.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
