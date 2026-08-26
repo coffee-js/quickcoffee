@@ -27,6 +27,18 @@ const MANUALS: &[(&str, &str)] = &[
 #[test]
 fn every_literate_manual_is_an_executable_passing_example() {
     for (name, source) in MANUALS {
+        assert!(
+            source
+                .lines()
+                .any(|line| !line.starts_with("    ") && line.contains('`')),
+            "{name} should mark technical prose with Markdown inline code"
+        );
+        assert!(
+            !source
+                .lines()
+                .any(|line| line.trim_start().starts_with("```")),
+            "{name} must keep executable literate code indented, not fenced"
+        );
         assert!(matches!(
             Context::new().eval_named(name, source),
             Ok(Value::Bool(true))

@@ -6,9 +6,9 @@
 
 
 
-映射可展其项，后书之键胜前书：{...defaults, theme: 'dark'}。
+映射可展其项，后书之键胜前书：`{...defaults, theme: 'dark'}`。
 
-映射解构末可用 ...metadata 收未列之键，所得映射不变。
+映射解构末可用 `...metadata` 收未列之键，所得映射不变。
 
 数列与 Unicode 字符负索引，-一取其末。
 
@@ -16,88 +16,88 @@
 
 
 
-# 注一行；### … ### 注一段，弗相嵌，先于布局析法略之。
+`#` 注一行；`### … ###` 注一段，弗相嵌，先于布局析法略之。
 
 名从 Unicode XID 之法，合附之记可续名，而机不正其 Unicode。
 
-yes、on 同 true；no、off 同 false；is、isnt 则严等也。
+`yes`、`on` 同 `true`；`no`、`off` 同 `false`；`is`、`isnt` 则严等也。
 
-! 同 not，严反 Bool；!= 仍严不等。
+`!` 同 `not`，严反 Bool；`!=` 仍严不等。
 
 严等与数较可相连，中项惟求一遍，前否则后不求。
 
-qcoffee - 者，自标准输入读其文也。
+`qcoffee -` 者，自标准输入读其文也。
 
-qcoffee --quit 初置一 Context 而默退，不得兼源码与他行法。
+`qcoffee --quit` 初置一 Context 而默退，不得兼源码与他行法。
 
-qcoffee --stats 则书所试指令、余燃料及查名、调用、容器、迭、异常、托管值分配与词法环境分配之数于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
+`qcoffee --stats` 则书所试指令、余燃料及查名、调用、容器、迭、异常、托管值分配与词法环境分配之数于标准错误，程序之标准输出不改；每次惟一源码输入，执行模式相冲则报用法之误。
 
-嵌入之模块可名 import/export；Engine::compile_module、Context::run_module 惟由宿主 ModuleLoader 得其文，模块全局私有，而全图共其 fuel。
+嵌入之模块可名 import/export；`Engine::compile_module`、`Context::run_module` 惟由宿主 `ModuleLoader` 得其文，模块全局私有，而全图共其 fuel。
 
-qcoffee --check FILE 者，析编验其文而不行也。
+`qcoffee --check FILE` 者，析编验其文而不行也。
 
-qcoffee --interactive（或 -i）者，逐行共用一 Context；:help 示命，:quit 出之。
+`qcoffee --interactive`（或 `-i`）者，逐行共用一 Context；`:help` 示命，`:quit` 出之。
 
-qcoffee --interactive --stats 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。
+`qcoffee --interactive --stats` 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。
 
 'a☕中'[1] 即 '☕'，'a☕中'[1..2]' 得 '☕中'；字符串索引循 Unicode 标量。
 
-for character, index in 'a☕中' then index，得 [0, 1, 2]；字符串循 Unicode 标量，by 可正可负，负者自末起。
+`for character, index in 'a☕中' then index`，得 `[0, 1, 2]`；字符串循 Unicode 标量，by 可正可负，负者自末起。
 
-do (name, other) -> ... 即调用之，转外层同名之值；do -> ... 仍零参。
+`do (name, other) -> ...` 即调用之，转外层同名之值；`do -> ...` 仍零参。
 
-[head, tail...] = [1, 2, 3]，tail 得 [2, 3]；数组之 rest 必居末。
+`[head, tail...] = [1, 2, 3]`，tail 得 `[2, 3]`；数组之 rest 必居末。
 
-qtest --fuel N 者，为各可行文别限其指令之数。
+`qtest --fuel N` 者，为各可行文别限其指令之数。
 
-qtest --stats 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
+`qtest --stats` 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 
-qtest --json 每篇出一行 JSON，便于 CI 取用；--stats 仍书于标准错误。
+`qtest --json` 每篇出一行 JSON，便于 CI 取用；`--stats` 仍书于标准错误。
 
-qtest --tap 出 TAP 13 及定次之记录；--json 与 --tap 不可并用。
+`qtest --tap` 出 TAP 13 及定次之记录；`--json` 与 `--tap` 不可并用。
 
-qtest --filter TEXT 依路径择篇；qtest --list 但列所择之篇而不行其文。
+`qtest --filter TEXT` 依路径择篇；`qtest --list` 但列所择之篇而不行其文。
 
-qcoffee --json 一行以 JSON 载其值或错状，俾 CI 与宿主取用。
+`qcoffee --json` 一行以 JSON 载其值或错状，俾 CI 与宿主取用。
 
-宿主之误，有 ErrorKind::Parse、Verify、Runtime 三类，且可别取其详；error.position() 或示从一始之源码行。
+宿主之误，有 `ErrorKind::Parse`、Verify、Runtime 三类，且可别取其详；`error.position()` 或示从一始之源码行。
 
-Engine::compile_program 创时验之；Context::run_program 屡行则复用不可变已验字节码。
+`Engine::compile_program` 创时验之；`Context::run_program` 屡行则复用不可变已验字节码。
 
-Program::fingerprint 出确定 u64 码键，便宿主缓存，而不改执行。
+`Program::fingerprint` 出确定 u64 码键，便宿主缓存，而不改执行。
 
-qcoffee --fingerprint FILE 出十六位小写字节码键，先验之而不行其文。
+`qcoffee --fingerprint FILE` 出十六位小写字节码键，先验之而不行其文。
 
-qbench --json 每负载出一计时录，皆有语义护栏；--iterations 定其试数。
+`qbench --json` 每负载出一计时录，皆有语义护栏；`--iterations` 定其试数。
 
-每 qbench 录之 profile_* 皆取一次不入计时之执行，记热点与分配事件，不乘 --iterations 或 --repeat。
+每 qbench 录之 profile_* 皆取一次不入计时之执行，记热点与分配事件，不乘 `--iterations` 或 `--repeat`。
 
-qbench --compare-qjs PATH 别计两端启动、编译、预编热行与 CLI 全程。正报宜 --repeat 11；各段皆有中数与 *_mad_ns。
+`qbench --compare-qjs PATH` 别计两端启动、编译、预编热行与 CLI 全程。正报宜 `--repeat` 11；各段皆有中数与 *_mad_ns。
 
 指纹以定式编码字节码，不取 Rust 调试辞，故工具链改其辞而缓存键不改。
 
-qdocco --markdown 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
+`qdocco --markdown` 出说明、围栏 QuickCoffee 代码及终值为可阅 Markdown 文。
 
-嵌者可于两行之间呼 Context::set_fuel；Context::fuel 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。
+嵌者可于两行之间呼 `Context::set_fuel`；`Context::fuel` 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。
 
-cargo run --example embed 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
+`cargo run --example embed` 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 
-宿主可用 Value::kind() 别其类，Value::is_nil() 验 nil，不窥其内容器。
+宿主可用 `Value::kind()` 别其类，`Value::is_nil()` 验 nil，不窥其内容器。
 
 Cargo 包志指仓、docs.rs API、README 与许可证，使嵌者易寻其用。
 
-Context::last_execution() 示所试指令与余燃料，而不露 VM 之帧。
+`Context::last_execution()` 示所试指令与余燃料，而不露 VM 之帧。
 
 -- 后之参，以常字符串数组 argv 见于文中。
 
-其内府皆常函，如 print、len、type、error、range、str、trim、contains、starts_with、ends_with、sort、concat、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split、assert；RFC 0139 之字询严而无 locale，trim 依固定 Unicode White_Space 表；RFC 0140 之 sort 不改原列，稳次有限同类标量；RFC 0144 之 concat 惟连二同类 String 或 Array，先验资源而后作新值；error(code, message, data, cause) 作密封 Error，catch 得之，而资源之误不可捕。Decimal 以 m 为缀，除不尽者须明定数位与舍法。
+其内府皆常函，如 print、len、type、error、range、str、trim、contains、starts_with、ends_with、sort、concat、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split、assert；RFC 0139 之字询严而无 locale，trim 依固定 Unicode White_Space 表；RFC 0140 之 sort 不改原列，稳次有限同类标量；RFC 0144 之 concat 惟连二同类 String 或 Array，先验资源而后作新值；`error(code, message, data, cause)` 作密封 Error，catch 得之，而资源之误不可捕。Decimal 以 m 为缀，除不尽者须明定数位与舍法。
 
 
-函式取词法之境；末常参可书 y = 2，参缺或传 nil 则于函中取其值；末有余参，则书 tail...。
+函式取词法之境；末常参可书 `y = 2`，参缺或传 nil 则于函中取其值；末有余参，则书 `tail...`。
 
-常名之参可省其括：left, right -> left + right；常值、余参与解构仍须括之。
+常名之参可省其括：`left, right -> left + right`；常值、余参与解构仍须括之。
 
-return expression 惟函中可用，反其值而终此函；徒 return 得 nil，且清环行 finally。
+`return expression` 惟函中可用，反其值而终此函；徒 return 得 nil，且清环行 finally。
 
 函参可层叠数组映射之式；常值与余参仍惟名可书。
 
@@ -105,45 +105,45 @@ return expression 惟函中可用，反其值而终此函；徒 return 得 nil�
 
 区间亦可逆行，`[3..1]` 得 `[3, 2, 1]`，`[3...1]` 得 `[3, 2]`。
 
-数组之截，a[start..end] 及终，a[start...end] 不及终；端须界内有限整数，负自末计，受者 nil 则安截不求端。
+数组之截，`a[start..end]` 及终，`a[start...end]` 不及终；端须界内有限整数，负自末计，受者 nil 则安截不求端。
 
-空值回退，书 left ? right；惟 nil 发之，false 与零不易。
+空值回退，书 `left ? right`；惟 nil 发之，false 与零不易。
 
-后缀 value? 惟验非 nil；nil? 为 false，false? 与 0? 皆 true，未名之误弗隐。
+后缀 `value?` 惟验非 nil；`nil?` 为 false，`false?` 与 `0?` 皆 true，未名之误弗隐。
 
-name ?= value，名未系或 nil 乃书之；既非 nil，右弗行，成员索引解构弗可。
+`name ?= value`，名未系或 nil 乃书之；既非 nil，右弗行，成员索引解构弗可。
 
-名亦可前后置增减：next = ++counter 得新值，previous = counter-- 先得旧值；惟名可用。
+名亦可前后置增减：`next = ++counter` 得新值，`previous = counter--` 先得旧值；惟名可用。
 
-算术亦有整除 // 与取模 %%：-7 // 5 得 -2，-7 %% 5 得 3。
+算术亦有整除 // 与取模 %%：`-7 // 5` 得 -2，`-7 %% 5` 得 3。
 
-value in array 验数组之有无；key of map 唯验映射己有之字符串键。
+`value in array` 验数组之有无；`key of map` 唯验映射己有之字符串键。
 
-value not in array、key not of map，皆反其严验，不涉原型。
+`value not in array`、`key not of map`，皆反其严验，不涉原型。
 
-映射字面量之 {name}，即 {name: name} 之省文。
+映射字面量之 `{name}`，即 `{name: name}` 之省文。
 
 赋值之式，可层叠数组与映射；机先验其全式，后易诸名。
 
-数组与调用之 items...，展其数组，非假 JavaScript apply。
+数组与调用之 `items...`，展其数组，非假 JavaScript apply。
 
-安空值之缀，书 a?.name、a?[i]、f?(args)；惟受者 nil 则短之。
+安空值之缀，书 `a?.name`、`a?[i]`、`f?(args)`；惟受者 nil 则短之。
 
-until condition then body 者，至其布尔条件真而止。
+`until condition then body` 者，至其布尔条件真而止。
 
-语句可后书 while/until，反复其全赋或解构，弗嵌寻常子式。
+语句可后书 `while/until`，反复其全赋或解构，弗嵌寻常子式。
 
-loop body 者，如 while true 恒行；以 break 出之，犹受 fuel 限。
+`loop body` 者，如 `while true` 恒行；以 break 出之，犹受 fuel 限。
 
 for 为收集之式：轮体诸值成新数组，when 与 continue 弗收，break 存既得之首。
 
-for 所系可为严式：for [left, right] in pairs，每项全合乃易名。
+for 所系可为严式：`for [left, right] in pairs`，每项全合乃易名。
 
-数组之环可书 by step；步惟求一遍，须非零有限整数，负者自末起，映射环弗用之。
+数组之环可书 `by step`；步惟求一遍，须非零有限整数，负者自末起，映射环弗用之。
 
-数组之环亦可系从一始之下标：for value, index in items then value + index。
+数组之环亦可系从一始之下标：`for value, index in items then value + index`。
 
-后置之推导亦循严收集：value * 2 for value in items，或括以 [value * 2 for value in items]。
+后置之推导亦循严收集：`value * 2 for value in items`，或括以 `[value * 2 for value in items]`。
 
 ## Code
 

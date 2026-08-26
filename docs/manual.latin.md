@@ -8,63 +8,63 @@
 
 Tabulae mappae segmenta expandere possunt; claves posteriores priores superant.
 
-In forma mappae ...metadata claves omissas immutabiliter capit.
+In forma mappae `...metadata` claves omissas immutabiliter capit.
 
 Indices negativi in seriebus et textu Unicode extremum elementum petunt.
 
 Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 
-qcoffee - programma QuickCoffee ex initio normali legit.
+`qcoffee -` programma QuickCoffee ex initio normali legit.
 
-qcoffee --quit unum Context instituit et tacite exit; cum fonte aliisque modis executionis coniungi non potest.
+`qcoffee --quit` unum Context instituit et tacite exit; cum fonte aliisque modis executionis coniungi non potest.
 
-qcoffee --stats numeros instructionum, alimenti reliqui, viarum calidarum, valorum curatorum allocatarum et ambituum lexicalium allocatarum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
+`qcoffee --stats` numeros instructionum, alimenti reliqui, viarum calidarum, valorum curatorum allocatarum et ambituum lexicalium allocatarum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 
-Moduli hospitis import/export nominata habent; Engine::compile_module et Context::run_module fontem solum per ModuleLoader hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
+Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Context::run_module` fontem solum per `ModuleLoader` hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
 
-qcoffee --check FILE fontem verificat sine cursu.
+`qcoffee --check FILE` fontem verificat sine cursu.
 
-qcoffee --interactive (vel -i) unum Context per lineas servat; :help docet, :quit exit.
+`qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit.
 
-qcoffee --interactive --stats unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
+`qcoffee --interactive --stats` unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
 
 'a☕中'[1] est '☕', et 'a☕中'[1..2] est '☕中'; indices stringarum scalas Unicode sequuntur.
 
-for character, index in 'a☕中' then index indices Unicode scalarum [0, 1, 2] reddit; iteratio stringarum gradus nonnullos signatos by accipit.
+`for character, index in 'a☕中' then index` indices Unicode scalarum `[0, 1, 2]` reddit; iteratio stringarum gradus nonnullos signatos by accipit.
 
-do (name, other) -> ... statim vocat et valores externos eiusdem nominis tradit; do -> ... sine argumentis manet.
+`do (name, other) -> ...` statim vocat et valores externos eiusdem nominis tradit; `do -> ...` sine argumentis manet.
 
-[head, tail...] = [1, 2, 3] tail ad [2, 3] ligat; rest in forma array postremum esse debet.
+`[head, tail...] = [1, 2, 3]` tail ad `[2, 3]` ligat; rest in forma array postremum esse debet.
 
-qtest --fuel N cuique documento exsecutabili budget instructionum proprium dat.
+`qtest --fuel N` cuique documento exsecutabili budget instructionum proprium dat.
 
-qtest --stats numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
+`qtest --stats` numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 
-qtest --json unam lineam JSON pro unoquoque documento scribit ad usum CI; --stats in stderr manet.
+`qtest --json` unam lineam JSON pro unoquoque documento scribit ad usum CI; `--stats` in stderr manet.
 
-qtest --tap versiones TAP 13 et numeros certos scribit; --json et --tap simul prohibentur.
+`qtest --tap` versiones TAP 13 et numeros certos scribit; `--json` et `--tap` simul prohibentur.
 
-qtest --filter TEXT itinera congruentia eligit; qtest --list tantum documenta electa enumerat sine exsecutione.
+`qtest --filter TEXT` itinera congruentia eligit; `qtest --list` tantum documenta electa enumerat sine exsecutione.
 
-qcoffee --json unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
+`qcoffee --json` unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
 
-Errores hospitis ErrorKind::Parse, Verify, Runtime habent atque detail sine textu ostenso praebent; error.position() lineam fontis a uno numeratam interdum dat.
+Errores hospitis `ErrorKind::Parse`, Verify, Runtime habent atque detail sine textu ostenso praebent; `error.position()` lineam fontis a uno numeratam interdum dat.
 
-Engine::compile_program semel verificat; Context::run_program bytecode immutabile verificatum ad iteratum cursum reutitur.
+`Engine::compile_program` semel verificat; `Context::run_program` bytecode immutabile verificatum ad iteratum cursum reutitur.
 
-Program::fingerprint clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
+`Program::fingerprint` clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
 
-qcoffee --fingerprint FILE eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
+`qcoffee --fingerprint FILE` eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
 
-qbench --json unam mensurae lineam pro unoquoque onere custodito emittit; --iterations numerum exemplorum regit.
+`qbench --json` unam mensurae lineam pro unoquoque onere custodito emittit; `--iterations` numerum exemplorum regit.
 
-Campi profile_* cuiusque lineae qbench ex uno cursu non mensurato veniunt et vias calidas allocationesque sine multiplicatione per --iterations aut --repeat referunt.
+Campi profile_* cuiusque lineae qbench ex uno cursu non mensurato veniunt et vias calidas allocationesque sine multiplicatione per `--iterations` aut `--repeat` referunt.
 
-qbench --compare-qjs PATH initium, compilationem, cursum calidum praecompilatum et totum tempus CLI utriusque runtime separat. Relationes --repeat 11 utantur; cuique parti mediana et *_mad_ns sunt.
+`qbench --compare-qjs PATH` initium, compilationem, cursum calidum praecompilatum et totum tempus CLI utriusque runtime separat. Relationes `--repeat` 11 utantur; cuique parti mediana et *_mad_ns sunt.
 
 Claves codicem bytecode explicite et canonice signant, non formam Rust debug; ideo mutatio instrumenti claves non mutat.
 
-qdocco --markdown notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
+`qdocco --markdown` notas, codicem QuickCoffee clausum, et valorem ultimum in documento Markdown scribit.
 
 Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum ostendit sine globalibus deletis; `with_global` et `with_native` configurationem concatenatam praebent.
 
@@ -74,7 +74,7 @@ Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil proband
 
 Notitiae Cargoe hospites ad repositorium, API docs.rs, README et licentiam ducunt.
 
-Context::last_execution() numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
+`Context::last_execution()` numeros instructionum et alimenti reliqui ostendit, sine tabulis VM.
 
 Argumenta post -- ut series chordarum ordinaria argv praebentur.
 
@@ -82,20 +82,20 @@ JavaScript non est: catena prototyporum publica, this globale vel liberum, eval,
 
 
 
-# commentarium lineae est; ### … ### commentarium non-nidificatum ante layout et analysin removetur.
+`#` commentarium lineae est; `### … ###` commentarium non-nidificatum ante layout et analysin removetur.
 
 Nomina Unicode XID sequuntur; signa combinantia ea continuant, sine normalizatione.
 
-yes/on sunt true, no/off false; is/isnt aequalitatem strictam servant.
+`yes/on` sunt true, `no/off` false; `is/isnt` aequalitatem strictam servant.
 
 ! est negatio Bool stricta sicut not; != inaequalitas stricta manet.
 
 Comparationes conectae medium semel servant atque priore falso breviant.
 
-Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; RFC 0140 sort seriem novam stabilem scalarum finitorum eiusdem generis reddit; RFC 0144 concat duas String aut duas Array immutabiliter coniungit et limites ante allocationem probat; error(code, message, data, cause) Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
+Bibliotheca communis functiones ordinarias habet: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, assert; RFC 0139 inquisitiones stringarum strictas sine locale definit et trim tabula Unicode White_Space fixa utitur; RFC 0140 sort seriem novam stabilem scalarum finitorum eiusdem generis reddit; RFC 0144 concat duas String aut duas Array immutabiliter coniungit et limites ante allocationem probat; `error(code, message, data, cause)` Error clausum facit, catch Error accipit, sed resource-error capi non potest. Decimal m suffixo utitur; divisio non terminans scalam et modum rotundandi apertos poscit.
 
 
-Functiones ambitum lexicalem capiunt; y = 2 omissus vel nil intra functionem adhibetur; rest ultimus scribitur tail....
+Functiones ambitum lexicalem capiunt; `y = 2` omissus vel nil intra functionem adhibetur; rest ultimus scribitur `tail...`.
 
 Nomina nuda parentheses omittere possunt: sinister, dexter -> sinister + dexter; default, rest, pattern eas servant.
 
@@ -107,45 +107,45 @@ Spatium integrorum `[1..3]` finem includit; `[1...3]` finem excludit.
 
 Spatia descendere quoque possunt: `[3..1]` `[3, 2, 1]` reddit, `[3...1]` `[3, 2]` reddit.
 
-Sectio seriei a[start..end] finem includit, a[start...end] excludit; termini integri finiti intra limites sunt, negativi ab extremo numerantur, et sectio nil-tuta terminos nil recipiente omittit.
+Sectio seriei `a[start..end]` finem includit, `a[start...end]` excludit; termini integri finiti intra limites sunt, negativi ab extremo numerantur, et sectio nil-tuta terminos nil recipiente omittit.
 
-Recessus nil-specialis left ? right scribitur; false et zero servantur.
+Recessus nil-specialis `left ? right` scribitur; false et zero servantur.
 
-Suffixum value? non-nil tantum probat: nil? false est, false? et 0? true sunt, nomen non ligatum errorem manet.
+Suffixum `value?` non-nil tantum probat: `nil?` false est, `false?` et `0?` true sunt, nomen non ligatum errorem manet.
 
-name ?= value tantum nomen non ligatum aut nil scribit; non-nil dextram omittit, membrum, index, destructio excluduntur.
+`name ?= value` tantum nomen non ligatum aut nil scribit; non-nil dextram omittit, membrum, index, destructio excluduntur.
 
-Nomina etiam incrementum/decrementum strictum praefixum et postfixum habent: next = ++counter novum, previous = counter-- vetus valorem reddit.
+Nomina etiam incrementum/decrementum strictum praefixum et postfixum habent: `next = ++counter` novum, `previous = counter--` vetus valorem reddit.
 
-Arithmetica etiam divisionem inferiorem // et modulum dependentem %% habet: -7 // 5 est -2, -7 %% 5 est 3.
+Arithmetica etiam divisionem inferiorem // et modulum dependentem %% habet: `-7 // 5` est -2, `-7 %% 5` est 3.
 
-value in array membrum seriei probat; key of map clavem propriam map probat.
+`value in array` membrum seriei probat; `key of map` clavem propriam map probat.
 
-value not in array et key not of map easdem probationes strictas negant, sine prototypis.
+`value not in array` et `key not of map` easdem probationes strictas negant, sine prototypis.
 
-In littera map, {name} pro {name: name} breviter scribitur.
+In littera map, `{name}` pro `{name: name}` breviter scribitur.
 
 Patterna assignmentis series atque maps includere possunt; VM totum ante ligamina mutanda verificat.
 
-In seriebus et vocationibus, items... seriem expandit sine JavaScript apply.
+In seriebus et vocationibus, `items...` seriem expandit sine JavaScript apply.
 
-Suffixa nil-tuta a?.name, a?[i], f?(args) tantum recipiens nil breviant.
+Suffixa nil-tuta `a?.name`, `a?[i]`, `f?(args)` tantum recipiens nil breviant.
 
-until condition then body repetit donec conditio Boolean vera sit.
+`until condition then body` repetit donec conditio Boolean vera sit.
 
-In loco sententiae, postfix while/until totam assignationem aut destructionem strictam repetit, non subexpressionem.
+In loco sententiae, postfix `while/until` totam assignationem aut destructionem strictam repetit, non subexpressionem.
 
-loop body est while true infinitum; break exit, fuel autem limitem manet.
+`loop body` est `while true` infinitum; break exit, fuel autem limitem manet.
 
 Expressio for valores corporis colligit; when et continue omittunt, break praefixum collectum servat.
 
-Ligamen for pattern strictum esse potest: for [left, right] in pairs singula par atomice ligat.
+Ligamen for pattern strictum esse potest: `for [left, right] in pairs` singula par atomice ligat.
 
-Ordo seriei by step uti potest; gradus integer finitus positivus semel aestimatur, maps eum excludunt.
+Ordo seriei `by step` uti potest; gradus integer finitus positivus semel aestimatur, maps eum excludunt.
 
-Iteratio seriei etiam indicem a zero numeratum ligare potest: for value, index in items then value + index.
+Iteratio seriei etiam indicem a zero numeratum ligare potest: `for value, index in items then value + index`.
 
-Comprehensio postfix eandem collectionem strictam servat: value * 2 for value in items, vel [value * 2 for value in items].
+Comprehensio postfix eandem collectionem strictam servat: `value * 2 for value in items`, vel `[value * 2 for value in items]`.
 
 ## Code
 

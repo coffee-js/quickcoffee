@@ -106,6 +106,58 @@ fn trim_section(section: &str) -> String {
         format!("{section}\n")
     }
 }
+fn normalize_code_span(source: &str) -> String {
+    let normalized = source
+        .split([' ', '\t', '\n', '\r'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() && !source.is_empty() {
+        " ".to_owned()
+    } else {
+        normalized
+    }
+}
+fn render_inline_html(source: &str) -> String {
+    let mut rendered = String::new();
+    let mut offset = 0;
+    while let Some(relative_start) = source[offset..].find('`') {
+        let start = offset + relative_start;
+        rendered.push_str(&escape(&source[offset..start]));
+        let ticks = source[start..]
+            .bytes()
+            .take_while(|byte| *byte == b'`')
+            .count();
+        let content_start = start + ticks;
+        let mut search = content_start;
+        let closing = loop {
+            let Some(relative_tick) = source[search..].find('`') else {
+                break None;
+            };
+            let candidate = search + relative_tick;
+            let candidate_ticks = source[candidate..]
+                .bytes()
+                .take_while(|byte| *byte == b'`')
+                .count();
+            if candidate_ticks == ticks {
+                break Some(candidate);
+            }
+            search = candidate + candidate_ticks;
+        };
+        let Some(closing) = closing else {
+            rendered.push_str(&escape(&source[start..]));
+            return rendered;
+        };
+        rendered.push_str("<code>");
+        rendered.push_str(&escape(&normalize_code_span(
+            &source[content_start..closing],
+        )));
+        rendered.push_str("</code>");
+        offset = closing + ticks;
+    }
+    rendered.push_str(&escape(&source[offset..]));
+    rendered
+}
 fn render_prose_html(source: &str) -> String {
     source
         .split("\n\n")
@@ -125,7 +177,7 @@ fn render_prose_html(source: &str) -> String {
             };
             Some(format!(
                 "<{tag}>{}</{tag}>",
-                escape(&text.replace('\n', " "))
+                render_inline_html(&text.replace('\n', " "))
             ))
         })
         .collect()
@@ -241,7 +293,9 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_markdown, split_source, write_output};
+    use super::{
+        render_inline_html, render_markdown, render_prose_html, split_source, write_output,
+    };
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -279,5 +333,21 @@ mod tests {
         assert_eq!(code.trim(), "answer = 40\nanswer + 2");
         let rendered = render_markdown(source, "42");
         assert!(rendered.contains("````coffee\nanswer = 40"));
+    }
+
+    #[test]
+    fn literate_html_renders_escaped_inline_code_spans() {
+        assert_eq!(
+            render_inline_html("Call `Context::eval` with `<source>`; keep unmatched ` safe."),
+            "Call <code>Context::eval</code> with <code>&lt;source&gt;</code>; keep unmatched ` safe."
+        );
+        assert_eq!(
+            render_inline_html("Write `` ` `` to describe a backtick."),
+            "Write <code>`</code> to describe a backtick."
+        );
+        assert_eq!(
+            render_prose_html("Use `qcoffee --check FILE`."),
+            "<p>Use <code>qcoffee --check FILE</code>.</p>"
+        );
     }
 }
