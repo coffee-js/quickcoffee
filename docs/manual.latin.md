@@ -18,7 +18,7 @@ Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 
 `qcoffee --quit` unum Context instituit et tacite exit; cum fonte aliisque modis executionis coniungi non potest.
 
-`qcoffee --stats` numeros instructionum, alimenti reliqui, viarum calidarum, eventuum allocationis veterum, obiectorum curatorum logicorum et byte sarcinae normatae ad errorem ordinarium scribit, dum exitus programmatis intactus manet; duo postrema neque RSS neque retentio neque culmen memoriae sunt. Unus tantum fons admittitur et modi contrarii errorem usus reddunt.
+`qcoffee --stats` numeros instructionum, alimenti reliqui, viarum calidarum, valorum curatorum allocatarum et ambituum lexicalium allocatarum ad errorem ordinarium scribit, dum exitus programmatis intactus manet; unus tantum fons admittitur et modi contrarii errorem usus reddunt.
 
 Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Context::run_module` fontem solum per `ModuleLoader` hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
 
@@ -58,7 +58,7 @@ Errores hospitis `ErrorKind::Parse`, Verify, Runtime habent atque detail sine te
 
 `qbench --json` unam mensurae lineam pro unoquoque onere custodito emittit; `--iterations` numerum exemplorum regit.
 
-Campi profile_* cuiusque lineae qbench ex uno cursu non mensurato veniunt et vias calidas, eventus veteres allocationis atque incrementa determinata obiectorum curatorum et byte logicorum sine multiplicatione per `--iterations` aut `--repeat` referunt.
+Campi profile_* cuiusque lineae qbench ex uno cursu non mensurato veniunt et vias calidas allocationesque sine multiplicatione per `--iterations` aut `--repeat` referunt.
 
 `qbench --compare-qjs PATH` initium, compilationem, cursum calidum praecompilatum et totum tempus CLI utriusque runtime separat. Relationes `--repeat` 11 utantur; cuique parti mediana et *_mad_ns sunt.
 
