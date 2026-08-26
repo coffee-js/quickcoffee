@@ -790,6 +790,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "stdlib-min-max",
         "stdlib-range-sum",
         "stdlib-string-queries",
+        "stdlib-stable-sort",
         "closures-and-ranges",
         "call-containing-local-loop",
         "captured-local-loop",

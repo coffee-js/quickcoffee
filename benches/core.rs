@@ -48,6 +48,12 @@ fn main() {
             expected: "true",
         },
         Workload {
+            name: "stdlib-stable-sort",
+            source: "sorted = sort([100..1])\nsorted[0] + sorted[99]",
+            iterations: 10_000,
+            expected: "101",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,

@@ -99,6 +99,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "true",
     },
     Workload {
+        name: "stdlib-stable-sort",
+        source: "sorted = sort([100..1])\nsorted[0] + sorted[99]",
+        expected: "101",
+    },
+    Workload {
         name: "closures-and-ranges",
         source: "base = 1\nadd = (n) -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
         expected: "1274",

@@ -2301,6 +2301,119 @@ fn encode_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Er
         .map_err(|error| json_error("json.encode", error))
 }
 
+fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 1 {
+        return Err(Error::runtime("sort expects one array argument"));
+    }
+    let Value::Array(input) = &xs[0] else {
+        return Err(Error::runtime("sort expects an array"));
+    };
+    let item_limit = limits.max_collection_operation_items();
+    if input.len() > item_limit {
+        return Err(Error::resource(
+            ResourceLimit::CollectionOperationItems,
+            format!("sort input exceeds {item_limit} items"),
+        ));
+    }
+    let Some(first) = input.first() else {
+        return Ok(Value::Array(Rc::new(Vec::new())));
+    };
+
+    let sorted = match first {
+        Value::Number(_) => {
+            if !input
+                .iter()
+                .all(|value| matches!(value, Value::Number(number) if number.is_finite()))
+            {
+                return Err(Error::runtime(
+                    "sort expects homogeneous finite numbers, integers, decimals, or strings",
+                ));
+            }
+            let mut values = input.as_ref().clone();
+            values.sort_by(|left, right| {
+                let (Value::Number(left), Value::Number(right)) = (left, right) else {
+                    unreachable!("sort validated homogeneous numbers")
+                };
+                left.partial_cmp(right)
+                    .expect("sort validated finite numbers")
+            });
+            values
+        }
+        Value::Integer(_) => {
+            if !input.iter().all(|value| matches!(value, Value::Integer(_))) {
+                return Err(Error::runtime(
+                    "sort expects homogeneous finite numbers, integers, decimals, or strings",
+                ));
+            }
+            let mut values = input.as_ref().clone();
+            values.sort_by(|left, right| {
+                let (Value::Integer(left), Value::Integer(right)) = (left, right) else {
+                    unreachable!("sort validated homogeneous integers")
+                };
+                left.cmp(right)
+            });
+            values
+        }
+        Value::Decimal(_) => {
+            if !input.iter().all(|value| matches!(value, Value::Decimal(_))) {
+                return Err(Error::runtime(
+                    "sort expects homogeneous finite numbers, integers, decimals, or strings",
+                ));
+            }
+            let scale = input
+                .iter()
+                .map(|value| match value {
+                    Value::Decimal(value) => value.scale,
+                    _ => unreachable!("sort validated homogeneous decimals"),
+                })
+                .max()
+                .unwrap_or(0);
+            let coefficient_limit = decimal_coefficient_bit_limit(limits);
+            let mut keyed = Vec::with_capacity(input.len());
+            for value in input.iter() {
+                let Value::Decimal(decimal) = value else {
+                    unreachable!("sort validated homogeneous decimals")
+                };
+                let growth = scale - decimal.scale;
+                check_decimal_power_growth(decimal.inner(), growth, limits)?;
+                let coefficient = decimal.inner() * decimal_power_of_ten(growth);
+                if coefficient_limit < MAX_DECIMAL_BITS && coefficient.bits() > coefficient_limit {
+                    return Err(Error::resource(
+                        ResourceLimit::DecimalCoefficientBits,
+                        format!(
+                            "decimal aligned coefficient magnitude exceeds {coefficient_limit} bits"
+                        ),
+                    ));
+                }
+                keyed.push((value.clone(), coefficient));
+            }
+            keyed.sort_by(|left, right| left.1.cmp(&right.1));
+            keyed.into_iter().map(|(value, _)| value).collect()
+        }
+        Value::String(_) => {
+            if !input.iter().all(|value| matches!(value, Value::String(_))) {
+                return Err(Error::runtime(
+                    "sort expects homogeneous finite numbers, integers, decimals, or strings",
+                ));
+            }
+            let mut values = input.as_ref().clone();
+            values.sort_by(|left, right| {
+                let (Value::String(left), Value::String(right)) = (left, right) else {
+                    unreachable!("sort validated homogeneous strings")
+                };
+                left.cmp(right)
+            });
+            values
+        }
+        _ => {
+            return Err(Error::runtime(
+                "sort expects homogeneous finite numbers, integers, decimals, or strings",
+            ));
+        }
+    };
+    Ok(Value::Array(Rc::new(sorted)))
+}
+
 fn valid_error_code(code: &str) -> bool {
     code.len() <= 64
         && code
@@ -2679,6 +2792,7 @@ impl Context {
             };
             Ok(Value::Bool(input.ends_with(suffix.as_ref())))
         });
+        self.add_resource_builtin("sort", sort_builtin, array_and_element_allocations);
         self.install_json_builtins();
         self.add_builtin(
             "integer",

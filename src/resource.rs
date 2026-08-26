@@ -25,6 +25,8 @@ pub enum ResourceLimit {
     DecimalCoefficientBits,
     /// A Decimal exceeded its configured normalized base-10 scale boundary.
     DecimalScale,
+    /// One collection operation exceeded its configured input item boundary.
+    CollectionOperationItems,
 }
 
 /// Deterministic data-size boundaries applied by an execution [`crate::Context`].
@@ -44,6 +46,7 @@ pub struct ResourceLimits {
     max_integer_bits: u64,
     max_decimal_coefficient_bits: u64,
     max_decimal_scale: u32,
+    max_collection_operation_items: usize,
 }
 
 impl Default for ResourceLimits {
@@ -58,6 +61,7 @@ impl Default for ResourceLimits {
             max_integer_bits: 1_000_000,
             max_decimal_coefficient_bits: 1_000_000,
             max_decimal_scale: 100_000,
+            max_collection_operation_items: 100_000,
         }
     }
 }
@@ -168,6 +172,17 @@ impl ResourceLimits {
     /// compile-time and host-construction safety boundary.
     pub fn with_max_decimal_scale(mut self, limit: u32) -> Self {
         self.max_decimal_scale = limit;
+        self
+    }
+
+    /// Returns the maximum input items processed by one collection operation.
+    pub fn max_collection_operation_items(&self) -> usize {
+        self.max_collection_operation_items
+    }
+
+    /// Returns a policy with the maximum collection-operation item count replaced.
+    pub fn with_max_collection_operation_items(mut self, limit: usize) -> Self {
+        self.max_collection_operation_items = limit;
         self
     }
 }

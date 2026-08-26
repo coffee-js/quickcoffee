@@ -266,6 +266,33 @@ fn module_children_inherit_exact_numeric_resource_policy() {
 }
 
 #[test]
+fn module_children_inherit_collection_operation_resource_policy() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { payload } from 'dependency'\nexport payload = payload",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export payload = sort([3, 2, 1])");
+    let limits = ResourceLimits::default().with_max_collection_operation_items(2);
+    let error = Context::new()
+        .with_resource_limits(limits)
+        .run_module(&main, &loader)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::CollectionOperationItems)
+    );
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("dependency")
+    );
+}
+
+#[test]
 fn module_directives_are_not_accepted_by_single_file_compilation() {
     let error = Engine::new()
         .compile_program_named("virtual://single.qc", "value = 1\nexport answer = 42")

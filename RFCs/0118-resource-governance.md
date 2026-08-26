@@ -9,7 +9,7 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 
 ## 契约
 
-1. `ErrorKind` 增加 `Resource`；`Error::resource_limit()` 返回稳定的 `ResourceLimit`，其他错误返回 `None`。执行类原因是 `Fuel`、`CallDepth`、`Cancellation`；数据大小原因包括 RFC 0138 的 JSON 六类边界及 `IntegerBits`、`DecimalCoefficientBits`、`DecimalScale`。原生回调主动失败时继续以 `Error::runtime` 创建 `Runtime` 错误；其成功返回值仍须通过 Context 数值策略。
+1. `ErrorKind` 增加 `Resource`；`Error::resource_limit()` 返回稳定的 `ResourceLimit`，其他错误返回 `None`。执行类原因是 `Fuel`、`CallDepth`、`Cancellation`；数据大小原因包括 RFC 0138 的 JSON 六类边界、`IntegerBits`、`DecimalCoefficientBits`、`DecimalScale` 及 RFC 0140 的 `CollectionOperationItems`。原生回调主动失败时继续以 `Error::runtime` 创建 `Runtime` 错误；其成功返回值仍须通过 Context 数值策略。
 2. fuel 耗尽是 `ResourceLimit::Fuel`，消息仍包含 `execution fuel exhausted`。资源错误不进入 QuickCoffee 的 `try`/`catch`，因此脚本不能吞掉取消、fuel 或深度限制后继续执行。
 3. `Context` 默认允许最多 1,024 层嵌套 QuickCoffee 字节码函数调用；顶层程序不计入层数。`with_max_call_depth`、`set_max_call_depth` 与 `max_call_depth` 配置每次后续运行；零只允许顶层代码，拒绝任何字节码函数调用。原生 Rust 回调不新增 QuickCoffee 调用帧。
 4. `CancellationToken` 是可克隆、一次性的宿主取消信号。`Context::with_cancellation_token` 或 `set_cancellation_token` 配置它，`clear_cancellation_token` 移除它。VM 在每条指令之前检查取消；已开始执行的同步原生回调不能被强行中断，宿主回调应自行遵守自己的取消策略。
@@ -30,6 +30,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 3. `Context::set_global` 保持兼容的无失败宿主 API，`Integer::parse_radix`、`Decimal::parse` 与 `Decimal::from_parts` 继续报告宿主构造失败；低于绝对天花板的 Context 策略在脚本实际读取该值时产生带源码标签、不可捕获的 Resource error。宿主仍可用 `get_global` 取回未被脚本接受的值。
 4. Integer 乘法、幂、移位和聚合，以及 Decimal 对齐、比较、聚合、乘法、幂、除法、舍入和转换，在可证明超限时先拒绝；所有最终数值在入栈、存储或返回前再次检查。失败指令不会执行其后的 assignment store。
 5. `parse_json` 的合法数字若越过同一数值策略，使用上述三种 ResourceLimit；JSON 数字语法错误仍为可捕获的 `json.parse`。JSON 容器计数与数值大小策略彼此独立。
+
+## 2026-08-26：集合操作项数策略
+
+1. RFC 0140 增加 `max_collection_operation_items`，默认 100,000，并以 `CollectionOperationItems` 标识越界；它限制一次集合标准库操作读取的输入项数，首个使用者是 `sort`。
+2. 操作在复制输入或分配比较键之前检查边界。该策略限制单次 builtin 内隐藏的工作规模，但不替代一般容器长度、输出增长、总内存或 retained-memory 策略。
+3. Decimal 集合操作继续同时遵守 coefficient-bit 与 scale 策略；集合项数允许并不授权比较过程构造超限的精确数值中间量。
 
 ## 验收
 

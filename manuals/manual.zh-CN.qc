@@ -50,9 +50,10 @@ bound_callback()
 ## yes/on 与 no/off 是布尔别名；is/isnt 保持严格相等。
 ## ! 是严格 Bool 的 not 别名；!= 仍为严格不等。
 ## 严格或数值比较可成链，保留中间值且前段失败会短路。
-## 标准库皆为普通函数：print、len、type、error、range、str、trim、contains、starts_with、ends_with、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split 与 assert；RFC 0139 字符串查询严格且不读取 locale，trim 使用固定 Unicode White_Space 表；error(code, message, data, cause) 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。
+## 标准库皆为普通函数：print、len、type、error、range、str、trim、contains、starts_with、ends_with、sort、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split 与 assert；RFC 0139 字符串查询严格且不读取 locale，trim 使用固定 Unicode White_Space 表；RFC 0140 sort 返回同质有限标量的新稳定数组，String 使用无 locale 的 Unicode scalar 顺序；error(code, message, data, cause) 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。
 trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
 contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
+sort(['中', 'a', '☕']) == ['a', '☕', '中']
 ## RFC 0137 Decimal 字面量使用 m 后缀；精确除法拒绝循环小数，decimal_div 与 round_decimal 要求显式 scale 和舍入模式。
 ## 映射字面量可从左至右展开：{...defaults, theme: 'dark'}；后写键覆盖先写键。
 ## 映射解构末尾可用 ...metadata 捕获未列键，所得映射不可变。
