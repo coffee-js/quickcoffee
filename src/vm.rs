@@ -1844,11 +1844,11 @@ enum FunctionKind {
     },
     Native {
         function: NativeFunction,
-        allocation_profile: Option<fn(&Value) -> u64>,
+        allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
     ResourceBuiltin {
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
-        allocation_profile: Option<fn(&Value) -> u64>,
+        allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
     BoundMethod {
         function: Rc<Function>,
@@ -2473,6 +2473,15 @@ pub struct ExecutionStats {
     pub value_allocations: u64,
     /// Lexical environments allocated for QuickCoffee function calls during the run.
     pub environment_allocations: u64,
+    /// Logical VM-managed objects allocated during the run.
+    ///
+    /// This additive counter follows RFC 0146 and is independent of allocator
+    /// calls, reference-count headers, pointer width, and object retention.
+    pub managed_objects_allocated: u64,
+    /// Stable logical payload bytes allocated for [`Self::managed_objects_allocated`].
+    ///
+    /// This is not RSS, capacity, or a current/peak retained-memory reading.
+    pub managed_bytes_allocated: u64,
 }
 /// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
@@ -2512,8 +2521,159 @@ thread_local! {
     static REUSABLE_FRAME_STACK: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
 }
 
-fn one_value_allocation(_: &Value) -> u64 {
-    1
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ManagedAllocation {
+    legacy_value_allocations: u64,
+    objects: u64,
+    bytes: u64,
+}
+impl ManagedAllocation {
+    fn legacy_shallow(legacy_value_allocations: u64, value: &Value) -> Self {
+        let mut allocation = shallow_managed_allocation(value);
+        allocation.legacy_value_allocations = legacy_value_allocations;
+        allocation
+    }
+
+    fn legacy_deep(legacy_value_allocations: u64, value: &Value) -> Self {
+        let mut allocation = deep_managed_allocation(value);
+        allocation.legacy_value_allocations = legacy_value_allocations;
+        allocation
+    }
+
+    fn add(&mut self, other: Self) {
+        self.legacy_value_allocations = self
+            .legacy_value_allocations
+            .saturating_add(other.legacy_value_allocations);
+        self.objects = self.objects.saturating_add(other.objects);
+        self.bytes = self.bytes.saturating_add(other.bytes);
+    }
+}
+
+const LOGICAL_REFERENCE_BYTES: u64 = 8;
+const LOGICAL_MAP_ENTRY_BYTES: u64 = 16;
+const LOGICAL_DECIMAL_SCALE_BYTES: u64 = 4;
+
+fn magnitude_bytes(bits: u64) -> u64 {
+    bits.saturating_add(7) / 8
+}
+
+fn shallow_managed_allocation(value: &Value) -> ManagedAllocation {
+    let (objects, bytes) = match value {
+        Value::Integer(value) => (1, magnitude_bytes(value.inner().bits())),
+        Value::Decimal(value) => (
+            1,
+            magnitude_bytes(value.inner().bits()).saturating_add(LOGICAL_DECIMAL_SCALE_BYTES),
+        ),
+        Value::String(value) => (1, value.len() as u64),
+        Value::Array(values) => (
+            1,
+            (values.len() as u64).saturating_mul(LOGICAL_REFERENCE_BYTES),
+        ),
+        Value::Map(values) => (
+            1,
+            values.iter().fold(0_u64, |bytes, (key, _)| {
+                bytes
+                    .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                    .saturating_add(key.len() as u64)
+            }),
+        ),
+        Value::Error(error) => (
+            1,
+            (error.code.len() as u64)
+                .saturating_add(error.message.len() as u64)
+                .saturating_add(LOGICAL_REFERENCE_BYTES.saturating_mul(2)),
+        ),
+        Value::Class(class) => (
+            1,
+            (class.name.len() as u64)
+                .saturating_add(LOGICAL_REFERENCE_BYTES.saturating_mul(2))
+                .saturating_add(
+                    (class.instance_methods.len() as u64)
+                        .saturating_add(class.static_methods.len() as u64)
+                        .saturating_mul(LOGICAL_MAP_ENTRY_BYTES),
+                )
+                .saturating_add(
+                    class
+                        .instance_methods
+                        .keys()
+                        .chain(class.static_methods.keys())
+                        .fold(0_u64, |bytes, key| bytes.saturating_add(key.len() as u64)),
+                ),
+        ),
+        Value::Instance(instance) => {
+            let fields = instance.fields.borrow();
+            (
+                1,
+                LOGICAL_REFERENCE_BYTES.saturating_add(fields.iter().fold(
+                    0_u64,
+                    |bytes, (key, _)| {
+                        bytes
+                            .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                            .saturating_add(key.len() as u64)
+                    },
+                )),
+            )
+        }
+        Value::Function(_) => (1, LOGICAL_REFERENCE_BYTES),
+        Value::Nil | Value::Bool(_) | Value::Number(_) => (0, 0),
+    };
+    ManagedAllocation {
+        legacy_value_allocations: 0,
+        objects,
+        bytes,
+    }
+}
+
+fn deep_managed_allocation(value: &Value) -> ManagedAllocation {
+    let mut allocation = shallow_managed_allocation(value);
+    match value {
+        Value::Array(values) => {
+            for child in values.iter() {
+                allocation.add(deep_managed_allocation(child));
+            }
+        }
+        Value::Map(values) => {
+            for child in values.values() {
+                allocation.add(deep_managed_allocation(child));
+            }
+        }
+        _ => {}
+    }
+    allocation
+}
+
+fn managed_array_allocation(length: usize) -> ManagedAllocation {
+    ManagedAllocation {
+        legacy_value_allocations: 0,
+        objects: 1,
+        bytes: (length as u64).saturating_mul(LOGICAL_REFERENCE_BYTES),
+    }
+}
+
+fn one_value_allocation(_: &[Value], value: &Value) -> ManagedAllocation {
+    ManagedAllocation::legacy_shallow(1, value)
+}
+
+fn range_allocation(args: &[Value], value: &Value) -> ManagedAllocation {
+    if matches!(args.first(), Some(Value::Integer(_))) {
+        ManagedAllocation::legacy_deep(1, value)
+    } else {
+        ManagedAllocation::legacy_shallow(1, value)
+    }
+}
+
+fn managed_value_allocation(_: &[Value], value: &Value) -> ManagedAllocation {
+    ManagedAllocation::legacy_shallow(0, value)
+}
+
+fn integer_builtin_allocation(args: &[Value], value: &Value) -> ManagedAllocation {
+    let mut allocation = if matches!(args.first(), Some(Value::Integer(_))) {
+        ManagedAllocation::default()
+    } else {
+        shallow_managed_allocation(value)
+    };
+    allocation.legacy_value_allocations = 1;
+    allocation
 }
 
 // Unicode White_Space, pinned explicitly so `trim` does not inherit locale or
@@ -2535,31 +2695,40 @@ fn is_pinned_unicode_whitespace(character: char) -> bool {
     )
 }
 
-fn array_and_element_allocations(value: &Value) -> u64 {
+fn array_and_element_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
     match value {
-        Value::Array(values) => values.len() as u64 + 1,
-        _ => 0,
+        Value::Array(values) => ManagedAllocation::legacy_deep(values.len() as u64 + 1, value),
+        _ => ManagedAllocation::default(),
     }
 }
 
-fn concat_allocations(value: &Value) -> u64 {
-    match value {
+fn sorted_array_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
+    let legacy = match value {
+        Value::Array(values) => values.len() as u64 + 1,
+        _ => 0,
+    };
+    ManagedAllocation::legacy_shallow(legacy, value)
+}
+
+fn concat_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
+    let legacy = match value {
         Value::String(_) => 1,
         Value::Array(values) => values.len() as u64 + 1,
         _ => 0,
-    }
+    };
+    ManagedAllocation::legacy_shallow(legacy, value)
 }
 
-fn json_value_allocations(value: &Value) -> u64 {
+fn legacy_json_value_allocations(value: &Value) -> u64 {
     match value {
         Value::Integer(_) | Value::Decimal(_) | Value::String(_) => 1,
         Value::Array(values) => values
             .iter()
-            .map(json_value_allocations)
+            .map(legacy_json_value_allocations)
             .fold(1_u64, u64::saturating_add),
         Value::Map(values) => values
             .values()
-            .map(json_value_allocations)
+            .map(legacy_json_value_allocations)
             .fold(values.len() as u64 + 1, u64::saturating_add),
         Value::Nil
         | Value::Bool(_)
@@ -2569,6 +2738,10 @@ fn json_value_allocations(value: &Value) -> u64 {
         | Value::Instance(_)
         | Value::Function(_) => 0,
     }
+}
+
+fn json_value_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
+    ManagedAllocation::legacy_deep(legacy_json_value_allocations(value), value)
 }
 
 fn json_error(code: &'static str, failure: json::JsonFailure) -> Error {
@@ -2911,7 +3084,7 @@ impl Context {
         &mut self,
         name: impl Into<String>,
         f: F,
-        allocation_profile: fn(&Value) -> u64,
+        allocation_profile: fn(&[Value], &Value) -> ManagedAllocation,
     ) where
         F: Fn(&[Value]) -> Result<Value, Error> + 'static,
     {
@@ -2929,7 +3102,7 @@ impl Context {
         &mut self,
         name: impl Into<String>,
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
-        allocation_profile: fn(&Value) -> u64,
+        allocation_profile: fn(&[Value], &Value) -> ManagedAllocation,
     ) {
         self.set_global(
             name,
@@ -3002,6 +3175,8 @@ impl Context {
             exception_ops: 0,
             value_allocations: 0,
             environment_allocations: 0,
+            managed_objects_allocated: 0,
+            managed_bytes_allocated: 0,
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
         };
@@ -3081,7 +3256,7 @@ impl Context {
                 }
                 range_values(xs[0].clone(), xs[1].clone(), false, limits)
             },
-            one_value_allocation,
+            range_allocation,
         );
         self.add_builtin(
             "str",
@@ -3135,7 +3310,7 @@ impl Context {
             };
             Ok(Value::Bool(input.ends_with(suffix.as_ref())))
         });
-        self.add_resource_builtin("sort", sort_builtin, array_and_element_allocations);
+        self.add_resource_builtin("sort", sort_builtin, sorted_array_allocations);
         self.add_resource_builtin("concat", concat_builtin, concat_allocations);
         self.install_json_builtins();
         self.add_builtin(
@@ -3160,7 +3335,7 @@ impl Context {
                     )),
                 }
             },
-            one_value_allocation,
+            integer_builtin_allocation,
         );
         self.add_unprofiled_resource_builtin("number", |xs, limits| {
             if xs.len() != 1 {
@@ -3251,33 +3426,43 @@ impl Context {
             },
             one_value_allocation,
         );
-        self.add_native("abs", |xs| {
-            if xs.len() != 1 {
-                return Err(Error::runtime("abs expects one number"));
-            }
-            match &xs[0] {
-                Value::Number(value) if value.is_finite() => Ok(Value::Number(value.abs())),
-                Value::Integer(value) => Ok(Value::Integer(Rc::new(Integer::from_bigint(
-                    value.inner().abs(),
-                )?))),
-                Value::Decimal(value) => Ok(Value::Decimal(Rc::new(Decimal::from_bigint(
-                    value.inner().abs(),
-                    value.scale,
-                )?))),
-                _ => Err(Error::runtime(
-                    "abs expects a finite number, integer, or decimal",
-                )),
-            }
-        });
-        self.add_unprofiled_resource_builtin("sum", |xs, limits| {
-            aggregate_numeric(xs, "sum", Aggregate::Sum, limits)
-        });
-        self.add_unprofiled_resource_builtin("min", |xs, limits| {
-            aggregate_numeric(xs, "min", Aggregate::Min, limits)
-        });
-        self.add_unprofiled_resource_builtin("max", |xs, limits| {
-            aggregate_numeric(xs, "max", Aggregate::Max, limits)
-        });
+        self.add_builtin(
+            "abs",
+            |xs| {
+                if xs.len() != 1 {
+                    return Err(Error::runtime("abs expects one number"));
+                }
+                match &xs[0] {
+                    Value::Number(value) if value.is_finite() => Ok(Value::Number(value.abs())),
+                    Value::Integer(value) => Ok(Value::Integer(Rc::new(Integer::from_bigint(
+                        value.inner().abs(),
+                    )?))),
+                    Value::Decimal(value) => Ok(Value::Decimal(Rc::new(Decimal::from_bigint(
+                        value.inner().abs(),
+                        value.scale,
+                    )?))),
+                    _ => Err(Error::runtime(
+                        "abs expects a finite number, integer, or decimal",
+                    )),
+                }
+            },
+            managed_value_allocation,
+        );
+        self.add_resource_builtin(
+            "sum",
+            |xs, limits| aggregate_numeric(xs, "sum", Aggregate::Sum, limits),
+            managed_value_allocation,
+        );
+        self.add_resource_builtin(
+            "min",
+            |xs, limits| aggregate_numeric(xs, "min", Aggregate::Min, limits),
+            managed_value_allocation,
+        );
+        self.add_resource_builtin(
+            "max",
+            |xs, limits| aggregate_numeric(xs, "max", Aggregate::Max, limits),
+            managed_value_allocation,
+        );
         self.add_builtin(
             "error",
             |xs| {
@@ -3631,6 +3816,8 @@ struct Vm {
     exception_ops: u64,
     value_allocations: u64,
     environment_allocations: u64,
+    managed_objects_allocated: u64,
+    managed_bytes_allocated: u64,
     initial_debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
 }
@@ -3672,8 +3859,35 @@ impl Vm {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
 
+    fn record_managed_allocation(&mut self, allocation: ManagedAllocation) {
+        self.value_allocations = self
+            .value_allocations
+            .saturating_add(allocation.legacy_value_allocations);
+        self.managed_objects_allocated = self
+            .managed_objects_allocated
+            .saturating_add(allocation.objects);
+        self.managed_bytes_allocated = self
+            .managed_bytes_allocated
+            .saturating_add(allocation.bytes);
+    }
+
+    fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) {
+        self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value));
+    }
+
+    fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) {
+        self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value));
+    }
+
+    fn record_stack_managed_allocation(&mut self, frame: &Frame) {
+        self.record_managed_allocation(shallow_managed_allocation(
+            frame.stack.last().expect("managed numeric result"),
+        ));
+    }
+
     fn record_environment_allocation(&mut self) {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
+        self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
     }
 
     // This boundary keeps argument-buffer plumbing out of the monolithic
@@ -3756,7 +3970,7 @@ impl Vm {
             class: class.clone(),
             fields: RefCell::new(BTreeMap::new()),
         }));
-        self.record_value_allocations(1);
+        self.record_shallow_value_allocation(1, &instance);
         if let Some((owner, constructor)) = find_constructor(&class) {
             return Ok(Step::Call {
                 target: CallTarget::Receiver {
@@ -3956,15 +4170,16 @@ impl Vm {
                 }
             }
         }
-        frame.stack.push(Value::Class(Rc::new(Class {
+        let class = Value::Class(Rc::new(Class {
             name: Rc::from(name),
             superclass,
             constructor,
             instance_methods: instance_table,
             static_methods: static_table,
             static_fields: RefCell::new(BTreeMap::new()),
-        })));
-        self.record_value_allocations(1);
+        }));
+        self.record_shallow_value_allocation(1, &class);
+        frame.stack.push(class);
         Ok(())
     }
 
@@ -4059,6 +4274,8 @@ impl Vm {
             exception_ops: self.exception_ops,
             value_allocations: self.value_allocations,
             environment_allocations: self.environment_allocations,
+            managed_objects_allocated: self.managed_objects_allocated,
+            managed_bytes_allocated: self.managed_bytes_allocated,
             initial_debug_info: debug_info,
             execution_plan,
         };
@@ -4075,6 +4292,8 @@ impl Vm {
         self.exception_ops = nested.exception_ops;
         self.value_allocations = nested.value_allocations;
         self.environment_allocations = nested.environment_allocations;
+        self.managed_objects_allocated = nested.managed_objects_allocated;
+        self.managed_bytes_allocated = nested.managed_bytes_allocated;
         result
     }
     fn stats(&self) -> ExecutionStats {
@@ -4090,6 +4309,8 @@ impl Vm {
             exception_ops: self.exception_ops,
             value_allocations: self.value_allocations,
             environment_allocations: self.environment_allocations,
+            managed_objects_allocated: self.managed_objects_allocated,
+            managed_bytes_allocated: self.managed_bytes_allocated,
         }
     }
     fn run(&mut self, chunk: Rc<Chunk>, global: Env) -> Result<Value, Error> {
@@ -4217,9 +4438,9 @@ impl Vm {
                                 env.borrow_mut().restore(snapshot);
                                 return Err(error);
                             }
-                            (bindings, 0)
+                            (bindings, ManagedAllocation::default())
                         };
-                        self.record_value_allocations(allocations);
+                        self.record_managed_allocation(allocations);
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -4256,10 +4477,21 @@ impl Vm {
                     }
                     Instruction::Neg => match pop(frame)? {
                         Value::Number(x) => frame.stack.push(Value::Number(-x)),
-                        Value::Integer(x) => push_integer(frame, -x.inner(), self.resource_limits)?,
-                        Value::Decimal(x) => frame.stack.push(Value::Decimal(Rc::new(
-                            resource_decimal(-x.inner(), x.scale, self.resource_limits)?,
-                        ))),
+                        Value::Integer(x) => {
+                            push_integer(frame, -x.inner(), self.resource_limits)?;
+                            self.record_managed_allocation(shallow_managed_allocation(
+                                frame.stack.last().expect("integer result"),
+                            ));
+                        }
+                        Value::Decimal(x) => {
+                            let value = Value::Decimal(Rc::new(resource_decimal(
+                                -x.inner(),
+                                x.scale,
+                                self.resource_limits,
+                            )?));
+                            self.record_managed_allocation(shallow_managed_allocation(&value));
+                            frame.stack.push(value);
+                        }
                         _ => {
                             return Err(Error::runtime(
                                 "unary '-' expects number, integer, or decimal",
@@ -4275,94 +4507,169 @@ impl Vm {
                             let x = bit_integer(Value::Number(x))?;
                             frame.stack.push(Value::Number((!x) as f64));
                         }
-                        Value::Integer(x) => push_integer(frame, !x.inner(), self.resource_limits)?,
+                        Value::Integer(x) => {
+                            push_integer(frame, !x.inner(), self.resource_limits)?;
+                            self.record_managed_allocation(shallow_managed_allocation(
+                                frame.stack.last().expect("integer result"),
+                            ));
+                        }
                         _ => return Err(Error::runtime("'~' expects number or integer")),
                     },
                     Instruction::Exists => {
                         let value = pop(frame)?;
                         frame.stack.push(Value::Bool(!matches!(value, Value::Nil)))
                     }
-                    Instruction::Increment => numeric_update(frame, true, &self.resource_limits)?,
-                    Instruction::Decrement => numeric_update(frame, false, &self.resource_limits)?,
-                    Instruction::Add => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a + b,
-                        |a, b, _| Ok(a + b),
-                        decimal_add,
-                    )?,
-                    Instruction::Sub => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a - b,
-                        |a, b, _| Ok(a - b),
-                        decimal_sub,
-                    )?,
-                    Instruction::Mul => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a * b,
-                        integer_mul_resource,
-                        decimal_mul,
-                    )?,
-                    Instruction::Div => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a / b,
-                        |a, b, _| integer_div(a, b),
-                        decimal_exact_div,
-                    )?,
-                    Instruction::FloorDiv => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| (a / b).floor(),
-                        |a, b, _| integer_floor_div(a, b),
-                        decimal_floor_div,
-                    )?,
-                    Instruction::Rem => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a % b,
-                        |a, b, _| integer_rem(a, b),
-                        decimal_rem,
-                    )?,
-                    Instruction::Modulo => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| (a % b + b) % b,
-                        |a, b, _| integer_modulo(a, b),
-                        decimal_modulo,
-                    )?,
-                    Instruction::BitAnd => numeric_bit_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a & b,
-                        |a, b| a & b,
-                    )?,
-                    Instruction::BitOr => numeric_bit_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a | b,
-                        |a, b| a | b,
-                    )?,
-                    Instruction::BitXor => numeric_bit_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a ^ b,
-                        |a, b| a ^ b,
-                    )?,
-                    Instruction::ShiftLeft => numeric_shift(frame, false, &self.resource_limits)?,
-                    Instruction::ShiftRight => numeric_shift(frame, true, &self.resource_limits)?,
+                    Instruction::Increment => {
+                        if numeric_update(frame, true, &self.resource_limits)? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Decrement => {
+                        if numeric_update(frame, false, &self.resource_limits)? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Add => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a + b,
+                            |a, b, _| Ok(a + b),
+                            decimal_add,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Sub => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a - b,
+                            |a, b, _| Ok(a - b),
+                            decimal_sub,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Mul => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a * b,
+                            integer_mul_resource,
+                            decimal_mul,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Div => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a / b,
+                            |a, b, _| integer_div(a, b),
+                            decimal_exact_div,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::FloorDiv => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| (a / b).floor(),
+                            |a, b, _| integer_floor_div(a, b),
+                            decimal_floor_div,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Rem => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a % b,
+                            |a, b, _| integer_rem(a, b),
+                            decimal_rem,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::Modulo => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| (a % b + b) % b,
+                            |a, b, _| integer_modulo(a, b),
+                            decimal_modulo,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitAnd => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a & b,
+                            |a, b| a & b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitOr => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a | b,
+                            |a, b| a | b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::BitXor => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_bit_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a ^ b,
+                            |a, b| a ^ b,
+                        )?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::ShiftLeft => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_shift(frame, false, &self.resource_limits)?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
+                    Instruction::ShiftRight => {
+                        let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
+                        numeric_shift(frame, true, &self.resource_limits)?;
+                        if managed {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
                     Instruction::ShiftRightUnsigned => {
                         bit_shift(frame, |a, b| ((a as u32).wrapping_shr(b)) as i32)?
                     }
-                    Instruction::Pow => numeric_binary(
-                        frame,
-                        &self.resource_limits,
-                        |a, b| a.powf(b),
-                        integer_pow,
-                        decimal_pow,
-                    )?,
+                    Instruction::Pow => {
+                        if numeric_binary(
+                            frame,
+                            &self.resource_limits,
+                            |a, b| a.powf(b),
+                            integer_pow,
+                            decimal_pow,
+                        )? {
+                            self.record_stack_managed_allocation(frame);
+                        }
+                    }
                     Instruction::Eq => compare(frame, equal)?,
                     Instruction::Ne => compare(frame, |a, b| !equal(a, b))?,
                     Instruction::Lt => numeric_order(
@@ -4450,13 +4757,17 @@ impl Vm {
                             Value::Error(error) => Error::from_script_error(error),
                             value => {
                                 let message = format!("thrown: {value}");
-                                Error::from_script_error(Rc::new(ScriptError {
+                                let script_error = Rc::new(ScriptError {
                                     code: Rc::from("throw"),
                                     message: Rc::from(message.as_str()),
                                     data: value,
                                     cause: None,
                                     trusted_labels: Vec::new(),
-                                }))
+                                });
+                                self.record_managed_allocation(shallow_managed_allocation(
+                                    &Value::Error(script_error.clone()),
+                                ));
+                                Error::from_script_error(script_error)
                             }
                         });
                     }
@@ -4484,12 +4795,20 @@ impl Vm {
                                     .chars()
                                     .map(|character| Value::String(Rc::from(character.to_string())))
                                     .collect();
-                                self.record_value_allocations(values.len() as u64 + 1);
+                                let character_count = values.len();
+                                self.record_managed_allocation(ManagedAllocation {
+                                    legacy_value_allocations: (character_count as u64)
+                                        .saturating_add(1),
+                                    objects: (character_count as u64).saturating_add(1),
+                                    bytes: (character_count as u64)
+                                        .saturating_mul(LOGICAL_REFERENCE_BYTES)
+                                        .saturating_add(value.len() as u64),
+                                });
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(values),
                                         position: if step < 0 {
-                                            value.chars().count().saturating_sub(1)
+                                            character_count.saturating_sub(1)
                                         } else {
                                             0
                                         },
@@ -4561,8 +4880,8 @@ impl Vm {
                                     let value = entries.get(*position).map(|(key, value)| {
                                         vec![Value::String(Rc::from(key.as_str())), value.clone()]
                                     });
-                                    if value.is_some() {
-                                        self.record_value_allocations(1);
+                                    if let Some(values) = &value {
+                                        self.record_shallow_value_allocation(1, &values[0]);
                                         *position += 1;
                                     }
                                     value
@@ -4588,14 +4907,14 @@ impl Vm {
                                 .all(|(pattern, value)| static_pattern_matches(pattern, value))
                             {
                                 let mut bindings = vec![];
-                                let mut allocations = 0;
+                                let mut allocations = ManagedAllocation::default();
                                 for (pattern, value) in patterns.iter().zip(values.iter()) {
                                     let (mut pattern_bindings, pattern_allocations) =
                                         collect_static_pattern_bindings(pattern, value);
                                     bindings.append(&mut pattern_bindings);
-                                    allocations += pattern_allocations;
+                                    allocations.add(pattern_allocations);
                                 }
-                                self.record_value_allocations(allocations);
+                                self.record_managed_allocation(allocations);
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
                                     environment.set_local(&name, value);
@@ -4637,8 +4956,9 @@ impl Vm {
                     Instruction::MakeArray(n) => {
                         check_array_resource(*n, self.resource_limits)?;
                         let v = take(frame, *n)?;
-                        frame.stack.push(Value::Array(Rc::new(v)));
-                        self.record_value_allocations(1);
+                        let value = Value::Array(Rc::new(v));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::Append => {
                         let value = pop(frame)?;
@@ -4652,7 +4972,9 @@ impl Vm {
                         let cloned_backing = Rc::strong_count(&values) > 1;
                         Rc::make_mut(&mut values).push(value);
                         if cloned_backing {
-                            self.record_value_allocations(1);
+                            let mut allocation = managed_array_allocation(values.len());
+                            allocation.legacy_value_allocations = 1;
+                            self.record_managed_allocation(allocation);
                         }
                         frame.stack.push(Value::Array(values));
                     }
@@ -4675,8 +4997,9 @@ impl Vm {
                             };
                             values.extend(segment.iter().cloned());
                         }
-                        frame.stack.push(Value::Array(Rc::new(values)));
-                        self.record_value_allocations(1);
+                        let value = Value::Array(Rc::new(values));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::MergeMaps(n) => {
                         let segments = take(frame, *n)?;
@@ -4692,19 +5015,21 @@ impl Vm {
                             );
                         }
                         check_map_resource(values.len(), self.resource_limits)?;
-                        frame.stack.push(Value::Map(Rc::new(values)));
-                        self.record_value_allocations(1);
+                        let value = Value::Map(Rc::new(values));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::MakeRange(inclusive) => {
                         let end = pop(frame)?;
                         let start = pop(frame)?;
-                        frame.stack.push(range_values(
-                            start,
-                            end,
-                            *inclusive,
-                            self.resource_limits,
-                        )?);
-                        self.record_value_allocations(1);
+                        let exact = matches!(start, Value::Integer(_));
+                        let value = range_values(start, end, *inclusive, self.resource_limits)?;
+                        if exact {
+                            self.record_deep_value_allocation(1, &value);
+                        } else {
+                            self.record_shallow_value_allocation(1, &value);
+                        }
+                        frame.stack.push(value);
                     }
                     Instruction::MakeMap(keys) => {
                         check_map_resource(keys.len(), self.resource_limits)?;
@@ -4712,17 +5037,17 @@ impl Vm {
                             check_string_resource(key, self.resource_limits)?;
                         }
                         let v = take(frame, keys.len())?;
-                        frame
-                            .stack
-                            .push(Value::Map(Rc::new(keys.iter().cloned().zip(v).collect())));
-                        self.record_value_allocations(1);
+                        let value = Value::Map(Rc::new(keys.iter().cloned().zip(v).collect()));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::Stringify => {
                         let value = pop(frame)?;
                         let value = string_value(&value);
                         check_string_resource(&value, self.resource_limits)?;
-                        frame.stack.push(Value::String(Rc::from(value)));
-                        self.record_value_allocations(1);
+                        let value = Value::String(Rc::from(value));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::Concat(n) => {
                         let values = take(frame, *n)?;
@@ -4741,8 +5066,9 @@ impl Vm {
                             check_string_len_resource(length, self.resource_limits)?;
                             output.push_str(&value);
                         }
-                        frame.stack.push(Value::String(Rc::from(output)));
-                        self.record_value_allocations(1);
+                        let value = Value::String(Rc::from(output));
+                        self.record_shallow_value_allocation(1, &value);
+                        frame.stack.push(value);
                     }
                     Instruction::Index => {
                         let key = pop(frame)?;
@@ -4767,7 +5093,7 @@ impl Vm {
                         let value = member_value(target, name, false)?;
                         check_member_value_resources(&value, self.resource_limits)?;
                         if matches!(value, Value::Function(_)) {
-                            self.record_value_allocations(1);
+                            self.record_shallow_value_allocation(1, &value);
                         }
                         frame.stack.push(value);
                     }
@@ -4781,7 +5107,13 @@ impl Vm {
                         let target = frame.receiver.clone().ok_or_else(|| {
                             Error::runtime("receiver field write outside class member")
                         })?;
-                        set_receiver_member(target, name, value.clone(), self.resource_limits)?;
+                        if set_receiver_member(target, name, value.clone(), self.resource_limits)? {
+                            self.record_managed_allocation(ManagedAllocation {
+                                legacy_value_allocations: 0,
+                                objects: 0,
+                                bytes: LOGICAL_MAP_ENTRY_BYTES.saturating_add(name.len() as u64),
+                            });
+                        }
                         frame.stack.push(value);
                     }
                     Instruction::MemberCall { name, count } => {
@@ -4879,8 +5211,15 @@ impl Vm {
                                 debug_assert!(captured_receiver.is_none());
                                 function
                             };
-                            frame.stack.push(Value::Function(function));
-                            self.record_value_allocations(1);
+                            let value = Value::Function(function);
+                            let mut allocation = ManagedAllocation::legacy_shallow(1, &value);
+                            if *receiver_bound {
+                                allocation.objects = allocation.objects.saturating_add(1);
+                                allocation.bytes =
+                                    allocation.bytes.saturating_add(LOGICAL_REFERENCE_BYTES);
+                            }
+                            self.record_managed_allocation(allocation);
+                            frame.stack.push(value);
                         }
                         _ => return Err(Error::runtime("value used as function template")),
                     },
@@ -5263,30 +5602,32 @@ fn set_receiver_member(
     name: &str,
     value: Value,
     limits: ResourceLimits,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     check_value_resources(&value, limits)?;
     match target {
         Value::Instance(instance) => {
             let mut fields = instance.fields.borrow_mut();
-            if !fields.contains_key(name) {
+            let inserted = !fields.contains_key(name);
+            if inserted {
                 let next_len = fields.len().checked_add(1).ok_or_else(|| {
                     Error::resource(ResourceLimit::MapEntries, "map is too large")
                 })?;
                 check_map_resource(next_len, limits)?;
             }
             fields.insert(name.to_owned(), value);
-            Ok(())
+            Ok(inserted)
         }
         Value::Class(class) => {
             let mut fields = class.static_fields.borrow_mut();
-            if !fields.contains_key(name) {
+            let inserted = !fields.contains_key(name);
+            if inserted {
                 let next_len = fields.len().checked_add(1).ok_or_else(|| {
                     Error::resource(ResourceLimit::MapEntries, "map is too large")
                 })?;
                 check_map_resource(next_len, limits)?;
             }
             fields.insert(name.to_owned(), value);
-            Ok(())
+            Ok(inserted)
         }
         _ => Err(Error::runtime(
             "receiver field writes require a class or instance receiver",
@@ -5364,7 +5705,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_value_allocations(allocation_profile(&value));
+                    vm.record_managed_allocation(allocation_profile(args, &value));
                 }
                 frames
                     .last_mut()
@@ -5381,7 +5722,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_value_allocations(allocation_profile(&value));
+                    vm.record_managed_allocation(allocation_profile(args, &value));
                 }
                 frames
                     .last_mut()
@@ -5494,10 +5835,9 @@ fn call_with_context(
                         }
                     }
                     if let Some(rest) = rest {
-                        local
-                            .borrow_mut()
-                            .set_local(rest, Value::Array(Rc::new(args[params.len()..].to_vec())));
-                        vm.record_value_allocations(1);
+                        let value = Value::Array(Rc::new(args[params.len()..].to_vec()));
+                        vm.record_shallow_value_allocation(1, &value);
+                        local.borrow_mut().set_local(rest, value);
                     }
                 }
                 let bindings = match (binding_slots, fast_locals) {
@@ -5570,11 +5910,9 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
         if let Some(handler) = frame.handlers.pop() {
             frame.stack.truncate(handler.stack_depth);
             frame.iterators.truncate(handler.iterator_depth);
-            frame
-                .env
-                .borrow_mut()
-                .set_local(&handler.name, error.catch_value());
-            vm.record_value_allocations(1);
+            let caught = error.catch_value();
+            vm.record_shallow_value_allocation(1, &caught);
+            frame.env.borrow_mut().set_local(&handler.name, caught);
             frame.pc = handler.catch_pc;
             return true;
         }
@@ -5869,34 +6207,43 @@ fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<
 }
 // Keep the full host policy borrowed across generic Number operations. Copying
 // ResourceLimits here penalizes the scalar hot path even when no exact value is involved.
-fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<(), Error> {
-    match pop(f)? {
-        Value::Number(value) => f.stack.push(Value::Number(if increment {
-            value + 1.
-        } else {
-            value - 1.
-        })),
-        Value::Integer(value) => push_integer(
-            f,
-            if increment {
-                value.inner() + 1
+fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<bool, Error> {
+    let managed = match pop(f)? {
+        Value::Number(value) => {
+            f.stack.push(Value::Number(if increment {
+                value + 1.
             } else {
-                value.inner() - 1
-            },
-            *limits,
-        )?,
-        Value::Decimal(value) => f.stack.push(Value::Decimal(Rc::new(decimal_add(
-            &value,
-            &Decimal::from(if increment { 1 } else { -1 }),
-            *limits,
-        )?))),
+                value - 1.
+            }));
+            false
+        }
+        Value::Integer(value) => {
+            push_integer(
+                f,
+                if increment {
+                    value.inner() + 1
+                } else {
+                    value.inner() - 1
+                },
+                *limits,
+            )?;
+            true
+        }
+        Value::Decimal(value) => {
+            f.stack.push(Value::Decimal(Rc::new(decimal_add(
+                &value,
+                &Decimal::from(if increment { 1 } else { -1 }),
+                *limits,
+            )?)));
+            true
+        }
         _ => {
             return Err(Error::runtime(
                 "update operand must be number, integer, or decimal",
             ));
         }
-    }
-    Ok(())
+    };
+    Ok(managed)
 }
 fn numeric_binary(
     f: &mut Frame,
@@ -5904,17 +6251,23 @@ fn numeric_binary(
     number_op: impl FnOnce(f64, f64) -> f64,
     integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
     decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let b = pop(f)?;
     let a = pop(f)?;
-    match (a, b) {
-        (Value::Number(a), Value::Number(b)) => f.stack.push(Value::Number(number_op(a, b))),
-        (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner(), *limits)?, *limits)?
+    let managed = match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            f.stack.push(Value::Number(number_op(a, b)));
+            false
         }
-        (Value::Decimal(a), Value::Decimal(b)) => f
-            .stack
-            .push(Value::Decimal(Rc::new(decimal_op(&a, &b, *limits)?))),
+        (Value::Integer(a), Value::Integer(b)) => {
+            push_integer(f, integer_op(a.inner(), b.inner(), *limits)?, *limits)?;
+            true
+        }
+        (Value::Decimal(a), Value::Decimal(b)) => {
+            f.stack
+                .push(Value::Decimal(Rc::new(decimal_op(&a, &b, *limits)?)));
+            true
+        }
         (
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
             Value::Number(_) | Value::Integer(_) | Value::Decimal(_),
@@ -5928,8 +6281,8 @@ fn numeric_binary(
                 "expected matching number or integer operands",
             ));
         }
-    }
-    Ok(())
+    };
+    Ok(managed)
 }
 fn integer_div(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
     if b.is_zero() {
@@ -6018,7 +6371,7 @@ fn numeric_bit_binary(
             f.stack.push(Value::Number(number_op(a, b) as f64));
         }
         (Value::Integer(a), Value::Integer(b)) => {
-            push_integer(f, integer_op(a.inner(), b.inner()), *limits)?
+            push_integer(f, integer_op(a.inner(), b.inner()), *limits)?;
         }
         (Value::Number(_) | Value::Integer(_), Value::Number(_) | Value::Integer(_)) => {
             return Err(Error::runtime("cannot mix number and integer operands"));
@@ -6237,9 +6590,9 @@ fn static_pattern_matches(pattern: &Pattern, value: &Value) -> bool {
 fn collect_static_pattern_bindings(
     pattern: &Pattern,
     value: &Value,
-) -> (Vec<(String, Value)>, u64) {
+) -> (Vec<(String, Value)>, ManagedAllocation) {
     let mut bindings = vec![];
-    let mut allocations = 0;
+    let mut allocations = ManagedAllocation::default();
     collect_static_pattern_bindings_into(pattern, value, &mut bindings, &mut allocations);
     (bindings, allocations)
 }
@@ -6248,7 +6601,7 @@ fn collect_static_pattern_bindings_into(
     pattern: &Pattern,
     value: &Value,
     bindings: &mut Vec<(String, Value)>,
-    allocations: &mut u64,
+    allocations: &mut ManagedAllocation,
 ) {
     match pattern {
         Pattern::Ignore => {}
@@ -6264,11 +6617,9 @@ fn collect_static_pattern_bindings_into(
             };
             for (index, pattern) in patterns.iter().enumerate() {
                 if let Pattern::Rest(name) = pattern {
-                    bindings.push((
-                        name.clone(),
-                        Value::Array(Rc::new(values[index..].to_vec())),
-                    ));
-                    *allocations = allocations.saturating_add(1);
+                    let value = Value::Array(Rc::new(values[index..].to_vec()));
+                    allocations.add(ManagedAllocation::legacy_shallow(1, &value));
+                    bindings.push((name.clone(), value));
                     break;
                 }
                 collect_static_pattern_bindings_into(
@@ -6301,8 +6652,9 @@ fn collect_static_pattern_bindings_into(
                 .filter(|(key, _)| !explicit_fields.contains(key.as_str()))
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
-            bindings.push((rest.clone(), Value::Map(Rc::new(remaining))));
-            *allocations = allocations.saturating_add(1);
+            let value = Value::Map(Rc::new(remaining));
+            allocations.add(ManagedAllocation::legacy_shallow(1, &value));
+            bindings.push((rest.clone(), value));
         }
     }
 }
@@ -6388,7 +6740,7 @@ fn bind_pattern(
             for (index, pattern) in patterns.iter().enumerate() {
                 if let Pattern::Rest(name) = pattern {
                     let rest = Value::Array(Rc::new(values[index..].to_vec()));
-                    vm.record_value_allocations(1);
+                    vm.record_shallow_value_allocation(1, &rest);
                     bindings.push((name.clone(), rest.clone()));
                     if name != "_" {
                         env.borrow_mut().set_local(name, rest);
@@ -6462,7 +6814,7 @@ fn bind_pattern(
                 }
             }
             let rest_value = Value::Map(Rc::new(remaining));
-            vm.record_value_allocations(1);
+            vm.record_shallow_value_allocation(1, &rest_value);
             bindings.push((rest.clone(), rest_value.clone()));
             if rest != "_" {
                 env.borrow_mut().set_local(rest, rest_value);
@@ -6490,8 +6842,9 @@ fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
                     "string",
                 )?)
                 .ok_or_else(|| Error::runtime("string index out of range"))?;
-            vm.record_value_allocations(1);
-            Ok(Value::String(Rc::from(character.to_string())))
+            let value = Value::String(Rc::from(character.to_string()));
+            vm.record_shallow_value_allocation(1, &value);
+            Ok(value)
         }
         (Value::Map(m), Value::String(k)) => m
             .get(k.as_ref())
@@ -6547,7 +6900,7 @@ fn slice(
             }
             check_array_resource(end - start, limits)?;
             let value = Value::Array(Rc::new(values[start..end].to_vec()));
-            vm.record_value_allocations(1);
+            vm.record_shallow_value_allocation(1, &value);
             Ok(value)
         }
         Value::String(text) => {
@@ -6572,7 +6925,7 @@ fn slice(
                 .map_or(text.len(), |(offset, _)| offset);
             check_string_len_resource(end_byte - start_byte, limits)?;
             let value = Value::String(Rc::from(&text[start_byte..end_byte]));
-            vm.record_value_allocations(1);
+            vm.record_shallow_value_allocation(1, &value);
             Ok(value)
         }
         _ => Err(Error::runtime("slice expects an array or string")),
@@ -6626,7 +6979,9 @@ mod tests {
         assert!(static_pattern_matches(&pattern, &value));
         let (bindings, allocations) = collect_static_pattern_bindings(&pattern, &value);
         let bindings = bindings.into_iter().collect::<BTreeMap<_, _>>();
-        assert_eq!(allocations, 2);
+        assert_eq!(allocations.legacy_value_allocations, 2);
+        assert_eq!(allocations.objects, 2);
+        assert_eq!(allocations.bytes, 37);
         assert_eq!(bindings["id"].as_number(), Some(1_f64));
         assert_eq!(bindings["head"].as_number(), Some(2_f64));
         assert_eq!(bindings["tail"].as_array().unwrap().len(), 2);

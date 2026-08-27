@@ -194,7 +194,7 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                 if report_stats {
                     let execution = context.last_execution();
                     eprintln!(
-                        "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
+                        "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={} managed_objects_allocated={} managed_bytes_allocated={}",
                         execution.instructions,
                         execution.fuel_remaining,
                         execution.name_loads,
@@ -204,7 +204,9 @@ fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
                         execution.iterator_ops,
                         execution.exception_ops,
                         execution.value_allocations,
-                        execution.environment_allocations
+                        execution.environment_allocations,
+                        execution.managed_objects_allocated,
+                        execution.managed_bytes_allocated
                     );
                 }
                 match result {
@@ -551,7 +553,7 @@ fn main() -> ExitCode {
         if stats {
             let execution = context.last_execution();
             eprintln!(
-                "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
+                "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={} managed_objects_allocated={} managed_bytes_allocated={}",
                 execution.instructions,
                 execution.fuel_remaining,
                 execution.name_loads,
@@ -561,7 +563,9 @@ fn main() -> ExitCode {
                 execution.iterator_ops,
                 execution.exception_ops,
                 execution.value_allocations,
-                execution.environment_allocations
+                execution.environment_allocations,
+                execution.managed_objects_allocated,
+                execution.managed_bytes_allocated
             );
         }
         return match result {
@@ -642,7 +646,7 @@ fn main() -> ExitCode {
     if stats {
         let execution = context.last_execution();
         eprintln!(
-            "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={}",
+            "qcoffee stats: instructions={} fuel_remaining={} name_loads={} name_stores={} calls={} container_ops={} iterator_ops={} exception_ops={} value_allocations={} environment_allocations={} managed_objects_allocated={} managed_bytes_allocated={}",
             execution.instructions,
             execution.fuel_remaining,
             execution.name_loads,
@@ -652,7 +656,9 @@ fn main() -> ExitCode {
             execution.iterator_ops,
             execution.exception_ops,
             execution.value_allocations,
-            execution.environment_allocations
+            execution.environment_allocations,
+            execution.managed_objects_allocated,
+            execution.managed_bytes_allocated
         );
     }
     match result {

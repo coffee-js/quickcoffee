@@ -534,6 +534,8 @@ fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     assert!(stats_stderr.contains("fuel_remaining="));
     assert!(stats_stderr.contains("value_allocations="));
     assert!(stats_stderr.contains("environment_allocations="));
+    assert!(stats_stderr.contains("managed_objects_allocated="));
+    assert!(stats_stderr.contains("managed_bytes_allocated="));
 
     let args = Command::new(bin("qcoffee"))
         .args(["-e", "len(argv)", "--", "one", "two"])
@@ -1156,6 +1158,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
             "\"profile_exception_ops\":",
             "\"profile_value_allocations\":",
             "\"profile_environment_allocations\":",
+            "\"profile_managed_objects_allocated\":",
+            "\"profile_managed_bytes_allocated\":",
         ] {
             assert!(line.contains(field), "missing {field} in {line}");
         }
@@ -1179,6 +1183,8 @@ fn qbench_json_is_guarded_and_machine_readable() {
     assert!(text_stdout.contains("prepare_mad_ns=0"));
     assert!(text_stdout.contains("profile_value_allocations="));
     assert!(text_stdout.contains("profile_environment_allocations="));
+    assert!(text_stdout.contains("profile_managed_objects_allocated="));
+    assert!(text_stdout.contains("profile_managed_bytes_allocated="));
     let repeated = Command::new(bin("qbench"))
         .args(["--json", "--iterations", "1", "--repeat", "3"])
         .output()

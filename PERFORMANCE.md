@@ -756,7 +756,7 @@ make bench
 
 ## RFC 0123 托管分配剖析
 
-`qbench` 的每条 `quickcoffee.qbench.v1` 记录现在追加一次不计时执行的 `profile_*` 字段。热点计数来自 RFC 0122；`profile_value_allocations` 记录新建的引用计数字符串、数组、映射与字节码函数后备存储，`profile_environment_allocations` 记录 QuickCoffee 函数调用环境。它们是确定性事件数，不是字节数、存活对象数或系统分配器调用次数，也不包含编译期常量和嵌入宿主回调内部的分配。
+`qbench` 的每条 `quickcoffee.qbench.v1` 记录现在追加一次不计时执行的 `profile_*` 字段。热点计数来自 RFC 0122；`profile_value_allocations` 记录新建的引用计数字符串、数组、映射与字节码函数后备存储，`profile_environment_allocations` 记录 QuickCoffee 函数调用环境。它们是确定性历史事件数，不是字节数、存活对象数或系统分配器调用次数。RFC 0146 另增 `profile_managed_objects_allocated` 与 `profile_managed_bytes_allocated`，覆盖完整语言值类别和规范化 payload 增长；两者不等于 RSS、retained 或 peak memory。编译期常量和嵌入宿主回调内部的分配均不计入。
 
 可用一个迭代快速复现计时和单次执行剖析；调整 `--iterations` 或 `--repeat` 只改变计时样本，不会放大 `profile_*`：
 

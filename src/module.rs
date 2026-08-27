@@ -427,6 +427,8 @@ fn execute_module(
     stats.exception_ops += execution.exception_ops;
     stats.value_allocations += execution.value_allocations;
     stats.environment_allocations += execution.environment_allocations;
+    stats.managed_objects_allocated += execution.managed_objects_allocated;
+    stats.managed_bytes_allocated += execution.managed_bytes_allocated;
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

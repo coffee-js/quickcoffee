@@ -718,7 +718,7 @@ fn main() -> ExitCode {
 
         if json {
             println!(
-                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"prepare_ns\":{},\"prepare_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{},\"profile_instructions\":{},\"profile_call_depth_peak\":{},\"profile_name_loads\":{},\"profile_name_stores\":{},\"profile_calls\":{},\"profile_container_ops\":{},\"profile_iterator_ops\":{},\"profile_exception_ops\":{},\"profile_value_allocations\":{},\"profile_environment_allocations\":{}}}",
+                "{{\"schema\":\"{}\",\"version\":\"{}\",\"name\":\"{}\",\"iterations\":{},\"repeat\":{},\"expected\":\"{}\",\"compile_ns\":{},\"compile_mad_ns\":{},\"prepare_ns\":{},\"prepare_mad_ns\":{},\"verify_ns\":{},\"verify_mad_ns\":{},\"execute_ns\":{},\"execute_mad_ns\":{},\"profile_instructions\":{},\"profile_call_depth_peak\":{},\"profile_name_loads\":{},\"profile_name_stores\":{},\"profile_calls\":{},\"profile_container_ops\":{},\"profile_iterator_ops\":{},\"profile_exception_ops\":{},\"profile_value_allocations\":{},\"profile_environment_allocations\":{},\"profile_managed_objects_allocated\":{},\"profile_managed_bytes_allocated\":{}}}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 json_escape(workload.name),
@@ -742,11 +742,13 @@ fn main() -> ExitCode {
                 profile.iterator_ops,
                 profile.exception_ops,
                 profile.value_allocations,
-                profile.environment_allocations
+                profile.environment_allocations,
+                profile.managed_objects_allocated,
+                profile.managed_bytes_allocated
             );
         } else {
             println!(
-                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} prepare_ns={} prepare_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} profile_instructions={} profile_call_depth_peak={} profile_name_loads={} profile_name_stores={} profile_calls={} profile_container_ops={} profile_iterator_ops={} profile_exception_ops={} profile_value_allocations={} profile_environment_allocations={} expected={}",
+                "schema={} version={} {} iterations={} repeat={} compile_ns={} compile_mad_ns={} prepare_ns={} prepare_mad_ns={} verify_ns={} verify_mad_ns={} execute_ns={} execute_mad_ns={} profile_instructions={} profile_call_depth_peak={} profile_name_loads={} profile_name_stores={} profile_calls={} profile_container_ops={} profile_iterator_ops={} profile_exception_ops={} profile_value_allocations={} profile_environment_allocations={} profile_managed_objects_allocated={} profile_managed_bytes_allocated={} expected={}",
                 OUTPUT_SCHEMA,
                 env!("CARGO_PKG_VERSION"),
                 workload.name,
@@ -770,6 +772,8 @@ fn main() -> ExitCode {
                 profile.exception_ops,
                 profile.value_allocations,
                 profile.environment_allocations,
+                profile.managed_objects_allocated,
+                profile.managed_bytes_allocated,
                 workload.expected
             );
         }
