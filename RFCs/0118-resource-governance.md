@@ -50,6 +50,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. Array 连接还以左右输入项数总和复用 `CollectionOperationItems`，在复制任一元素之前拒绝超限工作。该操作边界与结果 `ArrayItems` 边界独立，宿主可分别收紧。
 3. 失败不修改输入且不返回部分结果；资源错误仍不可被脚本捕获。String 连接不读取 locale 或宿主 Unicode 表，Array 连接只按不可变 Value 语义克隆现有项。
 
+## 2026-08-27：保留托管图快照
+
+1. RFC 0146 的累计分配遥测不等于 retained-memory；RFC 0147 新增 `Context::retained_memory()`，以稳定逻辑对象/bytes 单位读取当前 Context 所有可达的托管值，不执行脚本且不改变执行统计。
+2. 普查从 Context 自己的 global environment 开始，跳过进程共享 builtin parent；共享 Rc backing 按 identity 仅计一次，Environment/Function/Class/Instance cycle 必须终止。模块导出与宿主手中但未存回 Context 的 Value 不属于该 Context 根。
+3. 快照不是 RSS、allocator/capacity、peak 或 hard limit。后续 retained-memory 限额必须在此基础上单独规定采样点、原子性、Context 生命周期与 host-visible failure state，不能从累计分配字段推导。
+
 ## 验收
 
 `tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。

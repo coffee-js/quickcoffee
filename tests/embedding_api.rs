@@ -1,6 +1,6 @@
 use quickcoffee::{
     CancellationToken, Context, Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, Integer,
-    IntoValue, ResourceLimit, ResourceLimits, TryFromValue, Value, ValueKind,
+    IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, TryFromValue, Value, ValueKind,
 };
 use std::collections::BTreeMap;
 
@@ -32,6 +32,62 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
     assert_eq!(context.run_program(&clone).unwrap().as_number(), Some(84.));
     assert_eq!(context.get_global("factor").unwrap().as_number(), Some(2.));
     assert!(context.get_global("missing").is_none());
+}
+
+#[test]
+fn retained_memory_census_is_context_owned_cycle_safe_and_alias_aware() {
+    let mut context = Context::new();
+    assert_eq!(
+        context.retained_memory(),
+        RetainedMemory {
+            objects: 1,
+            bytes: 0,
+        }
+    );
+
+    let shared = Value::array(vec![Value::from("bean")]);
+    context.set_global("first", shared.clone());
+    context.set_global("second", shared);
+    assert_eq!(
+        context.retained_memory(),
+        RetainedMemory {
+            objects: 3,
+            bytes: 12,
+        }
+    );
+
+    context.eval("cycle = -> cycle").unwrap();
+    let cycle_snapshot = context.retained_memory();
+    assert_eq!(cycle_snapshot, context.retained_memory());
+    assert_eq!(cycle_snapshot.objects, 4);
+    assert_eq!(cycle_snapshot.bytes, 20);
+
+    context.set_global("first", Value::from(1_f64));
+    context.set_global("second", Value::Nil);
+    assert_eq!(
+        context.retained_memory(),
+        RetainedMemory {
+            objects: 2,
+            bytes: 8,
+        }
+    );
+
+    context
+        .eval("class Box\n  constructor: (@value) ->\nbox = new Box('coffee')")
+        .unwrap();
+    let object_snapshot = context.retained_memory();
+    assert!(object_snapshot.objects > 2);
+    assert!(object_snapshot.bytes > 8);
+    assert_eq!(object_snapshot, context.retained_memory());
+
+    let isolated = Context::new();
+    assert_eq!(
+        isolated.retained_memory(),
+        RetainedMemory {
+            objects: 1,
+            bytes: 0,
+        }
+    );
 }
 
 #[test]

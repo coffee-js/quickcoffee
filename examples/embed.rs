@@ -30,5 +30,10 @@ fn main() -> Result<(), Error> {
         "host_add(20, 22) * factor",
     )?;
     println!("{value}");
+    let retained = context.retained_memory();
+    eprintln!(
+        "retained objects={} bytes={}",
+        retained.objects, retained.bytes
+    );
     Ok(())
 }

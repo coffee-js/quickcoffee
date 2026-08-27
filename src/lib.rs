@@ -22,8 +22,8 @@ pub use module::{
 pub use resource::{ResourceLimit, ResourceLimits};
 pub use vm::{
     CancellationToken, Context, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
-    ErrorKind, ExecutionStats, Function, Integer, IntoValue, NativeFunction, Program, ScriptError,
-    SourcePosition, SourceSpan, TryFromValue, Value, ValueKind,
+    ErrorKind, ExecutionStats, Function, Integer, IntoValue, NativeFunction, Program,
+    RetainedMemory, ScriptError, SourcePosition, SourceSpan, TryFromValue, Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.
