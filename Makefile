@@ -1,4 +1,4 @@
-.PHONY: fmt test release-test examples package-metadata package qbench-check fuzz-smoke clippy api-doc docs docs-html doc-check check bench qbench
+.PHONY: fmt test release-test examples package-metadata package release-tool-check qbench-check fuzz-smoke clippy api-doc docs docs-html doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -18,6 +18,9 @@ package-metadata:
 
 package:
 	cargo publish --dry-run --locked --allow-dirty
+
+release-tool-check:
+	python3 scripts/test_release.py
 
 clippy:
 	cargo clippy --locked --all-targets -- -D warnings
@@ -47,7 +50,7 @@ docs-html: doc-check
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.litcoffee -o target/manuals/manual.latin.html
 	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.litcoffee -o target/manuals/manual.devanagari-sa.html
 
-check: fmt test release-test examples package-metadata package qbench-check clippy api-doc doc-check
+check: fmt test release-test examples package-metadata package release-tool-check qbench-check clippy api-doc doc-check
 
 bench:
 	cargo bench --locked --bench core
