@@ -29,6 +29,104 @@ const MAX_DECIMAL_SCALE: u32 = 100_000;
 const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
 const MAX_REUSABLE_FRAME_STACK: usize = 64;
 
+// Keep the execution-facing policy at its pre-transient-budget width. ResourceLimits is a
+// public Copy value, but growing it changed the offset of every later Vm hot field and the ABI of
+// helper calls. Transient limits live in dedicated tail fields on Vm instead.
+#[derive(Clone, Copy)]
+struct VmResourceLimits {
+    max_json_input_bytes: usize,
+    max_json_output_bytes: usize,
+    max_json_string_bytes: usize,
+    max_json_container_items: usize,
+    max_json_values: usize,
+    max_json_nesting_depth: usize,
+    max_integer_bits: u64,
+    max_decimal_coefficient_bits: u64,
+    max_decimal_scale: u32,
+    max_collection_operation_items: usize,
+    max_text_operation_bytes: usize,
+    max_string_bytes: usize,
+    max_array_items: usize,
+    max_map_entries: usize,
+    max_retained_managed_objects: u64,
+    max_retained_managed_bytes: u64,
+}
+
+impl From<ResourceLimits> for VmResourceLimits {
+    fn from(limits: ResourceLimits) -> Self {
+        Self {
+            max_json_input_bytes: limits.max_json_input_bytes(),
+            max_json_output_bytes: limits.max_json_output_bytes(),
+            max_json_string_bytes: limits.max_json_string_bytes(),
+            max_json_container_items: limits.max_json_container_items(),
+            max_json_values: limits.max_json_values(),
+            max_json_nesting_depth: limits.max_json_nesting_depth(),
+            max_integer_bits: limits.max_integer_bits(),
+            max_decimal_coefficient_bits: limits.max_decimal_coefficient_bits(),
+            max_decimal_scale: limits.max_decimal_scale(),
+            max_collection_operation_items: limits.max_collection_operation_items(),
+            max_text_operation_bytes: limits.max_text_operation_bytes(),
+            max_string_bytes: limits.max_string_bytes(),
+            max_array_items: limits.max_array_items(),
+            max_map_entries: limits.max_map_entries(),
+            max_retained_managed_objects: limits.max_retained_managed_objects(),
+            max_retained_managed_bytes: limits.max_retained_managed_bytes(),
+        }
+    }
+}
+
+impl VmResourceLimits {
+    fn max_integer_bits(&self) -> u64 {
+        self.max_integer_bits
+    }
+    fn max_decimal_coefficient_bits(&self) -> u64 {
+        self.max_decimal_coefficient_bits
+    }
+    fn max_decimal_scale(&self) -> u32 {
+        self.max_decimal_scale
+    }
+    fn max_collection_operation_items(&self) -> usize {
+        self.max_collection_operation_items
+    }
+    fn max_text_operation_bytes(&self) -> usize {
+        self.max_text_operation_bytes
+    }
+    fn max_string_bytes(&self) -> usize {
+        self.max_string_bytes
+    }
+    fn max_array_items(&self) -> usize {
+        self.max_array_items
+    }
+    fn max_map_entries(&self) -> usize {
+        self.max_map_entries
+    }
+    fn public(self) -> ResourceLimits {
+        ResourceLimits::default()
+            .with_max_json_input_bytes(self.max_json_input_bytes)
+            .with_max_json_output_bytes(self.max_json_output_bytes)
+            .with_max_json_string_bytes(self.max_json_string_bytes)
+            .with_max_json_container_items(self.max_json_container_items)
+            .with_max_json_values(self.max_json_values)
+            .with_max_json_nesting_depth(self.max_json_nesting_depth)
+            .with_max_integer_bits(self.max_integer_bits)
+            .with_max_decimal_coefficient_bits(self.max_decimal_coefficient_bits)
+            .with_max_decimal_scale(self.max_decimal_scale)
+            .with_max_collection_operation_items(self.max_collection_operation_items)
+            .with_max_text_operation_bytes(self.max_text_operation_bytes)
+            .with_max_string_bytes(self.max_string_bytes)
+            .with_max_array_items(self.max_array_items)
+            .with_max_map_entries(self.max_map_entries)
+            .with_max_retained_managed_objects(self.max_retained_managed_objects)
+            .with_max_retained_managed_bytes(self.max_retained_managed_bytes)
+    }
+
+    fn public_with_transient(self, max_objects: u64, max_bytes: u64) -> ResourceLimits {
+        self.public()
+            .with_max_transient_managed_objects(max_objects)
+            .with_max_transient_managed_bytes(max_bytes)
+    }
+}
+
 /// Stable type tag for values crossing the embedding boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueKind {
@@ -208,7 +306,7 @@ impl Decimal {
             }
             None => return Err(Error::runtime("string is not a valid bounded decimal")),
         };
-        check_decimal_resource(&value, limits)?;
+        check_decimal_resource(&value, limits.into())?;
         Ok(value)
     }
     pub(crate) fn from_bigint(mut coefficient: BigInt, mut scale: u32) -> Result<Self, Error> {
@@ -308,6 +406,7 @@ pub(crate) fn decimal_text_resource_preflight(
     source: &str,
     limits: ResourceLimits,
 ) -> Result<(), Error> {
+    let limits = VmResourceLimits::from(limits);
     if !decimal_source_is_syntactically_valid(source) {
         return Ok(());
     }
@@ -414,6 +513,7 @@ pub(crate) fn integer_digits_resource_preflight(
     digits: &str,
     limits: ResourceLimits,
 ) -> Result<(), Error> {
+    let limits = VmResourceLimits::from(limits);
     let significant_digits = digits.trim_start_matches('0').len();
     let minimum_bits = if significant_digits == 0 {
         0
@@ -434,19 +534,19 @@ pub(crate) fn integer_digits_resource_preflight(
     }
 }
 
-fn integer_bit_limit(limits: ResourceLimits) -> u64 {
+fn integer_bit_limit(limits: VmResourceLimits) -> u64 {
     limits.max_integer_bits().min(MAX_INTEGER_BITS)
 }
 
-fn decimal_coefficient_bit_limit(limits: ResourceLimits) -> u64 {
+fn decimal_coefficient_bit_limit(limits: VmResourceLimits) -> u64 {
     limits.max_decimal_coefficient_bits().min(MAX_DECIMAL_BITS)
 }
 
-fn decimal_scale_limit(limits: ResourceLimits) -> u32 {
+fn decimal_scale_limit(limits: VmResourceLimits) -> u32 {
     limits.max_decimal_scale().min(MAX_DECIMAL_SCALE)
 }
 
-fn check_integer_resource(value: &BigInt, limits: ResourceLimits) -> Result<(), Error> {
+fn check_integer_resource(value: &BigInt, limits: VmResourceLimits) -> Result<(), Error> {
     let limit = integer_bit_limit(limits);
     if limit == MAX_INTEGER_BITS {
         return Ok(());
@@ -461,7 +561,7 @@ fn check_integer_resource(value: &BigInt, limits: ResourceLimits) -> Result<(), 
     }
 }
 
-fn check_decimal_resource(value: &Decimal, limits: ResourceLimits) -> Result<(), Error> {
+fn check_decimal_resource(value: &Decimal, limits: VmResourceLimits) -> Result<(), Error> {
     let scale_limit = decimal_scale_limit(limits);
     if scale_limit < MAX_DECIMAL_SCALE && value.scale > scale_limit {
         return Err(Error::resource(
@@ -481,7 +581,7 @@ fn check_decimal_resource(value: &Decimal, limits: ResourceLimits) -> Result<(),
 }
 
 #[inline]
-fn resource_integer(value: BigInt, limits: ResourceLimits) -> Result<Integer, Error> {
+fn resource_integer(value: BigInt, limits: VmResourceLimits) -> Result<Integer, Error> {
     let limit = integer_bit_limit(limits);
     if value.bits() > limit {
         Err(Error::resource(
@@ -497,7 +597,7 @@ fn resource_integer(value: BigInt, limits: ResourceLimits) -> Result<Integer, Er
 fn resource_decimal(
     coefficient: BigInt,
     scale: u32,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     let value = Decimal::from_bigint(coefficient, scale).map_err(|_| {
         if scale > MAX_DECIMAL_SCALE {
@@ -541,7 +641,7 @@ fn decimal_power_of_ten(exponent: u32) -> BigInt {
 fn check_decimal_power_growth(
     coefficient: &BigInt,
     exponent: u32,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<(), Error> {
     let limit = decimal_coefficient_bit_limit(limits);
     if limit == MAX_DECIMAL_BITS || coefficient.is_zero() {
@@ -562,7 +662,11 @@ fn check_decimal_power_growth(
 }
 
 #[inline]
-fn decimal_add(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_add(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
     if decimal_limits_active(limits) {
         check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -577,7 +681,11 @@ fn decimal_add(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
 }
 
 #[inline]
-fn decimal_sub(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_sub(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
     if decimal_limits_active(limits) {
         check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -591,7 +699,11 @@ fn decimal_sub(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
     )
 }
 
-fn decimal_mul(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_mul(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left
         .scale
         .checked_add(right.scale)
@@ -640,7 +752,7 @@ fn bounded_factor_exponent(value: &BigInt, factor: u8, limit: u32) -> u32 {
 fn decimal_exact_div(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal division by zero"));
@@ -683,7 +795,7 @@ fn decimal_exact_div(
 fn aligned_decimal_coefficients(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<(BigInt, BigInt, u32), Error> {
     let scale = left.scale.max(right.scale);
     check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -703,7 +815,7 @@ fn aligned_decimal_coefficients(
 fn decimal_cmp_resource(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<std::cmp::Ordering, Error> {
     let (left, right, _) = aligned_decimal_coefficients(left, right, limits)?;
     Ok(left.cmp(&right))
@@ -712,7 +824,7 @@ fn decimal_cmp_resource(
 fn decimal_floor_div(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal floor division by zero"));
@@ -721,7 +833,11 @@ fn decimal_floor_div(
     resource_decimal(integer_floor_div(&left, &right)?, 0, limits)
 }
 
-fn decimal_rem(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_rem(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal remainder by zero"));
     }
@@ -732,7 +848,7 @@ fn decimal_rem(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
 fn decimal_modulo(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal modulo by zero"));
@@ -741,7 +857,11 @@ fn decimal_modulo(
     resource_decimal(integer_modulo(&left, &right)?, scale, limits)
 }
 
-fn decimal_pow(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_pow(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     if right.scale != 0 {
         return Err(Error::runtime(
             "decimal exponent must be a non-negative whole Decimal",
@@ -804,7 +924,7 @@ impl DecimalRounding {
     }
 }
 
-fn decimal_scale_argument(value: &Value, limits: ResourceLimits) -> Result<u32, Error> {
+fn decimal_scale_argument(value: &Value, limits: VmResourceLimits) -> Result<u32, Error> {
     let scale = match value {
         Value::Number(value)
             if value.is_finite()
@@ -881,7 +1001,7 @@ fn decimal_div_rounded(
     right: &Decimal,
     scale: u32,
     rounding: DecimalRounding,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     let numerator_scale = right
         .scale
@@ -908,7 +1028,7 @@ fn decimal_round(
     value: &Decimal,
     scale: u32,
     rounding: DecimalRounding,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     decimal_div_rounded(value, &Decimal::from(1_i64), scale, rounding, limits)
 }
@@ -1405,23 +1525,23 @@ fn value_needs_resource_check(value: &Value) -> bool {
 }
 
 #[inline(never)]
-fn check_member_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+fn check_member_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
     if value_needs_resource_check(value) {
         check_value_resources(value, limits)?;
     }
     Ok(())
 }
 
-fn decimal_limits_active(limits: ResourceLimits) -> bool {
+fn decimal_limits_active(limits: VmResourceLimits) -> bool {
     decimal_coefficient_bit_limit(limits) < MAX_DECIMAL_BITS
         || decimal_scale_limit(limits) < MAX_DECIMAL_SCALE
 }
 
-fn check_string_resource(value: &str, limits: ResourceLimits) -> Result<(), Error> {
+fn check_string_resource(value: &str, limits: VmResourceLimits) -> Result<(), Error> {
     check_string_len_resource(value.len(), limits)
 }
 
-fn check_string_len_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_string_len_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_string_bytes() {
         return Err(Error::resource(
             ResourceLimit::StringBytes,
@@ -1431,7 +1551,7 @@ fn check_string_len_resource(len: usize, limits: ResourceLimits) -> Result<(), E
     Ok(())
 }
 
-fn check_array_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_array_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_array_items() {
         return Err(Error::resource(
             ResourceLimit::ArrayItems,
@@ -1441,7 +1561,7 @@ fn check_array_resource(len: usize, limits: ResourceLimits) -> Result<(), Error>
     Ok(())
 }
 
-fn check_map_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_map_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_map_entries() {
         return Err(Error::resource(
             ResourceLimit::MapEntries,
@@ -1451,7 +1571,7 @@ fn check_map_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
         match value {
@@ -2193,7 +2313,7 @@ enum FunctionKind {
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
     ResourceBuiltin {
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
     BoundMethod {
@@ -4053,19 +4173,14 @@ fn transient_managed_bytes_limit_error(actual: u64, limit: u64) -> Error {
 fn check_transient_managed_allocation_limits(
     objects: u64,
     bytes: u64,
-    limits: &ResourceLimits,
+    max_objects: u64,
+    max_bytes: u64,
 ) -> Result<(), Error> {
-    if objects > limits.max_transient_managed_objects() {
-        return Err(transient_managed_objects_limit_error(
-            objects,
-            limits.max_transient_managed_objects(),
-        ));
+    if objects > max_objects {
+        return Err(transient_managed_objects_limit_error(objects, max_objects));
     }
-    if bytes > limits.max_transient_managed_bytes() {
-        return Err(transient_managed_bytes_limit_error(
-            bytes,
-            limits.max_transient_managed_bytes(),
-        ));
+    if bytes > max_bytes {
+        return Err(transient_managed_bytes_limit_error(bytes, max_bytes));
     }
     Ok(())
 }
@@ -4230,26 +4345,26 @@ fn json_error(code: &'static str, failure: json::JsonFailure) -> Error {
     }
 }
 
-fn parse_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn parse_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("parse_json expects one string argument"));
     }
     let Value::String(source) = &xs[0] else {
         return Err(Error::runtime("parse_json expects a string"));
     };
-    json::parse_json(source, limits).map_err(|error| json_error("json.parse", error))
+    json::parse_json(source, limits.public()).map_err(|error| json_error("json.parse", error))
 }
 
-fn encode_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn encode_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("encode_json expects one argument"));
     }
-    json::encode_json(&xs[0], limits)
+    json::encode_json(&xs[0], limits.public())
         .map(Value::from)
         .map_err(|error| json_error("json.encode", error))
 }
 
-fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn sort_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("sort expects one array argument"));
     }
@@ -4362,7 +4477,7 @@ fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
     Ok(Value::Array(Rc::new(sorted)))
 }
 
-fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn concat_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 2 {
         return Err(Error::runtime("concat expects two arguments"));
     }
@@ -4406,7 +4521,7 @@ fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> 
     }
 }
 
-fn replace_all_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn replace_all_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 3 {
         return Err(Error::runtime("replace_all expects three string arguments"));
     }
@@ -4453,7 +4568,7 @@ fn checked_replacement_output_len(
     needle_len: usize,
     replacement_len: usize,
     matches: usize,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<usize, Error> {
     let output_len = if replacement_len >= needle_len {
         replacement_len
@@ -4789,7 +4904,7 @@ impl Context {
     fn add_resource_builtin(
         &mut self,
         name: impl Into<String>,
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
         allocation_profile: fn(&[Value], &Value) -> ManagedAllocation,
     ) {
         self.set_global(
@@ -4805,7 +4920,7 @@ impl Context {
     fn add_unprofiled_resource_builtin(
         &mut self,
         name: impl Into<String>,
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
     ) {
         self.set_global(
             name,
@@ -4857,27 +4972,15 @@ impl Context {
     pub fn run(&mut self, chunk: Chunk) -> Result<Value, Error> {
         self.run_program(&chunk.into())
     }
-    /// Runs shared compiled bytecode without cloning its instruction stream.
-    pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
-        program.ensure_verified_for_bytecode_limit(
-            self.engine.compile_limits().max_bytecode_instructions(),
-        )?;
-        let retained_limits_active = retained_memory_limits_active(self.resource_limits);
-        let transient_limits_active =
-            transient_managed_allocation_limits_active(&self.resource_limits);
-        let state_transaction = if retained_limits_active || transient_limits_active {
-            if retained_limits_active {
-                check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
-            }
-            Some(RetainedMemoryTransaction::capture(&self.global))
-        } else {
-            None
-        };
-        let mut vm = Vm {
+    fn execute_program<const TRANSIENT_LIMITS: bool>(
+        &self,
+        program: &Program,
+    ) -> (Result<Value, Error>, ExecutionStats) {
+        let mut vm = Vm::<TRANSIENT_LIMITS> {
             fuel: self.fuel,
             instructions: 0,
             max_call_depth: self.max_call_depth,
-            resource_limits: self.resource_limits,
+            resource_limits: self.resource_limits.into(),
             value_limits_active: value_limits_active(self.resource_limits),
             call_depth: 0,
             call_depth_peak: 0,
@@ -4898,10 +5001,35 @@ impl Context {
             managed_bytes_allocated: 0,
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
-            transient_limits_active,
+            max_transient_managed_objects: self.resource_limits.max_transient_managed_objects(),
+            max_transient_managed_bytes: self.resource_limits.max_transient_managed_bytes(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
-        self.last_execution = vm.stats();
+        let stats = vm.stats();
+        (result, stats)
+    }
+    /// Runs shared compiled bytecode without cloning its instruction stream.
+    pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
+        program.ensure_verified_for_bytecode_limit(
+            self.engine.compile_limits().max_bytecode_instructions(),
+        )?;
+        let retained_limits_active = retained_memory_limits_active(self.resource_limits);
+        let transient_limits_active =
+            transient_managed_allocation_limits_active(&self.resource_limits);
+        let state_transaction = if retained_limits_active || transient_limits_active {
+            if retained_limits_active {
+                check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
+            }
+            Some(RetainedMemoryTransaction::capture(&self.global))
+        } else {
+            None
+        };
+        let (result, stats) = if transient_limits_active {
+            self.execute_program::<true>(program)
+        } else {
+            self.execute_program::<false>(program)
+        };
+        self.last_execution = stats;
         if let Some(transaction) = state_transaction {
             let transient_limit_failed = result.as_ref().is_err_and(|error| {
                 matches!(
@@ -5123,7 +5251,9 @@ impl Context {
                     Value::Integer(value) => {
                         resource_decimal(value.inner().clone(), 0, limits)?
                     }
-                    Value::String(value) => Decimal::parse_with_resource_limits(value, limits)?,
+                    Value::String(value) => {
+                        Decimal::parse_with_resource_limits(value, limits.public())?
+                    }
                     Value::Number(_) => {
                         return Err(Error::runtime(
                             "decimal does not accept Number; use a suffixed literal or decimal string",
@@ -5552,11 +5682,11 @@ enum IterationKind {
         position: usize,
     },
 }
-struct Vm {
+struct Vm<const TRANSIENT_LIMITS: bool> {
     fuel: u64,
     instructions: u64,
     max_call_depth: usize,
-    resource_limits: ResourceLimits,
+    resource_limits: VmResourceLimits,
     value_limits_active: bool,
     call_depth: usize,
     call_depth_peak: usize,
@@ -5574,9 +5704,8 @@ struct Vm {
     managed_bytes_allocated: u64,
     initial_debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
-    // Keep the common disabled path to one tail-field read. In particular,
-    // class construction records several managed allocations per instance.
-    transient_limits_active: bool,
+    max_transient_managed_objects: u64,
+    max_transient_managed_bytes: u64,
 }
 enum Step {
     Continue,
@@ -5596,7 +5725,7 @@ enum CallTarget {
         context: MethodContext,
     },
 }
-impl Vm {
+impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
     fn source_span(frame: &Frame, pc: usize) -> Option<SourceSpan> {
         frame
             .debug_info
@@ -5627,13 +5756,14 @@ impl Vm {
         self.managed_bytes_allocated = self
             .managed_bytes_allocated
             .saturating_add(allocation.bytes);
-        if !self.transient_limits_active {
+        if !TRANSIENT_LIMITS {
             return Ok(());
         }
         check_transient_managed_allocation_limits(
             self.managed_objects_allocated,
             self.managed_bytes_allocated,
-            &self.resource_limits,
+            self.max_transient_managed_objects,
+            self.max_transient_managed_bytes,
         )
     }
 
@@ -5658,13 +5788,14 @@ impl Vm {
     fn record_environment_allocation(&mut self) -> Result<(), Error> {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
-        if !self.transient_limits_active {
+        if !TRANSIENT_LIMITS {
             return Ok(());
         }
         check_transient_managed_allocation_limits(
             self.managed_objects_allocated,
             self.managed_bytes_allocated,
-            &self.resource_limits,
+            self.max_transient_managed_objects,
+            self.max_transient_managed_bytes,
         )
     }
 
@@ -6035,7 +6166,7 @@ impl Vm {
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
     ) -> Result<Value, Error> {
-        let mut nested = Vm {
+        let mut nested = Vm::<TRANSIENT_LIMITS> {
             fuel: self.fuel,
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
@@ -6057,7 +6188,8 @@ impl Vm {
             managed_bytes_allocated: self.managed_bytes_allocated,
             initial_debug_info: debug_info,
             execution_plan,
-            transient_limits_active: self.transient_limits_active,
+            max_transient_managed_objects: self.max_transient_managed_objects,
+            max_transient_managed_bytes: self.max_transient_managed_bytes,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -7397,7 +7529,7 @@ fn set_receiver_member(
     target: Value,
     name: &str,
     value: Value,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<bool, Error> {
     check_value_resources(&value, limits)?;
     match target {
@@ -7431,15 +7563,20 @@ fn set_receiver_member(
     }
 }
 
-fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> Result<(), Error> {
+fn call<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    frames: &mut Vec<Frame>,
+    callee: Value,
+    args: &[Value],
+) -> Result<(), Error> {
     call_with_context(vm, frames, callee, args, None)
 }
 
 // Most class calls have at most two explicit arguments. Keep receiver
 // prepending off the allocator path for those calls while leaving uncommon
 // larger arities on a straightforward fallback.
-fn call_with_receiver(
-    vm: &mut Vm,
+fn call_with_receiver<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     frames: &mut Vec<Frame>,
     function: Rc<Function>,
     receiver: &Value,
@@ -7483,8 +7620,8 @@ fn call_with_receiver(
     }
 }
 
-fn call_with_context(
-    vm: &mut Vm,
+fn call_with_context<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     frames: &mut Vec<Frame>,
     callee: Value,
     args: &[Value],
@@ -7650,7 +7787,7 @@ fn call_with_context(
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
-                    stack: Vm::take_frame_stack(),
+                    stack: Vm::<TRANSIENT_LIMITS>::take_frame_stack(),
                     iterators: vec![],
                     handlers: vec![],
                     debug_info: debug_info.clone(),
@@ -7693,7 +7830,10 @@ fn call_with_context(
             FunctionKind::ContextualNative { function } => {
                 let mut context = NativeCallContext {
                     cancellation: vm.cancellation.clone(),
-                    resource_limits: vm.resource_limits,
+                    resource_limits: vm.resource_limits.public_with_transient(
+                        vm.max_transient_managed_objects,
+                        vm.max_transient_managed_bytes,
+                    ),
                     host_bindings: vm.host_bindings.clone(),
                     fuel_remaining: vm.fuel,
                     managed_objects_allocated: 0,
@@ -7721,7 +7861,11 @@ fn call_with_context(
     }
     Ok(())
 }
-fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> Result<bool, Error> {
+fn handle_error<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    frames: &mut Vec<Frame>,
+    error: &Error,
+) -> Result<bool, Error> {
     if error.kind() == ErrorKind::Resource {
         return Ok(false);
     }
@@ -7744,7 +7888,7 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> Result<b
         }
         let mut discarded = frames.pop().expect("VM has a failing frame");
         if has_caller {
-            Vm::recycle_frame_stack(std::mem::take(&mut discarded.stack));
+            Vm::<TRANSIENT_LIMITS>::recycle_frame_stack(std::mem::take(&mut discarded.stack));
         }
     }
 }
@@ -7763,7 +7907,7 @@ fn number(v: Value) -> Result<f64, Error> {
     v.as_number()
         .ok_or_else(|| Error::runtime("expected number"))
 }
-fn decimal_to_exact_number(value: &Decimal, limits: ResourceLimits) -> Result<f64, Error> {
+fn decimal_to_exact_number(value: &Decimal, limits: VmResourceLimits) -> Result<f64, Error> {
     check_decimal_power_growth(&BigInt::from(1_u8), value.scale, limits)?;
     let mut numerator = value.inner().clone();
     let mut denominator = decimal_power_of_ten(value.scale);
@@ -7798,7 +7942,7 @@ fn aggregate_numeric(
     xs: &[Value],
     name: &str,
     aggregate: Aggregate,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime(format!("{name} expects one array")));
@@ -7906,7 +8050,7 @@ fn numeric_range(
     start: f64,
     end: f64,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     if !start.is_finite()
         || !end.is_finite()
@@ -7944,7 +8088,7 @@ fn range_values(
     start: Value,
     end: Value,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     match (start, end) {
         (Value::Number(start), Value::Number(end)) => numeric_range(start, end, inclusive, limits),
@@ -8022,14 +8166,18 @@ fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
         .ok_or_else(|| Error::runtime("condition must be bool"))
 }
-fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<(), Error> {
+fn push_integer(f: &mut Frame, value: BigInt, limits: VmResourceLimits) -> Result<(), Error> {
     f.stack
         .push(Value::Integer(Rc::new(resource_integer(value, limits)?)));
     Ok(())
 }
 // Keep the full host policy borrowed across generic Number operations. Copying
 // ResourceLimits here penalizes the scalar hot path even when no exact value is involved.
-fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<bool, Error> {
+fn numeric_update(
+    f: &mut Frame,
+    increment: bool,
+    limits: &VmResourceLimits,
+) -> Result<bool, Error> {
     let managed = match pop(f)? {
         Value::Number(value) => {
             f.stack.push(Value::Number(if increment {
@@ -8069,10 +8217,10 @@ fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Re
 }
 fn numeric_binary(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(f64, f64) -> f64,
-    integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
-    decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
+    integer_op: impl FnOnce(&BigInt, &BigInt, VmResourceLimits) -> Result<BigInt, Error>,
+    decimal_op: impl FnOnce(&Decimal, &Decimal, VmResourceLimits) -> Result<Decimal, Error>,
 ) -> Result<bool, Error> {
     let b = pop(f)?;
     let a = pop(f)?;
@@ -8137,7 +8285,7 @@ fn integer_modulo(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
         Ok(remainder)
     }
 }
-fn integer_pow(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
+fn integer_pow(a: &BigInt, b: &BigInt, limits: VmResourceLimits) -> Result<BigInt, Error> {
     let exponent = b
         .to_u32()
         .ok_or_else(|| Error::runtime("integer exponent must be a non-negative 32-bit integer"))?;
@@ -8153,7 +8301,7 @@ fn integer_pow(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt,
     Ok(a.pow(exponent))
 }
 
-fn integer_mul_resource(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
+fn integer_mul_resource(a: &BigInt, b: &BigInt, limits: VmResourceLimits) -> Result<BigInt, Error> {
     let minimum_bits = a.bits().saturating_add(b.bits()).saturating_sub(1);
     if !a.is_zero() && !b.is_zero() && minimum_bits > integer_bit_limit(limits) {
         return Err(Error::resource(
@@ -8180,7 +8328,7 @@ fn bit_integer(value: Value) -> Result<i32, Error> {
 }
 fn numeric_bit_binary(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(i32, i32) -> i32,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
 ) -> Result<(), Error> {
@@ -8217,7 +8365,7 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
-fn numeric_shift(f: &mut Frame, right: bool, limits: &ResourceLimits) -> Result<(), Error> {
+fn numeric_shift(f: &mut Frame, right: bool, limits: &VmResourceLimits) -> Result<(), Error> {
     let shift = pop(f)?;
     let value = pop(f)?;
     match (value, shift) {
@@ -8288,7 +8436,7 @@ fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Err
 }
 fn numeric_order(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(f64, f64) -> bool,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
     decimal_op: impl FnOnce(std::cmp::Ordering) -> bool,
@@ -8481,8 +8629,8 @@ fn collect_static_pattern_bindings_into(
     }
 }
 
-fn bind_pattern(
-    vm: &mut Vm,
+fn bind_pattern<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     pattern: &Pattern,
     value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
@@ -8645,7 +8793,11 @@ fn bind_pattern(
         }
     }
 }
-fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
+fn index<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    target: Value,
+    key: Value,
+) -> Result<Value, Error> {
     match (target, key) {
         (Value::Array(xs), i @ (Value::Number(_) | Value::Integer(_))) => xs
             .get(sequence_index(
@@ -8700,13 +8852,13 @@ fn sequence_index(index: i128, len: usize, kind: &str) -> Result<usize, Error> {
     }
     Ok(resolved as usize)
 }
-fn slice(
-    vm: &mut Vm,
+fn slice<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     target: Value,
     start: Value,
     end: Value,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     match target {
         Value::Array(values) => {
@@ -8779,6 +8931,38 @@ mod tests {
     }
 
     #[test]
+    fn vm_resource_limits_preserve_pre_transient_policy_width() {
+        assert_eq!(
+            std::mem::size_of::<VmResourceLimits>() + 2 * std::mem::size_of::<u64>(),
+            std::mem::size_of::<ResourceLimits>()
+        );
+
+        let limits = ResourceLimits::default()
+            .with_max_json_input_bytes(11)
+            .with_max_json_output_bytes(12)
+            .with_max_json_string_bytes(13)
+            .with_max_json_container_items(14)
+            .with_max_json_values(15)
+            .with_max_json_nesting_depth(16)
+            .with_max_integer_bits(17)
+            .with_max_decimal_coefficient_bits(18)
+            .with_max_decimal_scale(19)
+            .with_max_collection_operation_items(20)
+            .with_max_text_operation_bytes(21)
+            .with_max_string_bytes(22)
+            .with_max_array_items(23)
+            .with_max_map_entries(24)
+            .with_max_retained_managed_objects(25)
+            .with_max_retained_managed_bytes(26)
+            .with_max_transient_managed_objects(27)
+            .with_max_transient_managed_bytes(28);
+        assert_eq!(
+            VmResourceLimits::from(limits).public_with_transient(27, 28),
+            limits
+        );
+    }
+
+    #[test]
     fn program_debug_info_preserves_legacy_allocation_width() {
         assert_eq!(
             std::mem::size_of::<ProgramDebugInfo>(),
@@ -8790,7 +8974,7 @@ mod tests {
     #[test]
     fn literal_replacement_length_rejects_arithmetic_overflow() {
         let limits = ResourceLimits::default().with_max_string_bytes(usize::MAX);
-        let error = checked_replacement_output_len(usize::MAX, 1, 2, 1, limits).unwrap_err();
+        let error = checked_replacement_output_len(usize::MAX, 1, 2, 1, limits.into()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Resource);
         assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
     }
@@ -9010,7 +9194,7 @@ mod tests {
         assert_eq!(second.last_execution(), successful_stats);
 
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
-        Vm::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
+        Vm::<false>::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
         assert!(reusable_is_empty());
         assert_eq!(reusable_capacity(), MAX_REUSABLE_FRAME_STACK);
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
