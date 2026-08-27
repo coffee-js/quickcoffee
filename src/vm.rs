@@ -2000,11 +2000,28 @@ impl HostBindings {
     }
 }
 
+trait HostBindingsView {
+    fn state(&self) -> Option<&HostState>;
+    fn capabilities(&self) -> &HostCapabilities;
+}
+impl HostBindingsView for HostBindings {
+    fn state(&self) -> Option<&HostState> {
+        self.state.as_ref()
+    }
+    fn capabilities(&self) -> &HostCapabilities {
+        &self.capabilities
+    }
+}
+// Keep the execution-facing handle pointer-wide like the legacy `HostState`
+// trait object. A thin handle measurably perturbs the adjacent VM hot layout;
+// Context storage remains a thin optional `Rc<HostBindings>` when configured.
+type HostBindingsViewHandle = Rc<dyn HostBindingsView>;
+
 /// Per-invocation controls available to an opt-in contextual native callback.
 pub struct NativeCallContext {
     cancellation: Option<CancellationToken>,
     resource_limits: ResourceLimits,
-    host_bindings: Option<Rc<HostBindings>>,
+    host_bindings: Option<HostBindingsViewHandle>,
     fuel_remaining: u64,
     managed_objects_allocated: u64,
     managed_bytes_allocated: u64,
@@ -2058,12 +2075,12 @@ impl NativeCallContext {
 
     /// Clones the Context-owned state handle when its concrete type matches `T`.
     pub fn host_state<T: 'static>(&self) -> Option<Rc<T>> {
-        self.host_bindings.as_ref()?.state.as_ref()?.downcast()
+        self.host_bindings.as_ref()?.state()?.downcast()
     }
 
     /// Clones an allowlisted opaque capability when its slot and type match.
     pub fn capability<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
-        self.host_bindings.as_ref()?.capabilities.get(key)
+        self.host_bindings.as_ref()?.capabilities().get(key)
     }
 
     /// Records logical managed allocation performed by host work.
@@ -4533,7 +4550,10 @@ impl Context {
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
-            host_bindings: self.host_bindings.clone(),
+            host_bindings: self
+                .host_bindings
+                .as_ref()
+                .map(|bindings| bindings.clone() as HostBindingsViewHandle),
             name_loads: 0,
             name_stores: 0,
             calls: 0,
@@ -5193,7 +5213,7 @@ struct Vm {
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
-    host_bindings: Option<Rc<HostBindings>>,
+    host_bindings: Option<HostBindingsViewHandle>,
     name_loads: u64,
     name_stores: u64,
     calls: u64,
@@ -8360,6 +8380,14 @@ fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_bindings_view_preserves_legacy_vm_handle_width() {
+        assert_eq!(
+            std::mem::size_of::<Option<HostBindingsViewHandle>>(),
+            std::mem::size_of::<Option<HostState>>()
+        );
+    }
 
     #[test]
     fn literal_replacement_length_rejects_arithmetic_overflow() {
