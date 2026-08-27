@@ -1,4 +1,7 @@
-use crate::{Context, Engine, Error, ExecutionStats, Program, Value, lowering, parser};
+use crate::{
+    Context, Engine, Error, ExecutionStats, Program, Value, bytecode::FingerprintEncoder, lowering,
+    parser,
+};
 use cap_std::{ambient_authority, fs::Dir};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -6,6 +9,15 @@ use std::{
     path::{Component, Path},
     sync::Arc,
 };
+
+/// Canonical encoding version used by [`Engine::fingerprint_module_graph`].
+///
+/// A semantic change to the graph encoding must increment this value. The
+/// existing bytecode fingerprints remain a separate compatibility domain.
+pub const MODULE_GRAPH_FINGERPRINT_VERSION: u64 = 1;
+
+const MODULE_GRAPH_FINGERPRINT_DOMAIN: &str = "quickcoffee.module-graph";
+const MODULE_SOURCE_FINGERPRINT_DOMAIN: &str = "quickcoffee.module-source";
 
 /// Source returned by an embedding host for one named QuickCoffee module.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -278,6 +290,7 @@ fn is_module_extension(extension: &str) -> bool {
 pub struct Module {
     name: String,
     program: Program,
+    source_fingerprint: u64,
     imports: Vec<(Vec<(String, String)>, String)>,
     exports: Vec<(String, String)>,
 }
@@ -339,6 +352,7 @@ impl Engine {
         Ok(Module {
             name,
             program,
+            source_fingerprint: fingerprint_module_source(source),
             imports: syntax.imports,
             exports: syntax
                 .exports
@@ -347,6 +361,173 @@ impl Engine {
                 .collect(),
         })
     }
+
+    /// Loads and verifies the complete static dependency graph without
+    /// executing it, then returns its deterministic versioned fingerprint.
+    ///
+    /// The fingerprint covers canonical module names, raw UTF-8 sources,
+    /// verified program fingerprints, named imports and exports, and resolved
+    /// dependency edges. Missing modules, invalid dependencies, and cycles are
+    /// returned as errors and never produce a partial fingerprint.
+    pub fn fingerprint_module_graph(
+        &self,
+        entry: &Module,
+        loader: &dyn ModuleLoader,
+    ) -> Result<u64, Error> {
+        let mut identities = BTreeMap::new();
+        let mut graph = BTreeMap::new();
+        let mut active = Vec::new();
+        collect_module_graph(
+            self,
+            entry,
+            loader,
+            &mut identities,
+            &mut graph,
+            &mut active,
+        )?;
+        Ok(encode_module_graph(entry.name(), &graph))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModuleIdentity {
+    source_fingerprint: u64,
+    program_fingerprint: u64,
+    imports: Vec<(Vec<(String, String)>, String)>,
+    exports: Vec<(String, String)>,
+}
+
+impl From<&Module> for ModuleIdentity {
+    fn from(module: &Module) -> Self {
+        Self {
+            source_fingerprint: module.source_fingerprint,
+            program_fingerprint: module.program.fingerprint(),
+            imports: module.imports.clone(),
+            exports: module.exports.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct GraphImport {
+    bindings: Vec<(String, String)>,
+    specifier: String,
+    dependency: String,
+}
+
+#[derive(Clone, Debug)]
+struct GraphModule {
+    source_fingerprint: u64,
+    program_fingerprint: u64,
+    imports: Vec<GraphImport>,
+    exports: Vec<(String, String)>,
+}
+
+fn fingerprint_module_source(source: &str) -> u64 {
+    let mut encoder = FingerprintEncoder::new();
+    encoder.string(MODULE_SOURCE_FINGERPRINT_DOMAIN);
+    encoder.u64(MODULE_GRAPH_FINGERPRINT_VERSION);
+    encoder.string(source);
+    encoder.finish()
+}
+
+fn collect_module_graph(
+    engine: &Engine,
+    module: &Module,
+    loader: &dyn ModuleLoader,
+    identities: &mut BTreeMap<String, ModuleIdentity>,
+    graph: &mut BTreeMap<String, GraphModule>,
+    active: &mut Vec<String>,
+) -> Result<(), Error> {
+    if active.iter().any(|name| name == module.name()) {
+        let mut cycle = active.clone();
+        cycle.push(module.name.clone());
+        return Err(Error::runtime(format!(
+            "circular module dependency: {}",
+            cycle.join(" -> ")
+        )));
+    }
+
+    let identity = ModuleIdentity::from(module);
+    if let Some(existing) = identities.get(module.name()) {
+        if existing != &identity {
+            return Err(Error::runtime(format!(
+                "module canonical name resolved to inconsistent source: {}",
+                module.name()
+            )));
+        }
+        return Ok(());
+    }
+    identities.insert(module.name.clone(), identity);
+    active.push(module.name.clone());
+
+    let mut imports = Vec::with_capacity(module.imports.len());
+    for (bindings, specifier) in &module.imports {
+        let source = loader.load(specifier, module.name())?;
+        let dependency = engine.compile_module(source.name(), source.source())?;
+        let dependency_name = dependency.name.clone();
+        collect_module_graph(engine, &dependency, loader, identities, graph, active)?;
+        for (public, _) in bindings {
+            if !dependency
+                .exports
+                .iter()
+                .any(|(exported, _)| exported == public)
+            {
+                return Err(Error::runtime(format!(
+                    "module {} does not export {public}",
+                    dependency.name
+                )));
+            }
+        }
+        imports.push(GraphImport {
+            bindings: bindings.clone(),
+            specifier: specifier.clone(),
+            dependency: dependency_name,
+        });
+    }
+
+    let mut exports = module.exports.clone();
+    exports.sort();
+    active.pop();
+    graph.insert(
+        module.name.clone(),
+        GraphModule {
+            source_fingerprint: module.source_fingerprint,
+            program_fingerprint: module.program.fingerprint(),
+            imports,
+            exports,
+        },
+    );
+    Ok(())
+}
+
+fn encode_module_graph(entry_name: &str, graph: &BTreeMap<String, GraphModule>) -> u64 {
+    let mut encoder = FingerprintEncoder::new();
+    encoder.string(MODULE_GRAPH_FINGERPRINT_DOMAIN);
+    encoder.u64(MODULE_GRAPH_FINGERPRINT_VERSION);
+    encoder.string(entry_name);
+    encoder.u64(graph.len() as u64);
+    for (name, module) in graph {
+        encoder.string(name);
+        encoder.u64(module.source_fingerprint);
+        encoder.u64(module.program_fingerprint);
+        encoder.u64(module.imports.len() as u64);
+        for import in &module.imports {
+            encoder.string(&import.specifier);
+            encoder.string(&import.dependency);
+            encoder.u64(import.bindings.len() as u64);
+            for (public, local) in &import.bindings {
+                encoder.string(public);
+                encoder.string(local);
+            }
+        }
+        encoder.u64(module.exports.len() as u64);
+        for (public, local) in &module.exports {
+            encoder.string(public);
+            encoder.string(local);
+        }
+    }
+    encoder.finish()
 }
 
 impl Context {

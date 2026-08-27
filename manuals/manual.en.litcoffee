@@ -12,7 +12,9 @@ Source is parsed, compiled to verified bytecode, and executed with a fuel budget
 
 Embedded modules may use named import/export; `Engine::compile_module` and `Context::run_module` obtain source only through a host `ModuleLoader`, keep module globals private, and share fuel across the graph.
 
-`qcoffee --module-root ROOT ENTRY` explicitly grants one restricted-file module root to that execution only; ENTRY is root-relative, imports stay ./ or ../, and success prints the ordered export Map (or an exports JSON record). Fuel, stats, and argv work there, while single-file, stdin, -e, REPL, check, disassembly, and fingerprint modes never gain that authority.
+`Engine::fingerprint_module_graph` uses the same loader to load and verify the complete static graph without executing it, returning a versioned u64 cache key sensitive to dependency sources, canonical names, imports/exports, and edges.
+
+`qcoffee --module-root ROOT ENTRY` explicitly grants one restricted-file module root to that operation; ENTRY is root-relative and imports stay ./ or ../. The ordinary mode executes the graph and prints the ordered export Map (or an exports JSON record), while combining `--fingerprint` prints only its 16-digit graph key without execution. Single-file, stdin, -e, REPL, check, and disassembly modes never gain that authority.
 
 Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
 
@@ -49,6 +51,8 @@ Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource pl
 `Program::fingerprint` provides a deterministic u64 bytecode cache key without changing execution.
 
 `qcoffee --fingerprint FILE` prints the same verified bytecode key as 16 lowercase hexadecimal digits without running the file.
+
+`qcoffee --fingerprint --module-root ROOT ENTRY` prints the separately versioned v1 module-graph fingerprint in the same format without executing any module.
 
 `qbench --json` emits one timing record per guarded workload; `--iterations` controls sample count.
 

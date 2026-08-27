@@ -18,7 +18,7 @@
 | 工作流 | Issue |
 |---|---|
 | CoffeeScript 2016 特性矩阵与源码范围诊断 | [#74](https://github.com/coffee-js/quickcoffee/issues/74) |
-| 模块包、受限 CLI 加载与模块图指纹 | [#75](https://github.com/coffee-js/quickcoffee/issues/75) |
+| 模块包、预编译 manifest 与模块生命周期 | [#75](https://github.com/coffee-js/quickcoffee/issues/75) |
 | 内存预算与运行时隔离 | [#76](https://github.com/coffee-js/quickcoffee/issues/76) |
 | 嵌入 API 0.2 与显式宿主能力 | [#77](https://github.com/coffee-js/quickcoffee/issues/77) |
 | 确定性的业务数据与文本基元 | [#78](https://github.com/coffee-js/quickcoffee/issues/78) |

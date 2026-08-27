@@ -654,17 +654,17 @@ impl Chunk {
     }
 }
 
-struct FingerprintEncoder {
+pub(crate) struct FingerprintEncoder {
     hash: u64,
 }
 
 impl FingerprintEncoder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             hash: 0xcbf29ce484222325,
         }
     }
-    fn finish(self) -> u64 {
+    pub(crate) fn finish(self) -> u64 {
         self.hash
     }
     fn byte(&mut self, byte: u8) {
@@ -674,7 +674,7 @@ impl FingerprintEncoder {
     fn tag(&mut self, tag: u8) {
         self.byte(tag);
     }
-    fn u64(&mut self, value: u64) {
+    pub(crate) fn u64(&mut self, value: u64) {
         for byte in value.to_le_bytes() {
             self.byte(byte);
         }
@@ -685,7 +685,7 @@ impl FingerprintEncoder {
     fn bool(&mut self, value: bool) {
         self.byte(u8::from(value));
     }
-    fn string(&mut self, value: &str) {
+    pub(crate) fn string(&mut self, value: &str) {
         self.u64(value.len() as u64);
         for byte in value.as_bytes() {
             self.byte(*byte);

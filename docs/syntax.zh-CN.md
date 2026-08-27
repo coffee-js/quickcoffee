@@ -10,9 +10,9 @@
 
 `Engine::check_program*` 只进行静态编译而不执行，可返回多个彼此独立、可恢复的 parser error。恢复刻意限定在确定性的顶层语句边界；普通 `compile*` API 仍只返回首个错误。`qcoffee --check FILE` 按源序把这些 parser error 写入标准错误，标准输出为空且绝不执行字节码。
 
-嵌入宿主可用 `Program::fingerprint()` 作为确定性字节码缓存键；该指纹不改变验证与执行语义。
+嵌入宿主可用 `Program::fingerprint()` 作为确定性单程序字节码缓存键；`Engine::fingerprint_module_graph(entry, loader)` 则在不执行模块的前提下加载并验证完整静态图，返回依赖 source、规范名、imports/exports 与边均敏感的 v1 `u64` 缓存键。`MODULE_GRAPH_FINGERPRINT_VERSION` 标识独立于 bytecode 的 canonical encoding 版本。
 
-内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，指纹使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉。`IntoValue` 与 `TryFromValue` 可递归转换常用的拥有型 Rust 标量、`Vec`、`BTreeMap<String, T>` 与 `Option`，不执行脚本，也不在 Number、Integer 与 Decimal 间 coercion；也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。
+内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，`qcoffee --fingerprint --module-root ROOT ENTRY` 以同一格式输出完整受限模块图的独立版本化指纹；两者都使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉。`IntoValue` 与 `TryFromValue` 可递归转换常用的拥有型 Rust 标量、`Vec`、`BTreeMap<String, T>` 与 `Option`，不执行脚本，也不在 Number、Integer 与 Decimal 间 coercion；也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。
 
 `Context::retained_memory()` 读取该 Context global 可达值的确定性 logical object/byte 快照，会对共享值与循环去重，并跳过共享 builtin 和宿主 callback 内部；它不是 RSS、峰值或硬内存上限。
 
@@ -40,7 +40,7 @@
 | 运算 | 算术、严格有符号 32 位位运算 `&`、`|`、`^`、`~`、`<<`、`>>`、`>>>` 及其名称复合赋值、名称复合赋值 `name += value`、`-=`, `*=`, `/=`, `%=`, `**=`、名称前后置更新 `++`/`--`、比较（`==`/`is`、`!=`/`isnt`，可短路成链 `a < b < c`）、`and`/`or`、`not`、仅对 `nil` 回退的 `left ? right`、后缀非 nil 测试 `value?`、仅名称的存在性赋值 `name ?= value`、数组成员 `value in array` / `value not in array`、映射自身键 `key of map` / `key not of map`、数组索引与严格切片 `a[start..end]` / `a[start...end]`、映射成员访问、nil 安全后缀 `a?.name`、`a?[i]`、`a?[start..end]`、`f?(args)` | 成员/索引/解构复合赋值、成员/索引/解构 `?=`、字符串/映射切片、隐式截断、未声明名称检查 |
 | 控制 | `if`/`unless`、后置条件、`while … then …`、`until … then …`、语句后置 `body while/until condition`、前置或后置列表推导 `for value[, index] in xs [by step] [when condition] then …` / `value for value in xs`、`switch`/`when`、`try`/`catch`/`finally`、`throw`、函数内 `return`、`break`、`continue` | JS Error 对象、顶层 `return`、映射 `for` 的 `by` |
 | 赋值/函数 | `a, b = array`、`[a, tail...] = array`（末项 rest 可为空）、`[a, {point: [b, c]}] = array`、`{key, "first-name": first, ...metadata} = map`（标识符或字面字符串键）的严格递归解构、`_` 忽略位；`x, y -> expression` 无括号名称闭包、`([a, b], {factor}) -> expression` 解构形参、`(x, y = 2, rest...) -> expression`（缺省或 `nil` 取默认）、`f(items...)` 展开调用、class 接收者上下文中的 receiver-bound `=>`、`do` 立即调用 | 动态 computed 映射键、无括号默认/rest/解构参数、class 外接收者绑定、生成器 |
-| OO/模块 | 缩进 `class Name` 成员体、`constructor: (...) ->`、实例/`@static` 方法、class 内 `this`/`@field`、受限字段写入、`new Class(args...)`、私有 `class Child extends Parent` 链、静态解析的 `super(args...)`、继承实例/静态查找、可安全逸出的 `method: =>` 与嵌套 `=>`、专用 Class/Instance 值与接收者成员调用；历史工厂形式给出迁移诊断。仅嵌入 `Engine::compile_module` 的命名 import/export；宿主可显式构造根目录受限的 `RestrictedFileModuleLoader` | 全局/自由 `this`、普通函数/默认参数中的 `=>`、任意函数构造、公开原型能力、class 外 `super`/接收者绑定、CLI 文件模块、隐式文件/网络加载 |
+| OO/模块 | 缩进 `class Name` 成员体、`constructor: (...) ->`、实例/`@static` 方法、class 内 `this`/`@field`、受限字段写入、`new Class(args...)`、私有 `class Child extends Parent` 链、静态解析的 `super(args...)`、继承实例/静态查找、可安全逸出的 `method: =>` 与嵌套 `=>`、专用 Class/Instance 值与接收者成员调用；历史工厂形式给出迁移诊断。嵌入 API 的命名 import/export、显式 `ModuleLoader`、受限文件 loader、CLI 执行和非执行图指纹 | 全局/自由 `this`、普通函数/默认参数中的 `=>`、任意函数构造、公开原型能力、class 外 `super`/接收者绑定、隐式文件/网络加载、模块包、dynamic import |
 
 整数区间支持升序与降序：`[2..4]` 为 `[2, 3, 4]`，`[4..2]` 为 `[4, 3, 2]`；排除上界形式相应省略终点（`[4...2]` 为 `[4, 3]`）。边界必须是有限整数，过长区间仍报错。
 
@@ -60,7 +60,7 @@
 
 `for` 的绑定可用严格递归模式：`for [left, right] in pairs then left + right`、`for own _, value of record then value` 均可。模式不匹配是运行时错误，且本轮绑定绝不部分写入。
 
-模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。宿主可显式构造 `RestrictedFileModuleLoader`，只读取一个规范根目录内的 UTF-8 `.coffee` 或 `.litcoffee` 文件；依赖必须使用 `./` 或 `../`，省略扩展名时补 `.coffee`，绝对/bare 名、平台专用分隔符、词法越界及符号链接逃逸均拒绝。CLI 仅可用 `qcoffee --module-root ROOT ENTRY` 显式启用同一能力：成功时输出按名称排序的导出 Map，`--json` 输出 `exports`；该模式可配合 fuel、stats 和 `argv`，但与单文件、stdin、`-e`、REPL、check、反汇编和指纹模式互斥，普通 CLI 运行不会隐式读取模块。
+模块由嵌入宿主显式加载：`ModuleLoader` 只返回规范名称和源码，`Context::run_module` 在私有顶层环境执行并只返回声明的 `ModuleExports`；同名依赖在一次运行中复用，循环依赖明确报错，且整张图共享 fuel 与取消边界。`Engine::fingerprint_module_graph` 在同一 loader 边界内加载并验证完整静态图但不执行，将入口、原始 source、Program 指纹、imports/exports 与规范依赖边编码为顺序无关的版本化缓存键；缺失和 cycle 不产生部分键。宿主可显式构造 `RestrictedFileModuleLoader`，只读取一个规范根目录内的 UTF-8 `.coffee` 或 `.litcoffee` 文件；依赖必须使用 `./` 或 `../`，省略扩展名时补 `.coffee`，绝对/bare 名、平台专用分隔符、词法越界及符号链接逃逸均拒绝。CLI 用 `qcoffee --module-root ROOT ENTRY` 显式执行同一图，或用 `qcoffee --fingerprint --module-root ROOT ENTRY` 只检查图指纹；普通 CLI 运行不会隐式读取模块。
 
 名称亦支持前置、后置数值更新：`next = ++counter` 产生更新后的值，`previous = counter--` 先产生旧值再减一。`++`、`--` 只接受名称并使用严格数值运算；成员、索引和解构形式在解析阶段拒绝。
 

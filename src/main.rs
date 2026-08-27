@@ -9,7 +9,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY [--fingerprint] | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
     );
 }
 fn read_source(path: &str) -> Result<String, String> {
@@ -386,49 +386,16 @@ fn main() -> ExitCode {
                     eprintln!("--json cannot be combined with --fingerprint");
                     return ExitCode::from(2);
                 }
-                if source.is_some()
-                    || module_root.is_some()
-                    || dump
-                    || check
-                    || fingerprint
-                    || stats
-                {
+                if source.is_some() || dump || check || fingerprint || stats {
                     eprintln!(
                         "-e, --check, --dump-bytecode, --fingerprint, --json, and --stats are execution-mode alternatives"
                     );
                     return ExitCode::from(2);
                 }
                 fingerprint = true;
-                match args.next() {
-                    Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
-                    {
-                        Ok(text) => {
-                            source = Some(text);
-                            source_name = Some(path);
-                        }
-                        Err(error) => {
-                            eprintln!("{error}");
-                            return ExitCode::from(1);
-                        }
-                    },
-                    Some(_) => {
-                        eprintln!("--fingerprint requires a file");
-                        return ExitCode::from(2);
-                    }
-                    None => {
-                        eprintln!("--fingerprint requires a file");
-                        return ExitCode::from(2);
-                    }
-                }
             }
             "--module-root" => {
-                if source.is_some()
-                    || module_root.is_some()
-                    || dump
-                    || check
-                    || fingerprint
-                    || interactive
-                {
+                if source.is_some() || module_root.is_some() || dump || check || interactive {
                     eprintln!(
                         "--module-root cannot be combined with another source or execution mode"
                     );
@@ -533,7 +500,8 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         };
-        let module = match Engine::new().compile_module(source.name(), source.source()) {
+        let engine = Engine::new();
+        let module = match engine.compile_module(source.name(), source.source()) {
             Ok(module) => module,
             Err(error) => {
                 if json {
@@ -544,6 +512,18 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         };
+        if fingerprint {
+            return match engine.fingerprint_module_graph(&module, &loader) {
+                Ok(fingerprint) => {
+                    println!("{fingerprint:016x}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::from(1)
+                }
+            };
+        }
         let mut context = Context::new().with_fuel(fuel);
         context.set_global(
             "argv",
@@ -589,6 +569,10 @@ fn main() -> ExitCode {
         };
     }
     let Some(source) = source else {
+        if fingerprint {
+            eprintln!("--fingerprint requires a file or --module-root ROOT ENTRY");
+            return ExitCode::from(2);
+        }
         usage();
         return ExitCode::from(2);
     };

@@ -897,6 +897,79 @@ fn qcoffee_fingerprint_is_stable_non_executing_and_mutually_exclusive() {
 }
 
 #[test]
+fn qcoffee_fingerprints_restricted_module_graphs_without_execution() {
+    let root =
+        std::env::temp_dir().join(format!("qcoffee-module-fingerprint-{}", std::process::id()));
+    let app = root.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        app.join("main.coffee"),
+        "import { value } from './dependency'\nprint('must not execute')\nexport result = value",
+    )
+    .unwrap();
+    fs::write(app.join("dependency.coffee"), "export value = 42").unwrap();
+    let root_text = root.to_str().unwrap();
+
+    let first = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", "--module-root", root_text, "app/main"])
+        .output()
+        .unwrap();
+    let reordered = Command::new(bin("qcoffee"))
+        .args(["--module-root", root_text, "app/main", "--fingerprint"])
+        .output()
+        .unwrap();
+    assert!(first.status.success() && reordered.status.success());
+    assert_eq!(first.stdout, reordered.stdout);
+    assert!(first.stderr.is_empty() && reordered.stderr.is_empty());
+    let fingerprint = String::from_utf8_lossy(&first.stdout);
+    assert_eq!(fingerprint.trim().len(), 16);
+    assert!(fingerprint.trim().chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(!fingerprint.contains("must not execute"));
+
+    fs::write(
+        app.join("dependency.coffee"),
+        "# source-only change\nexport value = 42",
+    )
+    .unwrap();
+    let changed = Command::new(bin("qcoffee"))
+        .args(["--fingerprint", "--module-root", root_text, "app/main"])
+        .output()
+        .unwrap();
+    assert!(changed.status.success());
+    assert_ne!(first.stdout, changed.stdout);
+
+    for args in [
+        vec![
+            "--json",
+            "--fingerprint",
+            "--module-root",
+            root_text,
+            "app/main",
+        ],
+        vec![
+            "--stats",
+            "--fingerprint",
+            "--module-root",
+            root_text,
+            "app/main",
+        ],
+    ] {
+        let conflict = Command::new(bin("qcoffee")).args(args).output().unwrap();
+        assert_eq!(conflict.status.code(), Some(2));
+    }
+    let missing_input = Command::new(bin("qcoffee"))
+        .arg("--fingerprint")
+        .output()
+        .unwrap();
+    assert_eq!(missing_input.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&missing_input.stderr)
+            .contains("requires a file or --module-root ROOT ENTRY")
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn qcoffee_modules_require_an_explicit_restricted_root() {
     let root = std::env::temp_dir().join(format!("qcoffee-cli-modules-{}", std::process::id()));
     let app = root.join("app");

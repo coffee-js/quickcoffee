@@ -18,6 +18,8 @@
 
 अन्तःस्थ-module नामयुक्त import/export प्रयुङ्क्ते; `Engine::compile_module` तथा `Context::run_module` host-`ModuleLoader` द्वारा एव source गृह्णीतः, module-global गोप्यं fuel च सर्व-graph मध्ये संयुक्तम्।
 
+`Engine::fingerprint_module_graph` तेनैव loader द्वारा सम्पूर्णं स्थिर-graph पठित्वा सत्यापयति, न चालयति; version-युक्ता u64-कुञ्जी dependency-source, canonical-name, import/export तथा edge-परिवर्तनं ज्ञापयति।
+
 `qcoffee --check FILE` स्रोतं verify करोति, न चालयति।
 
 `qcoffee --interactive` (वा `-i`) एकं Context पङ्क्ति-क्रमेण धारयति; `:help` दर्शयति, `:quit` निर्गच्छति।
@@ -51,6 +53,8 @@ host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्श�
 `Program::fingerprint` होस्ट-सञ्चयाय नियतं u64 बीजं ददाति, निष्पादनं न परिवर्तयति।
 
 `qcoffee --fingerprint FILE` सत्यापित-bytecode-कुञ्जीं षोडश लघु-षोडशाधारीय-अङ्कैः दर्शयति, लेखं न चालयति।
+
+`qcoffee --fingerprint --module-root ROOT ENTRY` स्पष्टं restricted-root प्रयुज्य पृथक् v1 module-graph-कुञ्जीं तेनैव रूपेण दर्शयति, कमपि module न चालयति।
 
 `qbench --json` प्रत्येक-सुरक्षित-भारस्य एकं काल-मापन-फलम् लिखति; `--iterations` नमूना-सङ्ख्यां नियच्छति।
 

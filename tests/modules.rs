@@ -1,6 +1,6 @@
 use quickcoffee::{
-    Context, Engine, ErrorKind, MemoryModuleLoader, ModuleLoader, ResourceLimit, ResourceLimits,
-    RestrictedFileModuleLoader, Value,
+    Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader,
+    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Value,
 };
 use std::{
     fs,
@@ -15,6 +15,209 @@ fn module_temp(name: &str) -> PathBuf {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+struct CanonicalModuleLoader {
+    canonical_name: &'static str,
+    source: &'static str,
+}
+
+impl ModuleLoader for CanonicalModuleLoader {
+    fn load(&self, _specifier: &str, _referrer: &str) -> Result<ModuleSource, quickcoffee::Error> {
+        Ok(ModuleSource::new(self.canonical_name, self.source))
+    }
+}
+
+#[test]
+fn module_graph_fingerprints_are_stable_versioned_and_dependency_sensitive() {
+    assert_eq!(MODULE_GRAPH_FINGERPRINT_VERSION, 1);
+    let engine = Engine::new();
+    let entry = engine
+        .compile_module(
+            "app/main",
+            "import { left } from 'left'\nimport { right } from 'right'\nexport total = left + right",
+        )
+        .unwrap();
+    let mut forward = MemoryModuleLoader::new();
+    forward.insert("left", "export left = 20");
+    forward.insert("right", "export right = 22");
+    let mut reverse = MemoryModuleLoader::new();
+    reverse.insert("right", "export right = 22");
+    reverse.insert("left", "export left = 20");
+
+    let fingerprint = engine.fingerprint_module_graph(&entry, &forward).unwrap();
+    assert_eq!(fingerprint, 0xff97_10b9_ddd9_a0d1);
+    assert_ne!(fingerprint, 0);
+    assert_eq!(
+        fingerprint,
+        engine.fingerprint_module_graph(&entry, &forward).unwrap()
+    );
+    assert_eq!(
+        fingerprint,
+        engine.fingerprint_module_graph(&entry, &reverse).unwrap()
+    );
+
+    let mut changed_source = forward.clone();
+    changed_source.insert(
+        "right",
+        "# source-only cache invalidation\nexport right = 22",
+    );
+    let original_dependency = engine.compile_module("right", "export right = 22").unwrap();
+    let changed_dependency = engine
+        .compile_module(
+            "right",
+            "# source-only cache invalidation\nexport right = 22",
+        )
+        .unwrap();
+    assert_eq!(
+        original_dependency.fingerprint(),
+        changed_dependency.fingerprint()
+    );
+    assert_ne!(
+        fingerprint,
+        engine
+            .fingerprint_module_graph(&entry, &changed_source)
+            .unwrap()
+    );
+
+    let renamed_entry = engine
+        .compile_module(
+            "app/renamed",
+            "import { left } from 'left'\nimport { right } from 'right'\nexport total = left + right",
+        )
+        .unwrap();
+    assert_ne!(
+        fingerprint,
+        engine
+            .fingerprint_module_graph(&renamed_entry, &forward)
+            .unwrap()
+    );
+
+    let changed_import = engine
+        .compile_module(
+            "app/main",
+            "import { left as first } from 'left'\nimport { right } from 'right'\nexport total = first + right",
+        )
+        .unwrap();
+    assert_ne!(
+        fingerprint,
+        engine
+            .fingerprint_module_graph(&changed_import, &forward)
+            .unwrap()
+    );
+
+    let changed_export = engine
+        .compile_module(
+            "app/main",
+            "import { left } from 'left'\nimport { right } from 'right'\nexport result = left + right",
+        )
+        .unwrap();
+    assert_ne!(
+        fingerprint,
+        engine
+            .fingerprint_module_graph(&changed_export, &forward)
+            .unwrap()
+    );
+
+    let edge_entry = engine
+        .compile_module(
+            "entry",
+            "import { value } from 'alias'\nexport value = value",
+        )
+        .unwrap();
+    let first_edge = engine
+        .fingerprint_module_graph(
+            &edge_entry,
+            &CanonicalModuleLoader {
+                canonical_name: "canonical/first",
+                source: "export value = 42",
+            },
+        )
+        .unwrap();
+    let second_edge = engine
+        .fingerprint_module_graph(
+            &edge_entry,
+            &CanonicalModuleLoader {
+                canonical_name: "canonical/second",
+                source: "export value = 42",
+            },
+        )
+        .unwrap();
+    assert_ne!(first_edge, second_edge);
+}
+
+#[test]
+fn module_graph_fingerprints_reject_missing_cycles_and_inconsistent_canonical_sources() {
+    let engine = Engine::new();
+    let missing = engine
+        .compile_module(
+            "main",
+            "import { value } from 'missing'\nexport value = value",
+        )
+        .unwrap();
+    let error = engine
+        .fingerprint_module_graph(&missing, &MemoryModuleLoader::new())
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "module not found: missing");
+
+    let missing_export = engine
+        .compile_module(
+            "main",
+            "import { absent } from 'dependency'\nexport value = absent",
+        )
+        .unwrap();
+    let mut missing_export_loader = MemoryModuleLoader::new();
+    missing_export_loader.insert("dependency", "export present = 42");
+    let error = engine
+        .fingerprint_module_graph(&missing_export, &missing_export_loader)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "module dependency does not export absent");
+
+    let cycle = engine
+        .compile_module("a", "import { value } from 'b'\nexport value = value")
+        .unwrap();
+    let mut cycle_loader = MemoryModuleLoader::new();
+    cycle_loader.insert("a", "import { value } from 'b'\nexport value = value");
+    cycle_loader.insert("b", "import { value } from 'a'\nexport value = value");
+    let error = engine
+        .fingerprint_module_graph(&cycle, &cycle_loader)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "circular module dependency: a -> b -> a");
+
+    struct InconsistentLoader;
+    impl ModuleLoader for InconsistentLoader {
+        fn load(
+            &self,
+            specifier: &str,
+            _referrer: &str,
+        ) -> Result<ModuleSource, quickcoffee::Error> {
+            Ok(ModuleSource::new(
+                "canonical/shared",
+                if specifier == "first" {
+                    "export value = 1"
+                } else {
+                    "export value = 2"
+                },
+            ))
+        }
+    }
+    let inconsistent = engine
+        .compile_module(
+            "main",
+            "import { value as first } from 'first'\nimport { value as second } from 'second'\nexport total = first + second",
+        )
+        .unwrap();
+    let error = engine
+        .fingerprint_module_graph(&inconsistent, &InconsistentLoader)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(
+        error.message(),
+        "module canonical name resolved to inconsistent source: canonical/shared"
+    );
 }
 
 #[test]
@@ -502,6 +705,43 @@ fn restricted_file_loader_resolves_nested_relative_modules() {
 }
 
 #[test]
+fn restricted_file_module_graph_fingerprints_track_canonical_sources() {
+    let root = module_temp("fingerprint");
+    fs::create_dir_all(root.join("app/lib")).unwrap();
+    fs::write(
+        root.join("app/main.coffee"),
+        "import { value } from './lib/../lib/value.litcoffee'\nexport result = value",
+    )
+    .unwrap();
+    fs::write(
+        root.join("app/lib/value.litcoffee"),
+        "# Dependency documentation\n\n    export value = 42\n",
+    )
+    .unwrap();
+
+    let engine = Engine::new();
+    let loader = RestrictedFileModuleLoader::new(&root).unwrap();
+    let source = loader.load_entry("app/main").unwrap();
+    let entry = engine
+        .compile_module(source.name(), source.source())
+        .unwrap();
+    let first = engine.fingerprint_module_graph(&entry, &loader).unwrap();
+    assert_eq!(
+        first,
+        engine.fingerprint_module_graph(&entry, &loader).unwrap()
+    );
+
+    fs::write(
+        root.join("app/lib/value.litcoffee"),
+        "# Changed dependency documentation\n\n    export value = 42\n",
+    )
+    .unwrap();
+    let changed = engine.fingerprint_module_graph(&entry, &loader).unwrap();
+    assert_ne!(first, changed);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn restricted_file_loader_executes_explicit_litcoffee_modules() {
     let root = module_temp("literate");
     fs::create_dir_all(root.join("app")).unwrap();
@@ -593,6 +833,18 @@ fn restricted_file_loader_canonicalizes_aliases_and_rejects_symlink_escape() {
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
     let alias = loader.load_entry("alias").unwrap();
     assert_eq!(alias.name(), "real/module.coffee");
+    let real = loader.load_entry("real/module").unwrap();
+    let engine = Engine::new();
+    let alias_module = engine.compile_module(alias.name(), alias.source()).unwrap();
+    let real_module = engine.compile_module(real.name(), real.source()).unwrap();
+    assert_eq!(
+        engine
+            .fingerprint_module_graph(&alias_module, &loader)
+            .unwrap(),
+        engine
+            .fingerprint_module_graph(&real_module, &loader)
+            .unwrap()
+    );
     let error = loader.load_entry("escape").unwrap_err();
     assert_eq!(
         error.message(),

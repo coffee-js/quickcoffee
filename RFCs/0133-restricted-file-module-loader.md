@@ -15,7 +15,7 @@ RFC 0119 把模块源码解析权完全留给宿主，并刻意没有提供文�
 3. 依赖 specifier 必须显式以 `./` 或 `../` 开头，并相对 referrer 的规范根目录相对名称解析。bare/package 名、绝对路径、平台专用分隔符、其他扩展名、空段以及词法上越过根目录的 `..` 均返回结构化 runtime error。
 4. 所有规范化和打开操作都相对同一个已打开的 capability directory 执行。规范目标必须仍位于该能力内、是 `.coffee` 或 `.litcoffee` 普通文件且内容为 UTF-8；打开后的同一文件 handle 用于 metadata 验证和读取，因此并发替换路径或符号链接不能把读取重定向到根目录外。根目录内的符号链接别名使用真实目标的根目录相对 `/` 分隔名称作为 `ModuleSource::name`，且规范名称组件也拒绝反斜杠和冒号，使缓存、循环识别与跨平台 referrer 解析使用同一合法身份。
 5. 缺失文件、无效 entry/specifier/referrer、根目录越界、无效目标、读取失败和非 UTF-8 源码使用稳定且可区分的 `ErrorKind::Runtime` 分类。编译诊断继续使用 loader 返回的规范名称；fuel、取消、执行统计、bytecode、指纹和导出语义不变。
-6. 本 RFC 只提供显式宿主 loader 与以后 CLI 可复用的解析策略。`qcoffee` 单文件模式仍拒绝模块指令；CLI 激活、初始化循环策略、模块图指纹、预编译包和 qtest 包用例继续由 issue #75 的后续切片定义。
+6. 本 RFC 只提供显式宿主 loader 与 CLI 可复用的解析策略。`qcoffee` 单文件模式仍拒绝模块指令；RFC 0141 已交付显式根目录的 CLI 执行，RFC 0151 已交付非执行模块图指纹。预编译包、manifest 和 qtest 包用例继续由 issue #75 的后续切片定义。
 
 ## 验收
 
