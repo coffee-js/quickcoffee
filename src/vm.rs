@@ -2860,6 +2860,226 @@ impl RetainedMemoryCensus {
     }
 }
 
+struct RetainedMemoryTransaction {
+    environments: Vec<(Env, EnvironmentSnapshot)>,
+    classes: Vec<(Rc<Class>, BTreeMap<String, Value>)>,
+    instances: Vec<(Rc<Instance>, BTreeMap<String, Value>)>,
+    arrays: BTreeSet<usize>,
+    maps: BTreeSet<usize>,
+    errors: BTreeSet<usize>,
+    classes_seen: BTreeSet<usize>,
+    instances_seen: BTreeSet<usize>,
+    functions: BTreeSet<usize>,
+    environments_seen: BTreeSet<usize>,
+}
+impl RetainedMemoryTransaction {
+    fn capture(root: &Env) -> Self {
+        let mut transaction = Self {
+            environments: vec![],
+            classes: vec![],
+            instances: vec![],
+            arrays: BTreeSet::new(),
+            maps: BTreeSet::new(),
+            errors: BTreeSet::new(),
+            classes_seen: BTreeSet::new(),
+            instances_seen: BTreeSet::new(),
+            functions: BTreeSet::new(),
+            environments_seen: BTreeSet::new(),
+        };
+        transaction.environment(root);
+        transaction
+    }
+
+    fn first<T: ?Sized>(seen: &mut BTreeSet<usize>, value: &Rc<T>) -> bool {
+        seen.insert(RetainedMemoryCensus::rc_key(value))
+    }
+
+    fn value(&mut self, value: &Value) {
+        match value {
+            Value::Array(values) if Self::first(&mut self.arrays, values) => {
+                for value in values.iter() {
+                    self.value(value);
+                }
+            }
+            Value::Map(values) if Self::first(&mut self.maps, values) => {
+                for value in values.values() {
+                    self.value(value);
+                }
+            }
+            Value::Error(error) => self.error(error),
+            Value::Class(class) => self.class(class),
+            Value::Instance(instance) => self.instance(instance),
+            Value::Function(function) => self.function(function),
+            Value::Integer(_)
+            | Value::Decimal(_)
+            | Value::String(_)
+            | Value::Array(_)
+            | Value::Map(_)
+            | Value::Nil
+            | Value::Bool(_)
+            | Value::Number(_) => {}
+        }
+    }
+
+    fn error(&mut self, error: &Rc<ScriptError>) {
+        if !Self::first(&mut self.errors, error) {
+            return;
+        }
+        self.value(&error.data);
+        if let Some(cause) = &error.cause {
+            self.error(cause);
+        }
+    }
+
+    fn class(&mut self, class: &Rc<Class>) {
+        if !Self::first(&mut self.classes_seen, class) {
+            return;
+        }
+        let fields = class.static_fields.borrow();
+        let snapshot = fields.clone();
+        let values = fields.values().cloned().collect::<Vec<_>>();
+        drop(fields);
+        self.classes.push((class.clone(), snapshot));
+        if let Some(superclass) = &class.superclass {
+            self.class(superclass);
+        }
+        if let Some(constructor) = &class.constructor {
+            self.function(constructor);
+        }
+        for method in class
+            .instance_methods
+            .values()
+            .chain(class.static_methods.values())
+        {
+            self.function(method);
+        }
+        for value in values {
+            self.value(&value);
+        }
+    }
+
+    fn instance(&mut self, instance: &Rc<Instance>) {
+        if !Self::first(&mut self.instances_seen, instance) {
+            return;
+        }
+        let fields = instance.fields.borrow();
+        let snapshot = fields.clone();
+        let values = fields.values().cloned().collect::<Vec<_>>();
+        drop(fields);
+        self.instances.push((instance.clone(), snapshot));
+        self.class(&instance.class);
+        for value in values {
+            self.value(&value);
+        }
+    }
+
+    fn function(&mut self, function: &Rc<Function>) {
+        if !Self::first(&mut self.functions, function) {
+            return;
+        }
+        match &function.inner {
+            FunctionKind::Bytecode { env, .. } => self.environment(env),
+            FunctionKind::BoundMethod {
+                function,
+                receiver,
+                context,
+            } => {
+                self.function(function);
+                self.value(receiver);
+                self.class(&context.owner);
+            }
+            FunctionKind::ReceiverBound {
+                function,
+                captured_receiver,
+            } => {
+                self.function(function);
+                if let Some(receiver) = captured_receiver {
+                    self.value(receiver);
+                }
+            }
+            FunctionKind::Native { .. }
+            | FunctionKind::ResourceBuiltin { .. }
+            | FunctionKind::UnboundMethod { .. } => {}
+        }
+    }
+
+    fn environment(&mut self, environment: &Env) {
+        if BUILTIN_ENVIRONMENT.with(|builtins| Rc::ptr_eq(environment, builtins))
+            || !Self::first(&mut self.environments_seen, environment)
+        {
+            return;
+        }
+        let environment_ref = environment.borrow();
+        let snapshot = environment_ref.snapshot();
+        let values = environment_ref
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(slot, _)| {
+                environment_ref
+                    .initialized
+                    .get(*slot)
+                    .copied()
+                    .unwrap_or(true)
+            })
+            .map(|(_, (_, value))| value.clone())
+            .collect::<Vec<_>>();
+        let parent = environment_ref.parent.clone();
+        drop(environment_ref);
+        self.environments.push((environment.clone(), snapshot));
+        for value in values {
+            self.value(&value);
+        }
+        if let Some(parent) = parent {
+            self.environment(&parent);
+        }
+    }
+
+    fn restore(self) {
+        for (environment, snapshot) in self.environments {
+            environment.borrow_mut().restore(snapshot);
+        }
+        for (class, snapshot) in self.classes {
+            *class.static_fields.borrow_mut() = snapshot;
+        }
+        for (instance, snapshot) in self.instances {
+            *instance.fields.borrow_mut() = snapshot;
+        }
+    }
+}
+
+fn retained_memory_limits_active(limits: ResourceLimits) -> bool {
+    limits.max_retained_managed_objects() < u64::MAX
+        || limits.max_retained_managed_bytes() < u64::MAX
+}
+
+fn check_retained_memory_limits(
+    memory: RetainedMemory,
+    limits: ResourceLimits,
+) -> Result<(), Error> {
+    if memory.objects > limits.max_retained_managed_objects() {
+        return Err(Error::resource(
+            ResourceLimit::RetainedManagedObjects,
+            format!(
+                "context retains {} managed objects, exceeding {}",
+                memory.objects,
+                limits.max_retained_managed_objects()
+            ),
+        ));
+    }
+    if memory.bytes > limits.max_retained_managed_bytes() {
+        return Err(Error::resource(
+            ResourceLimit::RetainedManagedBytes,
+            format!(
+                "context retains {} managed bytes, exceeding {}",
+                memory.bytes,
+                limits.max_retained_managed_bytes()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn deep_managed_allocation(value: &Value) -> ManagedAllocation {
     let mut allocation = shallow_managed_allocation(value);
     match value {
@@ -3436,6 +3656,12 @@ impl Context {
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
         program.ensure_verified()?;
+        let retained_transaction = if retained_memory_limits_active(self.resource_limits) {
+            check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
+            Some(RetainedMemoryTransaction::capture(&self.global))
+        } else {
+            None
+        };
         let mut vm = Vm {
             fuel: self.fuel,
             instructions: 0,
@@ -3460,6 +3686,14 @@ impl Context {
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
+        if let Some(transaction) = retained_transaction {
+            if let Err(error) =
+                check_retained_memory_limits(self.retained_memory(), self.resource_limits)
+            {
+                transaction.restore();
+                return Err(error);
+            }
+        }
         result
     }
     pub(crate) fn module_child(&self) -> Self {

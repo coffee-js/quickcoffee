@@ -62,6 +62,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. Context 创建时把空 writable global 作为第一个样本。设置 global、执行、模块运行、错误和 VM 指令都不会隐式普查；嵌入方应在业务边界（例如顶层执行返回后）自行采样，避免把 O(graph) 工作放入调度热路径。
 3. 此记录仍不是 RSS、allocator/capacity、逐指令 live peak 或 hard limit。未来内存失败策略必须另行定义执行期间的检查、失败原子性和 host-visible state，不能把稀疏样本当作强制边界。
 
+## 2026-08-27：事务性 retained-state 提交限制
+
+1. RFC 0149 增加 `max_retained_managed_objects` 与 `max_retained_managed_bytes`；默认 `u64::MAX` 禁用，超限原因分别是 `RetainedManagedObjects` 与 `RetainedManagedBytes`。它们以 RFC 0147 Context-rooted logical 单位判断，不是 RSS 或 allocator 容量。
+2. 启用后，执行前先检查既有 Context；执行后再检查将提交的 retained 图。后者超限会恢复可达 Environment、Class static fields 与 Instance fields，并返回不可捕获 Resource error；数组由事务快照持有 Rc 而使用既有 copy-on-write，Map 本身不可变。
+3. 限额只约束顶层执行结束时 Context 将保留的状态，不限制同一轮中已丢弃的临时分配，也不承诺逐指令 live peak。模块子 Context 继承该策略；宿主 `set_global` 保持无失败 API，随后执行的 preflight 才会报告其预先存入的超限状态。
+
 ## 验收
 
 `tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。

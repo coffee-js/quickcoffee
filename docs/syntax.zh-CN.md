@@ -18,6 +18,8 @@
 
 需要可重复观测高水位的嵌入方，应在选定的业务边界显式调用 `Context::sample_retained_memory()`，再用 `Context::retained_memory_high_water()` 读取 Context 生命周期内各字段的最大已采样值。普查不会在每条 VM 指令或每次执行后自动运行，因此它不是完整的 live-memory 峰值，也不是硬限制。
 
+`ResourceLimits::with_max_retained_managed_objects` 与 `with_max_retained_managed_bytes` 可设置 Context root 的 retained-state 执行提交上限。已超限的 Context 会在字节码执行前被拒绝；本轮执行若会留下超限状态，则产生不可捕获资源错误，并恢复此前的 global、closure、class 静态字段和 instance 字段。它们不限制运行中临时分配、RSS 或完整 live-memory 峰值。
+
 `qbench --compare-qjs PATH --compare-iterations 1 --repeat 11 --json` 输出独立的 `quickcoffee.qcompare.v1` 同机对比；PATH 完全由调用者提供，记录覆盖标量循环、函数调用、数组构造/索引/遍历、映射读取/不可变更新和 Unicode 标量遍历/索引，并分别包含启动、编译、预编译热执行与端到端 CLI 总耗时，不能与进程内 `qbench.v1` 混比。JavaScript 的字符串下标是 UTF-16 code unit；Unicode 索引负载以 `Array.from` 预解码标量来匹配 QuickCoffee 的结果语义，此适配不表示底层操作同构。
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。

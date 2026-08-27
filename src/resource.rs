@@ -33,6 +33,10 @@ pub enum ResourceLimit {
     ArrayItems,
     /// A general QuickCoffee map exceeded its configured entry boundary.
     MapEntries,
+    /// A Context would retain more logical managed objects than permitted.
+    RetainedManagedObjects,
+    /// A Context would retain more logical managed payload bytes than permitted.
+    RetainedManagedBytes,
 }
 
 /// Deterministic data-size boundaries applied by an execution [`crate::Context`].
@@ -56,6 +60,8 @@ pub struct ResourceLimits {
     max_string_bytes: usize,
     max_array_items: usize,
     max_map_entries: usize,
+    max_retained_managed_objects: u64,
+    max_retained_managed_bytes: u64,
 }
 
 impl Default for ResourceLimits {
@@ -74,6 +80,8 @@ impl Default for ResourceLimits {
             max_string_bytes: 1_000_000,
             max_array_items: 100_000,
             max_map_entries: 100_000,
+            max_retained_managed_objects: u64::MAX,
+            max_retained_managed_bytes: u64::MAX,
         }
     }
 }
@@ -228,6 +236,32 @@ impl ResourceLimits {
     /// Returns a policy with the maximum general map entry count replaced.
     pub fn with_max_map_entries(mut self, limit: usize) -> Self {
         self.max_map_entries = limit;
+        self
+    }
+
+    /// Returns the maximum managed objects a Context may retain at execution commit.
+    ///
+    /// The default `u64::MAX` disables this optional retained-state guard.
+    pub fn max_retained_managed_objects(&self) -> u64 {
+        self.max_retained_managed_objects
+    }
+
+    /// Returns a policy with the retained managed-object commit boundary replaced.
+    pub fn with_max_retained_managed_objects(mut self, limit: u64) -> Self {
+        self.max_retained_managed_objects = limit;
+        self
+    }
+
+    /// Returns the maximum logical managed payload bytes a Context may retain at execution commit.
+    ///
+    /// The default `u64::MAX` disables this optional retained-state guard.
+    pub fn max_retained_managed_bytes(&self) -> u64 {
+        self.max_retained_managed_bytes
+    }
+
+    /// Returns a policy with the retained managed-byte commit boundary replaced.
+    pub fn with_max_retained_managed_bytes(mut self, limit: u64) -> Self {
+        self.max_retained_managed_bytes = limit;
         self
     }
 }
