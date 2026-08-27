@@ -1968,9 +1968,6 @@ enum FunctionKind {
         function: NativeFunction,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
-    ContextualNative {
-        function: ContextualNativeFunction,
-    },
     ResourceBuiltin {
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
@@ -1989,6 +1986,11 @@ enum FunctionKind {
     ReceiverBound {
         function: Rc<Function>,
         captured_receiver: Option<Value>,
+    },
+    // Append opt-in embedding variants so existing callable discriminants and
+    // their ordinary dispatch paths remain stable.
+    ContextualNative {
+        function: ContextualNativeFunction,
     },
 }
 #[derive(Clone)]
@@ -6852,32 +6854,6 @@ fn call_with_context(
                     .stack
                     .push(value);
             }
-            FunctionKind::ContextualNative { function } => {
-                let mut context = NativeCallContext {
-                    cancellation: vm.cancellation.clone(),
-                    resource_limits: vm.resource_limits,
-                    host_state: vm.host_state.clone(),
-                    fuel_remaining: vm.fuel,
-                    managed_objects_allocated: 0,
-                    managed_bytes_allocated: 0,
-                };
-                let result = function(&mut context, args);
-                vm.fuel = context.fuel_remaining;
-                vm.record_managed_allocation(ManagedAllocation {
-                    legacy_value_allocations: 0,
-                    objects: context.managed_objects_allocated,
-                    bytes: context.managed_bytes_allocated,
-                });
-                let value = result?;
-                if vm.value_limits_active && value_needs_resource_check(&value) {
-                    check_value_resources(&value, vm.resource_limits)?;
-                }
-                frames
-                    .last_mut()
-                    .expect("call has a caller frame")
-                    .stack
-                    .push(value);
-            }
             FunctionKind::ResourceBuiltin {
                 function,
                 allocation_profile,
@@ -7058,6 +7034,32 @@ fn call_with_context(
                         method_context,
                     )?;
                 }
+            }
+            FunctionKind::ContextualNative { function } => {
+                let mut context = NativeCallContext {
+                    cancellation: vm.cancellation.clone(),
+                    resource_limits: vm.resource_limits,
+                    host_state: vm.host_state.clone(),
+                    fuel_remaining: vm.fuel,
+                    managed_objects_allocated: 0,
+                    managed_bytes_allocated: 0,
+                };
+                let result = function(&mut context, args);
+                vm.fuel = context.fuel_remaining;
+                vm.record_managed_allocation(ManagedAllocation {
+                    legacy_value_allocations: 0,
+                    objects: context.managed_objects_allocated,
+                    bytes: context.managed_bytes_allocated,
+                });
+                let value = result?;
+                if vm.value_limits_active && value_needs_resource_check(&value) {
+                    check_value_resources(&value, vm.resource_limits)?;
+                }
+                frames
+                    .last_mut()
+                    .expect("call has a caller frame")
+                    .stack
+                    .push(value);
             }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
