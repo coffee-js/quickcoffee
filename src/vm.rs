@@ -4054,9 +4054,6 @@ fn check_transient_managed_allocation_limits(
     bytes: u64,
     limits: &ResourceLimits,
 ) -> Result<(), Error> {
-    if !transient_managed_allocation_limits_active(limits) {
-        return Ok(());
-    }
     if objects > limits.max_transient_managed_objects() {
         return Err(transient_managed_objects_limit_error(
             objects,
@@ -4900,6 +4897,7 @@ impl Context {
             managed_bytes_allocated: 0,
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
+            transient_limits_active,
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
@@ -5575,6 +5573,9 @@ struct Vm {
     managed_bytes_allocated: u64,
     initial_debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
+    // Keep the common disabled path to one tail-field read. In particular,
+    // class construction records several managed allocations per instance.
+    transient_limits_active: bool,
 }
 enum Step {
     Continue,
@@ -5624,6 +5625,9 @@ impl Vm {
         self.managed_bytes_allocated = self
             .managed_bytes_allocated
             .saturating_add(allocation.bytes);
+        if !self.transient_limits_active {
+            return Ok(());
+        }
         check_transient_managed_allocation_limits(
             self.managed_objects_allocated,
             self.managed_bytes_allocated,
@@ -5648,6 +5652,9 @@ impl Vm {
     fn record_environment_allocation(&mut self) -> Result<(), Error> {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
+        if !self.transient_limits_active {
+            return Ok(());
+        }
         check_transient_managed_allocation_limits(
             self.managed_objects_allocated,
             self.managed_bytes_allocated,
@@ -6044,6 +6051,7 @@ impl Vm {
             managed_bytes_allocated: self.managed_bytes_allocated,
             initial_debug_info: debug_info,
             execution_plan,
+            transient_limits_active: self.transient_limits_active,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
