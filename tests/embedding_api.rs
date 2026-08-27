@@ -1,6 +1,7 @@
 use quickcoffee::{
     CancellationToken, Context, Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, Integer,
-    IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, TryFromValue, Value, ValueKind,
+    IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, Runtime, TryFromValue, Value,
+    ValueKind,
 };
 use std::collections::BTreeMap;
 
@@ -32,6 +33,158 @@ fn public_embedding_surface_runs_shared_programs_with_host_state() {
     assert_eq!(context.run_program(&clone).unwrap().as_number(), Some(84.));
     assert_eq!(context.get_global("factor").unwrap().as_number(), Some(2.));
     assert!(context.get_global("missing").is_none());
+}
+
+#[test]
+fn runtime_context_builders_share_compilation_but_isolate_execution_state() {
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let limits = ResourceLimits::default().with_max_string_bytes(128);
+    let runtime = Runtime::builder()
+        .program_cache_entries(4)
+        .module_cache_entries(0)
+        .build();
+    let mut first = runtime
+        .context_builder()
+        .fuel(20)
+        .max_call_depth(7)
+        .resource_limits(limits)
+        .cancellation_token(cancelled)
+        .global("factor", Value::from(2_f64))
+        .native("host", |_| Ok(Value::from(20_f64)))
+        .build();
+    let mut second = runtime
+        .context_builder()
+        .fuel(40)
+        .global("factor", Value::from(3_f64))
+        .native("host", |_| Ok(Value::from(14_f64)))
+        .build();
+
+    let error = first
+        .eval_named("shared.coffee", "host() * factor")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Cancellation));
+    assert_eq!(first.fuel(), 20);
+    assert_eq!(second.fuel(), 40);
+    assert_eq!(first.max_call_depth(), 7);
+    assert_eq!(second.max_call_depth(), 1_024);
+    assert_eq!(first.resource_limits().max_string_bytes(), 128);
+    assert_ne!(second.resource_limits().max_string_bytes(), 128);
+    assert_eq!(
+        second
+            .eval_named("shared.coffee", "host() * factor")
+            .unwrap()
+            .as_number(),
+        Some(42.)
+    );
+    second.eval("private = 'second'").unwrap();
+    assert!(first.get_global("private").is_none());
+    assert_eq!(first.get_global("factor").unwrap().as_number(), Some(2.));
+    assert_eq!(second.get_global("factor").unwrap().as_number(), Some(3.));
+    assert_eq!(first.last_execution().instructions, 0);
+    assert!(second.last_execution().instructions > 0);
+    assert_eq!(first.retained_memory().objects, 2);
+    assert!(second.retained_memory().objects > first.retained_memory().objects);
+
+    let stats = runtime.cache_stats();
+    assert_eq!(stats.program_entries, 2);
+    assert_eq!(stats.program_hits, 1);
+    assert_eq!(stats.program_misses, 2);
+    assert_eq!(stats.module_entries, 0);
+}
+
+#[test]
+fn runtime_program_cache_is_exact_bounded_clearable_and_ignores_failures() {
+    let runtime = Runtime::builder()
+        .program_cache_entries(1)
+        .module_cache_entries(0)
+        .build();
+    runtime
+        .compile_program_named("one.coffee", "40 + 2")
+        .unwrap();
+    runtime
+        .compile_program_named("one.coffee", "40 + 2")
+        .unwrap();
+    runtime
+        .compile_program_named("one.coffee", "41 + 1")
+        .unwrap();
+    assert!(runtime.compile_program_named("bad.coffee", "if").is_err());
+    runtime
+        .compile_program_named("two.coffee", "41 + 1")
+        .unwrap();
+    let before_clear = runtime.cache_stats();
+    assert_eq!(before_clear.program_entries, 1);
+    assert_eq!(before_clear.program_hits, 1);
+    assert_eq!(before_clear.program_misses, 4);
+    assert_eq!(before_clear.program_evictions, 2);
+
+    runtime.clear_compile_caches();
+    assert_eq!(runtime.cache_stats().program_entries, 0);
+    runtime
+        .compile_program_named("one.coffee", "41 + 1")
+        .unwrap();
+    let after_clear = runtime.cache_stats();
+    assert_eq!(after_clear.program_misses, 5);
+    assert_eq!(after_clear.program_entries, 1);
+
+    let lru = Runtime::builder()
+        .program_cache_entries(2)
+        .module_cache_entries(0)
+        .build();
+    lru.compile_program_named("a.coffee", "40 + 2").unwrap();
+    lru.compile_program_named("b.coffee", "40 + 2").unwrap();
+    lru.compile_program_named("a.coffee", "40 + 2").unwrap();
+    lru.compile_program_named("c.coffee", "40 + 2").unwrap();
+    lru.compile_program_named("a.coffee", "40 + 2").unwrap();
+    assert_eq!(lru.cache_stats().program_hits, 2);
+    assert_eq!(lru.cache_stats().program_misses, 3);
+    assert_eq!(lru.cache_stats().program_evictions, 1);
+
+    let disabled = Runtime::builder()
+        .program_cache_entries(0)
+        .module_cache_entries(0)
+        .build();
+    disabled.compile_program("42").unwrap();
+    disabled.compile_program("42").unwrap();
+    assert_eq!(disabled.cache_stats().program_entries, 0);
+    assert_eq!(disabled.cache_stats().program_hits, 0);
+    assert_eq!(disabled.cache_stats().program_misses, 2);
+}
+
+#[test]
+fn context_builder_applies_mixed_bindings_in_declaration_order() {
+    let mut direct = Context::new();
+    direct.add_native("configured", |_| Ok(Value::from(1_f64)));
+    direct.set_global("configured", Value::from(2_f64));
+    assert_eq!(
+        direct.get_global("configured").unwrap().as_number(),
+        Some(2.)
+    );
+
+    let runtime = Runtime::new();
+    let mut global_wins = runtime
+        .context_builder()
+        .native("configured", |_| Ok(Value::from(1_f64)))
+        .global("configured", Value::from(2_f64))
+        .build();
+    assert_eq!(
+        global_wins.get_global("configured").unwrap().as_number(),
+        Some(2.)
+    );
+    assert_eq!(
+        global_wins.eval("configured").unwrap().as_number(),
+        Some(2.)
+    );
+
+    let mut native_wins = runtime
+        .context_builder()
+        .global("configured", Value::from(2_f64))
+        .native("configured", |_| Ok(Value::from(3_f64)))
+        .build();
+    assert_eq!(
+        native_wins.eval("configured()").unwrap().as_number(),
+        Some(3.)
+    );
 }
 
 #[test]

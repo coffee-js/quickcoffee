@@ -75,7 +75,7 @@ QuickCoffee 已提供：
 - 函数、默认参数、rest 参数、闭包、`try` / `catch` / `finally`、`throw`、`return`、循环与 `switch`。
 - JSON 编解码、稳定标量排序、`trim` / `contains` / `starts_with` / `replace_all` 等确定性标准库函数；JSON 保留 Integer/Decimal 精度。
 - 受限 class：`constructor`、实例/静态方法、`new`、私有继承链、静态解析的 `super`，以及只在合法 class 成员内可用的 `this`、`@` 和 `=>`。
-- 编译检查、结构化诊断、字节码反汇编/指纹，以及可复用的 `Program` 嵌入 API。
+- 编译检查、结构化诊断、字节码反汇编/指纹，以及带隔离 Context 和有界共享编译缓存的 `Runtime` 嵌入 API。
 
 请把这些差异当作语言设计，而不是待补的 JavaScript 兼容性：没有隐式类型转换、`undefined`、公开 `prototype` / `__proto__`、任意函数构造、自由 `this` 或 `eval`。class 外使用 `this`、`super` 或 receiver-bound `=>` 是编译错误。
 
@@ -100,21 +100,24 @@ QuickCoffee 已提供：
 
 ## 嵌入 Rust 应用
 
-最小嵌入只需创建一个 `Context` 并执行源码：
+最小嵌入可以直接创建一个 `Context`；需要让多个隔离 Context 复用编译产物时，由一个 `Runtime` 统一创建：
 
 ```rust
-use quickcoffee::{Context, Error};
+use quickcoffee::{Error, Runtime};
 
 fn evaluate_rule() -> Result<(), Error> {
-    let value = Context::new()
-        .with_fuel(100_000)
+    let runtime = Runtime::new();
+    let value = runtime
+        .context_builder()
+        .fuel(100_000)
+        .build()
         .eval_named("rules/discount.coffee", "amount = 120; amount * 0.9")?;
     println!("{value}");
     Ok(())
 }
 ```
 
-生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
+生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要通过 `ContextBuilder` 提供 `CancellationToken`、global 与 native。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
 
 ## 当前状态与已知缺口
 
@@ -159,4 +162,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0151](RFCs/0151-deterministic-module-graph-fingerprints.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0152](RFCs/0152-runtime-context-builders.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。

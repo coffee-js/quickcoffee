@@ -1,10 +1,12 @@
 use quickcoffee::{
     Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader,
-    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Value,
+    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
+    cell::Cell,
     fs,
     path::PathBuf,
+    rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -26,6 +28,86 @@ impl ModuleLoader for CanonicalModuleLoader {
     fn load(&self, _specifier: &str, _referrer: &str) -> Result<ModuleSource, quickcoffee::Error> {
         Ok(ModuleSource::new(self.canonical_name, self.source))
     }
+}
+
+#[test]
+fn runtime_module_cache_shares_compilation_but_never_evaluation_results() {
+    let runtime = Runtime::builder()
+        .program_cache_entries(0)
+        .module_cache_entries(2)
+        .build();
+    let entry = runtime
+        .compile_module(
+            "main",
+            "import { value } from 'dependency'\nexport result = value",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export value = tick()");
+    let calls = Rc::new(Cell::new(0_u64));
+
+    let make_context = || {
+        let calls = calls.clone();
+        runtime
+            .context_builder()
+            .native("tick", move |_| {
+                let next = calls.get() + 1;
+                calls.set(next);
+                Ok(Value::from(next as f64))
+            })
+            .build()
+    };
+    let mut first = make_context();
+    let mut second = make_context();
+    assert_eq!(
+        first
+            .run_module(&entry, &loader)
+            .unwrap()
+            .get("result")
+            .and_then(Value::as_number),
+        Some(1.)
+    );
+    assert_eq!(
+        second
+            .run_module(&entry, &loader)
+            .unwrap()
+            .get("result")
+            .and_then(Value::as_number),
+        Some(2.)
+    );
+    assert_eq!(calls.get(), 2);
+
+    let shared = runtime.cache_stats();
+    assert_eq!(shared.module_entries, 2);
+    assert_eq!(shared.module_hits, 1);
+    assert_eq!(shared.module_misses, 2);
+
+    runtime
+        .compile_module("dependency", "export value = tick() + 0")
+        .unwrap();
+    assert!(
+        runtime
+            .compile_module("broken", "export value = if")
+            .is_err()
+    );
+    let invalidated = runtime.cache_stats();
+    assert_eq!(invalidated.module_entries, 2);
+    assert_eq!(invalidated.module_misses, 4);
+    assert_eq!(invalidated.module_evictions, 1);
+
+    let disabled = Runtime::builder()
+        .program_cache_entries(0)
+        .module_cache_entries(0)
+        .build();
+    disabled
+        .compile_module("answer", "export value = 42")
+        .unwrap();
+    disabled
+        .compile_module("answer", "export value = 42")
+        .unwrap();
+    assert_eq!(disabled.cache_stats().module_entries, 0);
+    assert_eq!(disabled.cache_stats().module_hits, 0);
+    assert_eq!(disabled.cache_stats().module_misses, 2);
 }
 
 #[test]

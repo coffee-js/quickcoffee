@@ -74,6 +74,8 @@ Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.r
 
 嵌入方可在运行之间调用 `Context::set_fuel`、set_max_call_depth、set_resource_limits 与 set_cancellation_token；`Context::fuel` 和 resource_limits 返回当前策略，且不清除全局值；with_resource_limits、with_global 与 with_native 可链式配置宿主。
 
+`Runtime::context_builder` 创建的隔离 Context 只共享有界且已验证的 Program/Module 编译缓存；globals、已求值 exports、fuel、取消、统计和 retained-memory 状态仍归各 Context。
+
 `cargo run --example embed` 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
 
 宿主可用 `Value::kind()` 分流类型，用 `Value::is_nil()` 判断 nil，无须检查内部容器。
