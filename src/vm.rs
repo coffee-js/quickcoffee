@@ -4048,7 +4048,8 @@ fn transient_managed_bytes_limit_error(actual: u64, limit: u64) -> Error {
     )
 }
 
-#[inline]
+#[cold]
+#[inline(never)]
 fn check_transient_managed_allocation_limits(
     objects: u64,
     bytes: u64,
@@ -5615,6 +5616,7 @@ impl Vm {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
 
+    #[inline(always)]
     fn record_managed_allocation(&mut self, allocation: ManagedAllocation) -> Result<(), Error> {
         self.value_allocations = self
             .value_allocations
@@ -5635,20 +5637,24 @@ impl Vm {
         )
     }
 
+    #[inline(always)]
     fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
         self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value))
     }
 
+    #[inline(always)]
     fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
         self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value))
     }
 
+    #[inline(always)]
     fn record_stack_managed_allocation(&mut self, frame: &Frame) -> Result<(), Error> {
         self.record_managed_allocation(shallow_managed_allocation(
             frame.stack.last().expect("managed numeric result"),
         ))
     }
 
+    #[inline(always)]
     fn record_environment_allocation(&mut self) -> Result<(), Error> {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
