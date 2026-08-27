@@ -45,7 +45,7 @@ jobs:
             --output release-notes.md
       - name: Test release tooling
         run: python3 scripts/test_release.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: quickcoffee-release-notes
           path: release-notes.md
@@ -99,7 +99,7 @@ jobs:
             --archive "${archive}" \
             --version "${{ needs.validate.outputs.version }}" \
             --target "${{ matrix.target }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: quickcoffee-${{ needs.validate.outputs.version }}-${{ matrix.target }}
           path: dist/*
@@ -112,12 +112,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: quickcoffee-${{ needs.validate.outputs.version }}-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: quickcoffee-release-notes
           path: dist
@@ -135,7 +135,7 @@ jobs:
             --target x86_64-unknown-linux-gnu \
             --target x86_64-apple-darwin \
             --target x86_64-pc-windows-msvc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: quickcoffee-${{ needs.validate.outputs.version }}-release
           path: |
@@ -154,7 +154,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: quickcoffee-${{ needs.validate.outputs.version }}-release
           path: dist

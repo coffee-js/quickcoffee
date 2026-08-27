@@ -179,7 +179,7 @@ jobs:
 
       - name: Upload raw runs and comparison
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: qbench-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/quickcoffee-performance

@@ -117,8 +117,14 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("cargo test --locked --release --target", workflow)
         self.assertIn("cargo package --locked", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
-        self.assertIn("actions/download-artifact@v4", workflow)
+        workflows = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((repository / ".github/workflows").glob("*.yml"))
+        )
+        self.assertIn("actions/upload-artifact@v5", workflow)
+        self.assertIn("actions/download-artifact@v5", workflow)
+        self.assertNotIn("actions/upload-artifact@v4", workflows)
+        self.assertNotIn("actions/download-artifact@v4", workflows)
 
 
 if __name__ == "__main__":
