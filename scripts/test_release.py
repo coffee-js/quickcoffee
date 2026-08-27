@@ -121,10 +121,12 @@ class ReleaseToolTests(unittest.TestCase):
             path.read_text(encoding="utf-8")
             for path in sorted((repository / ".github/workflows").glob("*.yml"))
         )
-        self.assertIn("actions/upload-artifact@v5", workflow)
-        self.assertIn("actions/download-artifact@v5", workflow)
-        self.assertNotIn("actions/upload-artifact@v4", workflows)
-        self.assertNotIn("actions/download-artifact@v4", workflows)
+        self.assertIn("actions/upload-artifact@v7", workflow)
+        self.assertIn("actions/download-artifact@v8", workflow)
+        for deprecated in ("@v4", "@v5", "@v6"):
+            self.assertNotIn(f"actions/upload-artifact{deprecated}", workflows)
+        for deprecated in ("@v4", "@v5", "@v6", "@v7"):
+            self.assertNotIn(f"actions/download-artifact{deprecated}", workflows)
 
 
 if __name__ == "__main__":
