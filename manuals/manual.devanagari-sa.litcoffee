@@ -68,6 +68,8 @@ host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्श�
 
 अन्तःस्थापकः चालनयोर्मध्ये `Context::set_fuel` आह्वयितुं शक्नोति; `Context::fuel` वर्तमान-सीमां दर्शयति, वैश्विक-मूल्यानि न नाशयति; with_global तथा with_native क्रमिक-संयोजनाय स्तः।
 
+`Runtime::context_builder` पृथक् Context निर्माति; केवलं सीमित-सत्यापित Program/Module compilation-cache साझा भवति, globals, exports, fuel, cancellation, statistics, retained-memory च प्रत्येक-Context-स्वामित्वे तिष्ठन्ति।
+
 `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
 
 Host `Value::kind()` द्वारा प्रकारं विभजति, `Value::is_nil()` द्वारा nil परीक्षते, आन्तरिक-container न पश्यति।

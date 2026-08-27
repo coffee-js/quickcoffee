@@ -1,6 +1,6 @@
 use crate::{
-    Context, Engine, Error, ExecutionStats, Program, Value, bytecode::FingerprintEncoder, lowering,
-    parser,
+    Context, Engine, Error, ExecutionStats, Program, Runtime, Value, bytecode::FingerprintEncoder,
+    lowering, parser,
 };
 use cap_std::{ambient_authority, fs::Dir};
 use std::{
@@ -389,6 +389,23 @@ impl Engine {
     }
 }
 
+impl Runtime {
+    /// Compiles one named module, reusing an exact verified cache entry.
+    ///
+    /// The complete canonical name and raw UTF-8 source form the cache
+    /// identity. Only compilation artifacts are shared; module exports and
+    /// evaluation state always belong to an individual Context run.
+    pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
+        let name = name.into();
+        if let Some(module) = self.cached_module(&name, source) {
+            return Ok(module);
+        }
+        let module = self.engine().compile_module(name, source)?;
+        self.cache_module(module.clone(), source);
+        Ok(module)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ModuleIdentity {
     source_fingerprint: u64,
@@ -583,7 +600,7 @@ fn execute_module(
     let mut context = host.module_child().with_fuel(*fuel);
     for (bindings, specifier) in &module.imports {
         let source = loader.load(specifier, &module.name)?;
-        let dependency = Engine::new().compile_module(source.name(), source.source())?;
+        let dependency = host.compile_module(source.name(), source.source())?;
         let exports = execute_module(host, &dependency, loader, cache, active, fuel, stats)?;
         for (public, local) in bindings {
             let Some(value) = exports.get(public) else {

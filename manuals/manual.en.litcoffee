@@ -68,6 +68,8 @@ Fingerprints use explicit canonical bytecode encoding, not Rust debug formatting
 
 Embedders may call `Context::set_fuel` or set_resource_limits between runs without clearing globals; with_resource_limits, with_global, and with_native provide chainable setup.
 
+`Runtime::context_builder` creates isolated contexts that share only bounded verified Program/Module compilation caches; globals, evaluated exports, fuel, cancellation, statistics, and retained-memory state remain context-owned.
+
 `cargo run --example embed` compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 
 A host can branch on `Value::kind()` and use `Value::is_nil()` without inspecting internal containers.

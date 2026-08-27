@@ -84,6 +84,8 @@
 
 嵌者可于两行之间呼 `Context::set_fuel`；`Context::fuel` 示每行之限，而全局不失；with_global、with_native 可相次而呼以置宿主。
 
+`Runtime::context_builder` 所成诸 Context 各守其全局、导出、燃料、止令、计数与留存之忆，惟共用有界且已验之 Program/Module 编译藏。
+
 `cargo run --example embed` 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 
 宿主可用 `Value::kind()` 别其类，`Value::is_nil()` 验 nil，不窥其内容器。
@@ -161,6 +163,7 @@ class BoundCounter
 
 bound_callback = new BoundCounter(40).callback()
 bound_callback()
+
 
 
 

@@ -3,6 +3,7 @@ use crate::{
     bytecode::{Chunk, Constant, Instruction, Pattern},
     compile, json,
     lowering::{self, ChunkSourceMap, CompiledSourceMap},
+    module::Module,
     parser,
 };
 use num_bigint::BigInt;
@@ -10,7 +11,7 @@ use num_integer::Integer as NumInteger;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
     rc::Rc,
     sync::{
@@ -1812,6 +1813,15 @@ impl CancellationToken {
 
 /// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
+
+fn native_value(function: NativeFunction) -> Value {
+    Value::Function(Rc::new(Function {
+        inner: FunctionKind::Native {
+            function,
+            allocation_profile: None,
+        },
+    }))
+}
 /// Opaque class metadata created only by verified QuickCoffee bytecode.
 pub struct Class {
     name: Rc<str>,
@@ -2052,6 +2062,121 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
 /// A reusable compiler that does not hold execution state.
 #[derive(Clone, Default)]
 pub struct Engine;
+
+const DEFAULT_PROGRAM_CACHE_ENTRIES: usize = 64;
+const DEFAULT_MODULE_CACHE_ENTRIES: usize = 64;
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct SourceCacheKey {
+    name: Option<String>,
+    source: String,
+}
+
+struct CompileCache<T> {
+    capacity: usize,
+    entries: BTreeMap<SourceCacheKey, T>,
+    order: VecDeque<SourceCacheKey>,
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+}
+impl<T: Clone> CompileCache<T> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            entries: BTreeMap::new(),
+            order: VecDeque::new(),
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+        }
+    }
+
+    fn get(&mut self, key: &SourceCacheKey) -> Option<T> {
+        let Some(value) = self.entries.get(key).cloned() else {
+            self.misses = self.misses.saturating_add(1);
+            return None;
+        };
+        self.hits = self.hits.saturating_add(1);
+        if let Some(index) = self.order.iter().position(|candidate| candidate == key) {
+            self.order.remove(index);
+        }
+        self.order.push_back(key.clone());
+        Some(value)
+    }
+
+    fn insert(&mut self, key: SourceCacheKey, value: T) {
+        if self.capacity == 0 {
+            return;
+        }
+        if self.entries.contains_key(&key) {
+            self.entries.insert(key.clone(), value);
+            if let Some(index) = self.order.iter().position(|candidate| candidate == &key) {
+                self.order.remove(index);
+            }
+            self.order.push_back(key);
+            return;
+        }
+        while self.entries.len() >= self.capacity {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if self.entries.remove(&oldest).is_some() {
+                self.evictions = self.evictions.saturating_add(1);
+            }
+        }
+        self.entries.insert(key.clone(), value);
+        self.order.push_back(key);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+}
+
+struct RuntimeInner {
+    engine: Engine,
+    programs: RefCell<CompileCache<Program>>,
+    modules: RefCell<CompileCache<Module>>,
+}
+
+/// A same-thread owner for shared immutable compilation artifacts.
+///
+/// Clones share bounded Program and Module compilation caches. Contexts made by
+/// one Runtime keep all mutable script state isolated: globals, module exports,
+/// fuel, cancellation, statistics, and retained-memory accounting are never
+/// stored in the Runtime. The current VM uses `Rc`, so Runtime is deliberately
+/// not `Send` or `Sync`.
+#[derive(Clone)]
+pub struct Runtime(Rc<RuntimeInner>);
+
+/// Configures a [`Runtime`] and its bounded compilation caches.
+pub struct RuntimeBuilder {
+    program_cache_entries: usize,
+    module_cache_entries: usize,
+}
+
+/// A read-only cumulative snapshot of one Runtime's compilation caches.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RuntimeCacheStats {
+    /// Programs currently retained by the Runtime cache.
+    pub program_entries: usize,
+    /// Successful Program cache lookups.
+    pub program_hits: u64,
+    /// Program cache lookups that required compilation.
+    pub program_misses: u64,
+    /// Programs removed by the configured capacity boundary.
+    pub program_evictions: u64,
+    /// Modules currently retained by the Runtime cache.
+    pub module_entries: usize,
+    /// Successful Module cache lookups.
+    pub module_hits: u64,
+    /// Module cache lookups that required compilation.
+    pub module_misses: u64,
+    /// Modules removed by the configured capacity boundary.
+    pub module_evictions: u64,
+}
 /// A reference-counted compiled program for repeated execution.
 ///
 /// The shared storage is private so embedding callers do not need to manage
@@ -2441,6 +2566,155 @@ impl Engine {
         Ok(())
     }
 }
+
+impl Default for RuntimeBuilder {
+    fn default() -> Self {
+        Self {
+            program_cache_entries: DEFAULT_PROGRAM_CACHE_ENTRIES,
+            module_cache_entries: DEFAULT_MODULE_CACHE_ENTRIES,
+        }
+    }
+}
+impl RuntimeBuilder {
+    /// Creates a builder with 64 Program and 64 Module cache entries.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the maximum number of shared Programs retained by the Runtime.
+    ///
+    /// Zero disables this cache. The capacity counts entries, not source or
+    /// bytecode bytes; byte-oriented compile limits remain a separate policy.
+    pub fn program_cache_entries(mut self, entries: usize) -> Self {
+        self.program_cache_entries = entries;
+        self
+    }
+
+    /// Sets the maximum number of shared Modules retained by the Runtime.
+    ///
+    /// Zero disables this cache. Module evaluation results are never cached.
+    pub fn module_cache_entries(mut self, entries: usize) -> Self {
+        self.module_cache_entries = entries;
+        self
+    }
+
+    /// Builds a Runtime with independent bounded Program and Module caches.
+    pub fn build(self) -> Runtime {
+        Runtime(Rc::new(RuntimeInner {
+            engine: Engine::new(),
+            programs: RefCell::new(CompileCache::new(self.program_cache_entries)),
+            modules: RefCell::new(CompileCache::new(self.module_cache_entries)),
+        }))
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        RuntimeBuilder::new().build()
+    }
+}
+impl Runtime {
+    /// Creates a same-thread Runtime with default bounded compilation caches.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Starts configuration of a Runtime and its compilation-cache capacities.
+    pub fn builder() -> RuntimeBuilder {
+        RuntimeBuilder::new()
+    }
+
+    /// Starts configuration of an isolated Context owned by this Runtime.
+    pub fn context_builder(&self) -> ContextBuilder {
+        ContextBuilder::new(self.clone())
+    }
+
+    /// Creates an isolated Context with the default execution policies.
+    pub fn new_context(&self) -> Context {
+        self.context_builder().build()
+    }
+
+    /// Compiles source into a verified Program, reusing an exact cache entry.
+    pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
+        self.compile_program_source(None, source)
+    }
+
+    /// Compiles named source into a verified Program, reusing an exact cache entry.
+    ///
+    /// The complete source name and raw UTF-8 source form the cache identity. A
+    /// name ending in `.litcoffee` enables literate CoffeeScript preprocessing.
+    pub fn compile_program_named(&self, source_name: &str, source: &str) -> Result<Program, Error> {
+        self.compile_program_source(Some(source_name), source)
+    }
+
+    fn compile_program_source(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<Program, Error> {
+        let key = SourceCacheKey {
+            name: source_name.map(str::to_owned),
+            source: source.to_owned(),
+        };
+        if let Some(program) = self.0.programs.borrow_mut().get(&key) {
+            return Ok(program);
+        }
+        let program = match source_name {
+            Some(source_name) => self.0.engine.compile_program_named(source_name, source)?,
+            None => self.0.engine.compile_program(source)?,
+        };
+        self.0.programs.borrow_mut().insert(key, program.clone());
+        Ok(program)
+    }
+
+    /// Returns cumulative cache counters and current entry counts.
+    pub fn cache_stats(&self) -> RuntimeCacheStats {
+        let programs = self.0.programs.borrow();
+        let modules = self.0.modules.borrow();
+        RuntimeCacheStats {
+            program_entries: programs.entries.len(),
+            program_hits: programs.hits,
+            program_misses: programs.misses,
+            program_evictions: programs.evictions,
+            module_entries: modules.entries.len(),
+            module_hits: modules.hits,
+            module_misses: modules.misses,
+            module_evictions: modules.evictions,
+        }
+    }
+
+    /// Removes cached compilation artifacts without changing cumulative counters.
+    ///
+    /// Existing Program and Module handles remain valid because they own shared
+    /// immutable storage independently of the cache.
+    pub fn clear_compile_caches(&self) {
+        self.0.programs.borrow_mut().clear();
+        self.0.modules.borrow_mut().clear();
+    }
+
+    /// Returns the Runtime's stateless compiler for uncached Chunk, check, and
+    /// module-graph fingerprint operations.
+    pub fn engine(&self) -> &Engine {
+        &self.0.engine
+    }
+
+    pub(crate) fn cached_module(&self, name: &str, source: &str) -> Option<Module> {
+        let key = SourceCacheKey {
+            name: Some(name.to_owned()),
+            source: source.to_owned(),
+        };
+        self.0.modules.borrow_mut().get(&key)
+    }
+
+    pub(crate) fn cache_module(&self, module: Module, source: &str) {
+        let key = SourceCacheKey {
+            name: Some(module.name().to_owned()),
+            source: source.to_owned(),
+        };
+        self.0.modules.borrow_mut().insert(key, module);
+    }
+}
+
 /// Public counters for the most recent bytecode execution in a context.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ExecutionStats {
@@ -2496,9 +2770,99 @@ pub struct RetainedMemory {
     pub bytes: u64,
 }
 
+/// Declaratively configures one isolated [`Context`].
+///
+/// Building more than once is intentionally unsupported because native
+/// callbacks may capture non-cloneable host state. Start a new builder from
+/// the shared [`Runtime`] for each Context.
+pub struct ContextBuilder {
+    runtime: Runtime,
+    fuel: u64,
+    max_call_depth: usize,
+    resource_limits: ResourceLimits,
+    cancellation: Option<CancellationToken>,
+    bindings: Vec<(String, Value)>,
+}
+impl ContextBuilder {
+    fn new(runtime: Runtime) -> Self {
+        Self {
+            runtime,
+            fuel: 1_000_000,
+            max_call_depth: 1_024,
+            resource_limits: ResourceLimits::default(),
+            cancellation: None,
+            bindings: Vec::new(),
+        }
+    }
+
+    /// Sets the instruction budget for every run in the new Context.
+    pub fn fuel(mut self, fuel: u64) -> Self {
+        self.fuel = fuel;
+        self
+    }
+
+    /// Sets the maximum nested QuickCoffee function-call depth.
+    pub fn max_call_depth(mut self, max_call_depth: usize) -> Self {
+        self.max_call_depth = max_call_depth;
+        self
+    }
+
+    /// Sets deterministic data-size and retained-memory policies.
+    pub fn resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
+        self.resource_limits = resource_limits;
+        self
+    }
+
+    /// Installs the cancellation token observed by future runs.
+    pub fn cancellation_token(mut self, cancellation: CancellationToken) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Adds an immutable host global to the new Context.
+    pub fn global(mut self, name: impl Into<String>, value: Value) -> Self {
+        self.bindings.push((name.into(), value));
+        self
+    }
+
+    /// Adds an opaque host callback to the new Context.
+    pub fn native<F>(mut self, name: impl Into<String>, function: F) -> Self
+    where
+        F: Fn(&[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.bindings
+            .push((name.into(), native_value(Rc::new(function))));
+        self
+    }
+
+    /// Builds an isolated Context attached to the configured Runtime.
+    pub fn build(self) -> Context {
+        let global = BUILTIN_ENVIRONMENT.with(|builtins| env(Some(builtins.clone())));
+        let mut context = Context {
+            engine: self.runtime.engine().clone(),
+            runtime: Some(self.runtime),
+            global,
+            fuel: self.fuel,
+            max_call_depth: self.max_call_depth,
+            resource_limits: self.resource_limits,
+            cancellation: self.cancellation,
+            last_execution: ExecutionStats::default(),
+            retained_memory_high_water: RetainedMemory {
+                objects: 1,
+                bytes: 0,
+            },
+        };
+        for (name, value) in self.bindings {
+            context.set_global(name, value);
+        }
+        context
+    }
+}
+
 /// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
     engine: Engine,
+    runtime: Option<Runtime>,
     global: Env,
     fuel: u64,
     max_call_depth: usize,
@@ -2516,6 +2880,7 @@ thread_local! {
         let global = env(None);
         let mut context = Context {
             engine: Engine::new(),
+            runtime: None,
             global: global.clone(),
             fuel: 1_000_000,
             max_call_depth: 1_024,
@@ -3502,6 +3867,7 @@ impl Context {
         let global = BUILTIN_ENVIRONMENT.with(|builtins| env(Some(builtins.clone())));
         Self {
             engine: Engine::new(),
+            runtime: None,
             global,
             fuel: 1_000_000,
             max_call_depth: 1_024,
@@ -3513,6 +3879,13 @@ impl Context {
                 bytes: 0,
             },
         }
+    }
+    /// Starts configuration of a Context owned by a fresh default Runtime.
+    ///
+    /// Use [`Runtime::context_builder`] when multiple Contexts should share
+    /// compilation artifacts.
+    pub fn builder() -> ContextBuilder {
+        Runtime::new().context_builder()
     }
     /// Returns a builder-style context with the supplied fuel budget.
     pub fn with_fuel(mut self, fuel: u64) -> Self {
@@ -3640,15 +4013,10 @@ impl Context {
     where
         F: Fn(&[Value]) -> Result<Value, Error> + 'static,
     {
-        self.set_global(
-            name,
-            Value::Function(Rc::new(Function {
-                inner: FunctionKind::Native {
-                    function: Rc::new(f),
-                    allocation_profile: None,
-                },
-            })),
-        );
+        self.add_shared_native(name, Rc::new(f));
+    }
+    fn add_shared_native(&mut self, name: impl Into<String>, function: NativeFunction) {
+        self.set_global(name, native_value(function));
     }
     fn add_builtin<F>(
         &mut self,
@@ -3711,14 +4079,20 @@ impl Context {
     }
     /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {
-        let program = self.engine.compile_program(source)?;
+        let program = match &self.runtime {
+            Some(runtime) => runtime.compile_program(source)?,
+            None => self.engine.compile_program(source)?,
+        };
         self.run_program(&program)
     }
     /// Compiles, verifies, and executes source while attaching an opaque
     /// host-provided name to compile-time and runtime source labels. A name
     /// ending in `.litcoffee` enables literate CoffeeScript preprocessing.
     pub fn eval_named(&mut self, source_name: &str, source: &str) -> Result<Value, Error> {
-        let program = self.engine.compile_program_named(source_name, source)?;
+        let program = match &self.runtime {
+            Some(runtime) => runtime.compile_program_named(source_name, source)?,
+            None => self.engine.compile_program_named(source_name, source)?,
+        };
         self.run_program(&program)
     }
     /// Verifies and executes an owned bytecode chunk.
@@ -3771,6 +4145,7 @@ impl Context {
     pub(crate) fn module_child(&self) -> Self {
         Self {
             engine: self.engine.clone(),
+            runtime: self.runtime.clone(),
             global: env(Some(self.global.clone())),
             fuel: self.fuel,
             max_call_depth: self.max_call_depth,
@@ -3778,6 +4153,12 @@ impl Context {
             cancellation: self.cancellation.clone(),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
+        }
+    }
+    pub(crate) fn compile_module(&self, name: &str, source: &str) -> Result<Module, Error> {
+        match &self.runtime {
+            Some(runtime) => runtime.compile_module(name, source),
+            None => self.engine.compile_module(name, source),
         }
     }
     pub(crate) fn get_local(&self, name: &str) -> Option<Value> {

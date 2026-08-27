@@ -12,6 +12,8 @@
 
 嵌入宿主可用 `Program::fingerprint()` 作为确定性单程序字节码缓存键；`Engine::fingerprint_module_graph(entry, loader)` 则在不执行模块的前提下加载并验证完整静态图，返回依赖 source、规范名、imports/exports 与边均敏感的 v1 `u64` 缓存键。`MODULE_GRAPH_FINGERPRINT_VERSION` 标识独立于 bytecode 的 canonical encoding 版本。
 
+`RuntimeBuilder` 可分别配置有界 Program/Module 编译缓存，`Runtime::context_builder()` 创建的隔离 Context 只共享这些已验证产物。缓存身份包含完整的可选 source name 与原始 UTF-8 source；精确命中采用确定性的 least-recently-used 保留，失败编译不写入，容量为零会禁用缓存，`cache_stats()` / `clear_compile_caches()` 使 ownership 可审计。globals、native bindings、已求值模块 exports、fuel、取消、执行统计和 retained-memory 状态仍归各 Context。Program 与 VM Value 使用 `Rc`，因此当前 Runtime 只限同线程，刻意不实现 `Send` / `Sync`。
+
 内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，`qcoffee --fingerprint --module-root ROOT ENTRY` 以同一格式输出完整受限模块图的独立版本化指纹；两者都使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成说明、围栏源码和最终值供审阅；嵌入方可用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉。`IntoValue` 与 `TryFromValue` 可递归转换常用的拥有型 Rust 标量、`Vec`、`BTreeMap<String, T>` 与 `Option`，不执行脚本，也不在 Number、Integer 与 Decimal 间 coercion；也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。
 
 `Context::retained_memory()` 读取该 Context global 可达值的确定性 logical object/byte 快照，会对共享值与循环去重，并跳过共享 builtin 和宿主 callback 内部；它不是 RSS、峰值或硬内存上限。
