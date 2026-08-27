@@ -88,6 +88,24 @@ fn module_execution_and_host_roots_need_explicit_high_water_samples() {
 }
 
 #[test]
+fn module_children_inherit_retained_memory_commit_limits() {
+    let engine = Engine::new();
+    let module = engine
+        .compile_module("memory", "export payload = ['coffee']")
+        .unwrap();
+    let mut context = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_retained_managed_objects(2));
+    let error = context
+        .run_module(&module, &MemoryModuleLoader::new())
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::RetainedManagedObjects)
+    );
+    assert_eq!(context.retained_memory().objects, 1);
+}
+
+#[test]
 fn modules_export_classes_without_exposing_their_receiver_state() {
     let engine = Engine::new();
     let main = engine

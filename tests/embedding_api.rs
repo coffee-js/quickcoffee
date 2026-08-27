@@ -169,6 +169,71 @@ fn retained_memory_high_water_tracks_only_explicit_samples() {
 }
 
 #[test]
+fn retained_memory_limits_preflight_and_roll_back_context_mutations() {
+    let mut preflight = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_retained_managed_objects(1));
+    preflight.set_global("host_value", Value::from("coffee"));
+    let error = preflight.eval("1").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::RetainedManagedObjects)
+    );
+    assert_eq!(preflight.last_execution().instructions, 0);
+    assert_eq!(
+        preflight
+            .get_global("host_value")
+            .and_then(|value| value.as_str().map(str::to_owned)),
+        Some("coffee".to_owned())
+    );
+
+    let mut context = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_retained_managed_objects(2));
+    context.set_global("stable", Value::from("old"));
+    let error = context.eval("next = ['coffee']").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::RetainedManagedObjects)
+    );
+    assert_eq!(
+        context
+            .get_global("stable")
+            .and_then(|value| value.as_str().map(str::to_owned)),
+        Some("old".to_owned())
+    );
+    assert!(context.get_global("next").is_none());
+    assert!(context.last_execution().instructions > 0);
+
+    context.set_resource_limits(ResourceLimits::default().with_max_retained_managed_bytes(3));
+    let error = context.eval("stable = 'coffee'").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::RetainedManagedBytes)
+    );
+    assert_eq!(
+        context
+            .get_global("stable")
+            .and_then(|value| value.as_str().map(str::to_owned)),
+        Some("old".to_owned())
+    );
+
+    context.set_resource_limits(ResourceLimits::default());
+
+    context
+        .eval("class Box\n  constructor: (@value) ->\n  set: (value) -> @value = value\nbox = new Box('small')")
+        .unwrap();
+    let limit = context.retained_memory().bytes;
+    context.set_resource_limits(ResourceLimits::default().with_max_retained_managed_bytes(limit));
+    let error = context
+        .eval("box.set('a substantially larger value')")
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::RetainedManagedBytes)
+    );
+    assert_eq!(context.eval("box.value").unwrap().as_str(), Some("small"));
+}
+
+#[test]
 fn strict_host_value_conversions_are_recursive_and_non_coercing() {
     let input = BTreeMap::from([(
         "names".to_owned(),
