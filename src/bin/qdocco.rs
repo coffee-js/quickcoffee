@@ -10,9 +10,18 @@ use std::{
     process::ExitCode,
 };
 
+const HTML_TEMPLATE_VERSION: &str = "quickcoffee.qdocco.html.v1";
+const MARKDOWN_TEMPLATE_VERSION: &str = "quickcoffee.qdocco.markdown.v1";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WriteOutcome {
+    Written,
+    Unchanged,
+}
+
 fn usage() {
     eprintln!(
-        "Usage: qdocco [--check | --markdown] DOCUMENT.litcoffee [-o OUTPUT]\n       qdocco --version"
+        "Usage: qdocco [--check | --markdown] [--incremental] DOCUMENT.litcoffee [-o OUTPUT]\n       qdocco --version"
     );
 }
 fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
@@ -21,7 +30,17 @@ fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
         _ => left == right,
     }
 }
-fn write_output(destination: &Path, document: &str) -> io::Result<()> {
+fn write_output(destination: &Path, document: &str, incremental: bool) -> io::Result<WriteOutcome> {
+    if incremental {
+        match fs::read(destination) {
+            Ok(existing) if existing == document.as_bytes() => {
+                return Ok(WriteOutcome::Unchanged);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
     let file_name = destination
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("qdocco-output"));
@@ -52,7 +71,7 @@ fn write_output(destination: &Path, document: &str) -> io::Result<()> {
                 .unwrap_or_else(|| Path::new("."));
             fs::File::open(parent)?.sync_all()?;
         }
-        Ok(())
+        Ok(WriteOutcome::Written)
     })();
     if result.is_err() && created {
         let _ = fs::remove_file(&temporary);
@@ -186,7 +205,7 @@ fn render(source: &str, result: &str) -> String {
     let (prose_text, code) = split_source(source);
     let prose = render_prose_html(&prose_text);
     format!(
-        "<!doctype html><meta charset=\"utf-8\"><title>QuickCoffee document</title><style>body{{font:16px system-ui;display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:2rem}}pre{{background:#f5f5f5;padding:1rem;white-space:pre-wrap}}footer{{grid-column:1/-1}}</style><main><h1>Notes</h1>{prose}</main><main><h1>Code</h1><pre><code>{}</code></pre></main><footer>Final value: <code>{}</code></footer>",
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"generator\" content=\"{HTML_TEMPLATE_VERSION}\"><title>QuickCoffee document</title><style>body{{font:16px system-ui;display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:2rem}}pre{{background:#f5f5f5;padding:1rem;white-space:pre-wrap}}footer{{grid-column:1/-1}}</style><main><h1>Notes</h1>{prose}</main><main><h1>Code</h1><pre><code>{}</code></pre></main><footer>Final value: <code>{}</code></footer>",
         escape(&code),
         escape(result)
     )
@@ -195,7 +214,7 @@ fn render_markdown(source: &str, result: &str) -> String {
     let (prose, code) = split_source(source);
     let fence = markdown_fence(source);
     format!(
-        "# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}coffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"
+        "<!-- {MARKDOWN_TEMPLATE_VERSION} -->\n\n# QuickCoffee document\n\n## Notes\n\n{prose}\n## Code\n\n{fence}coffee\n{code}{fence}\n\n## Final value\n\n`{result}`\n"
     )
 }
 fn markdown_fence(source: &str) -> String {
@@ -214,6 +233,7 @@ fn markdown_fence(source: &str) -> String {
 fn main() -> ExitCode {
     let mut check = false;
     let mut markdown = false;
+    let mut incremental = false;
     let mut input = None;
     let mut output = None;
     let mut args = env::args().skip(1);
@@ -225,6 +245,7 @@ fn main() -> ExitCode {
             }
             "--check" => check = true,
             "--markdown" => markdown = true,
+            "--incremental" => incremental = true,
             "-o" => match args.next() {
                 Some(x) => output = Some(PathBuf::from(x)),
                 None => {
@@ -247,8 +268,8 @@ fn main() -> ExitCode {
         eprintln!("qdocco expects a .litcoffee document");
         return ExitCode::from(2);
     }
-    if check && markdown {
-        eprintln!("--check and --markdown are mutually exclusive");
+    if check && (markdown || incremental) {
+        eprintln!("--check cannot be combined with --markdown or --incremental");
         return ExitCode::from(2);
     }
     let source = match fs::read_to_string(&input) {
@@ -282,11 +303,14 @@ fn main() -> ExitCode {
         } else {
             render(&source, &result.to_string())
         };
-        if let Err(e) = write_output(&destination, &document) {
-            eprintln!("write error: {e}");
-            return ExitCode::from(1);
+        match write_output(&destination, &document, incremental) {
+            Ok(WriteOutcome::Written) => println!("wrote {}", destination.display()),
+            Ok(WriteOutcome::Unchanged) => println!("unchanged {}", destination.display()),
+            Err(e) => {
+                eprintln!("write error: {e}");
+                return ExitCode::from(1);
+            }
         }
-        println!("wrote {}", destination.display());
     }
     ExitCode::SUCCESS
 }
@@ -294,7 +318,8 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_inline_html, render_markdown, render_prose_html, split_source, write_output,
+        WriteOutcome, render_inline_html, render_markdown, render_prose_html, split_source,
+        write_output,
     };
     use std::{fs, path::PathBuf};
 
@@ -312,15 +337,27 @@ mod tests {
         let temporary = directory.join(temporary);
         fs::write(&temporary, "reserved").expect("reserve temporary output");
 
-        assert!(write_output(&destination, "new").is_err());
+        assert!(write_output(&destination, "new", false).is_err());
         assert_eq!(fs::read_to_string(&destination).expect("old output"), "old");
         assert_eq!(
             fs::read_to_string(&temporary).expect("reserved temporary output"),
             "reserved"
         );
 
+        assert_eq!(
+            write_output(&destination, "old", true).expect("unchanged output"),
+            WriteOutcome::Unchanged
+        );
+        assert_eq!(
+            fs::read_to_string(&temporary).expect("reserved temporary output"),
+            "reserved"
+        );
+
         fs::remove_file(&temporary).expect("release temporary output");
-        write_output(&destination, "new").expect("replace output");
+        assert_eq!(
+            write_output(&destination, "new", true).expect("replace output"),
+            WriteOutcome::Written
+        );
         assert_eq!(fs::read_to_string(&destination).expect("new output"), "new");
         fs::remove_dir_all(directory).expect("remove temporary directory");
     }

@@ -60,6 +60,7 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let page = fs::read_to_string(&output).unwrap();
+    assert!(page.contains("<meta name=\"generator\" content=\"quickcoffee.qdocco.html.v1\">"));
     assert!(page.contains("&lt;Guide&gt;"));
     assert!(page.contains("Call <code>Context::eval</code> with <code>&lt;source&gt;</code>."));
     assert!(page.contains("Final value: <code>3</code>"));
@@ -92,6 +93,7 @@ fn qdocco_renders_escaped_source_and_checks() {
             .success()
     );
     let document = fs::read_to_string(&markdown).unwrap();
+    assert!(document.starts_with("<!-- quickcoffee.qdocco.markdown.v1 -->\n"));
     assert!(document.contains("## Notes\n\n# <Guide>\n\nCall `Context::eval` with `<source>`."));
     assert!(document.contains("````coffee\n1 + 2\n````"));
     assert!(document.contains("## Final value\n\n`3`"));
@@ -162,6 +164,55 @@ fn qdocco_renders_escaped_source_and_checks() {
         .output()
         .unwrap();
     assert_eq!(conflict.status.code(), Some(2));
+    let incremental_conflict = Command::new(bin("qdocco"))
+        .args(["--check", "--incremental", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(incremental_conflict.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&incremental_conflict.stderr)
+            .contains("--check cannot be combined")
+    );
+    let incremental_input = temp.join("incremental.litcoffee");
+    let incremental_output = incremental_input.with_extension("md");
+    fs::write(&incremental_input, "Incremental.\n\n    40 + 2\n").unwrap();
+    let initial = Command::new(bin("qdocco"))
+        .args([
+            "--markdown",
+            "--incremental",
+            incremental_input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(initial.status.success());
+    assert!(String::from_utf8_lossy(&initial.stdout).starts_with("wrote "));
+    assert!(incremental_output.is_file());
+    let unchanged = Command::new(bin("qdocco"))
+        .args([
+            "--markdown",
+            "--incremental",
+            incremental_input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(unchanged.status.success());
+    assert!(String::from_utf8_lossy(&unchanged.stdout).starts_with("unchanged "));
+    fs::write(&incremental_input, "Incremental.\n\n    40 + 3\n").unwrap();
+    let changed = Command::new(bin("qdocco"))
+        .args([
+            "--markdown",
+            "--incremental",
+            incremental_input.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(changed.status.success());
+    assert!(String::from_utf8_lossy(&changed.stdout).starts_with("wrote "));
+    assert!(
+        fs::read_to_string(&incremental_output)
+            .unwrap()
+            .contains("## Final value\n\n`43`")
+    );
     let ordinary = temp.join("ordinary.coffee");
     fs::write(&ordinary, "true\n").unwrap();
     let rejected = Command::new(bin("qdocco")).arg(ordinary).output().unwrap();
