@@ -1,5 +1,6 @@
 # Rust build products
 /target/
+/docs/manual.*.html
 
 # Local/editor files
 .DS_Store
