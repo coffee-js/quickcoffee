@@ -52,7 +52,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qcoffee --json` 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
 
-Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.resource_limit()` 可分辨 fuel、调用深度、取消、JSON 六类边界、`StringBytes`、`ArrayItems`、`MapEntries`、`IntegerBits`、`DecimalCoefficientBits`、`DecimalScale`、`CollectionOperationItems`、`TextOperationBytes` 与 retained-memory 边界，宿主回调仍可返回 `Error::runtime("message")`，`error.position()` 可给出从 1 开始的源码行。
+Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.resource_limit()` 可分辨 fuel、调用深度、取消、JSON 六类边界、`StringBytes`、`ArrayItems`、`MapEntries`、`IntegerBits`、`DecimalCoefficientBits`、`DecimalScale`、`CollectionOperationItems`、`TextOperationBytes`、retained-memory 与 transient managed-allocation 边界，宿主回调仍可返回 `Error::runtime("message")`，`error.position()` 可给出从 1 开始的源码行。
 
 `Engine::compile_program` 创建时验证一次；`Context::run_program` 重复执行时复用不可变的已验证字节码。
 

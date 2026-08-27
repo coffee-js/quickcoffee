@@ -50,7 +50,7 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qcoffee --json` emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 
-Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, and retained-memory boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
+Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, retained-memory boundaries, and transient managed-allocation boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
 
 `Engine::compile_program` verifies once; `Context::run_program` reuses the immutable verified bytecode for repeated embedding calls.
 
