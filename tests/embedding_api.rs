@@ -91,6 +91,84 @@ fn retained_memory_census_is_context_owned_cycle_safe_and_alias_aware() {
 }
 
 #[test]
+fn retained_memory_high_water_tracks_only_explicit_samples() {
+    let mut context = Context::new();
+    assert_eq!(
+        context.retained_memory_high_water(),
+        RetainedMemory {
+            objects: 1,
+            bytes: 0,
+        }
+    );
+
+    context.set_global("payload", Value::array(vec![Value::from("coffee")]));
+    assert_eq!(
+        context.sample_retained_memory(),
+        RetainedMemory {
+            objects: 3,
+            bytes: 14,
+        }
+    );
+    context.set_global("payload", Value::Nil);
+    assert_eq!(
+        context.retained_memory(),
+        RetainedMemory {
+            objects: 1,
+            bytes: 0,
+        }
+    );
+    assert_eq!(
+        context.retained_memory_high_water(),
+        RetainedMemory {
+            objects: 3,
+            bytes: 14,
+        }
+    );
+
+    context
+        .eval("temporary = ['coffee', 'beans', 'espresso']; temporary = nil")
+        .unwrap();
+    assert_eq!(
+        context.sample_retained_memory(),
+        RetainedMemory {
+            objects: 1,
+            bytes: 0,
+        }
+    );
+    assert_eq!(
+        context.retained_memory_high_water(),
+        RetainedMemory {
+            objects: 3,
+            bytes: 14,
+        }
+    );
+
+    context.eval("kept = ['coffee', 'beans']").unwrap();
+    assert_eq!(
+        context.sample_retained_memory(),
+        RetainedMemory {
+            objects: 4,
+            bytes: 27,
+        }
+    );
+    assert!(context.eval("kept = ['espresso']; unknown()").is_err());
+    assert_eq!(
+        context.sample_retained_memory(),
+        RetainedMemory {
+            objects: 3,
+            bytes: 16,
+        }
+    );
+    assert_eq!(
+        context.retained_memory_high_water(),
+        RetainedMemory {
+            objects: 4,
+            bytes: 27,
+        }
+    );
+}
+
+#[test]
 fn strict_host_value_conversions_are_recursive_and_non_coercing() {
     let input = BTreeMap::from([(
         "names".to_owned(),

@@ -56,6 +56,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. 普查从 Context 自己的 global environment 开始，跳过进程共享 builtin parent；共享 Rc backing 按 identity 仅计一次，Environment/Function/Class/Instance cycle 必须终止。模块导出与宿主手中但未存回 Context 的 Value 不属于该 Context 根。
 3. 快照不是 RSS、allocator/capacity、peak 或 hard limit。后续 retained-memory 限额必须在此基础上单独规定采样点、原子性、Context 生命周期与 host-visible failure state，不能从累计分配字段推导。
 
+## 2026-08-27：显式保留图高水位采样
+
+1. RFC 0148 的 `Context::sample_retained_memory()` 是宿主显式观测点：它读取 RFC 0147 的当前 Context 图快照，并更新 `retained_memory_high_water()` 中 objects 与 bytes 各自的 Context-lifetime 最大已采样值；两个最大值不必来自同一个时刻。
+2. Context 创建时把空 writable global 作为第一个样本。设置 global、执行、模块运行、错误和 VM 指令都不会隐式普查；嵌入方应在业务边界（例如顶层执行返回后）自行采样，避免把 O(graph) 工作放入调度热路径。
+3. 此记录仍不是 RSS、allocator/capacity、逐指令 live peak 或 hard limit。未来内存失败策略必须另行定义执行期间的检查、失败原子性和 host-visible state，不能把稀疏样本当作强制边界。
+
 ## 验收
 
 `tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。

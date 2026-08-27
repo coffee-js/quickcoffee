@@ -30,10 +30,11 @@ fn main() -> Result<(), Error> {
         "host_add(20, 22) * factor",
     )?;
     println!("{value}");
-    let retained = context.retained_memory();
+    let retained = context.sample_retained_memory();
+    let retained_high_water = context.retained_memory_high_water();
     eprintln!(
-        "retained objects={} bytes={}",
-        retained.objects, retained.bytes
+        "retained objects={} bytes={} sampled_high_water_objects={} sampled_high_water_bytes={}",
+        retained.objects, retained.bytes, retained_high_water.objects, retained_high_water.bytes,
     );
     Ok(())
 }
