@@ -48,6 +48,25 @@ fn named_static_imports_and_exports_keep_module_globals_private() {
 }
 
 #[test]
+fn module_exports_are_counted_only_after_the_host_retains_them_in_context() {
+    let engine = Engine::new();
+    let module = engine
+        .compile_module("memory", "export payload = ['coffee', 'beans']")
+        .unwrap();
+    let context_before = Context::new().retained_memory();
+    let mut context = Context::new();
+    let exports = context
+        .run_module(&module, &MemoryModuleLoader::new())
+        .unwrap();
+    assert_eq!(context.retained_memory(), context_before);
+
+    context.set_global("payload", exports.get("payload").unwrap().clone());
+    let retained = context.retained_memory();
+    assert!(retained.objects > context_before.objects);
+    assert!(retained.bytes > context_before.bytes);
+}
+
+#[test]
 fn modules_export_classes_without_exposing_their_receiver_state() {
     let engine = Engine::new();
     let main = engine

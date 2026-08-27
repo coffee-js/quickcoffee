@@ -2483,6 +2483,19 @@ pub struct ExecutionStats {
     /// This is not RSS, capacity, or a current/peak retained-memory reading.
     pub managed_bytes_allocated: u64,
 }
+
+/// A deterministic snapshot of QuickCoffee-managed values retained by one context.
+///
+/// This follows RFC 0147's logical object and payload-byte model. It is not an
+/// allocator, capacity, RSS, or host-object measurement.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RetainedMemory {
+    /// Logical managed objects reachable from this context's owned globals.
+    pub objects: u64,
+    /// Stable logical payload bytes for [`Self::objects`].
+    pub bytes: u64,
+}
+
 /// An execution context containing globals, builtins, and per-run resource limits.
 pub struct Context {
     engine: Engine,
@@ -2621,6 +2634,227 @@ fn shallow_managed_allocation(value: &Value) -> ManagedAllocation {
         legacy_value_allocations: 0,
         objects,
         bytes,
+    }
+}
+
+#[derive(Default)]
+struct RetainedMemoryCensus {
+    snapshot: RetainedMemory,
+    integers: BTreeSet<usize>,
+    decimals: BTreeSet<usize>,
+    strings: BTreeSet<usize>,
+    arrays: BTreeSet<usize>,
+    maps: BTreeSet<usize>,
+    errors: BTreeSet<usize>,
+    classes: BTreeSet<usize>,
+    instances: BTreeSet<usize>,
+    functions: BTreeSet<usize>,
+    environments: BTreeSet<usize>,
+}
+impl RetainedMemoryCensus {
+    fn rc_key<T: ?Sized>(value: &Rc<T>) -> usize {
+        Rc::as_ptr(value) as *const () as usize
+    }
+
+    fn first<T: ?Sized>(seen: &mut BTreeSet<usize>, value: &Rc<T>) -> bool {
+        seen.insert(Self::rc_key(value))
+    }
+
+    fn add(&mut self, objects: u64, bytes: u64) {
+        self.snapshot.objects = self.snapshot.objects.saturating_add(objects);
+        self.snapshot.bytes = self.snapshot.bytes.saturating_add(bytes);
+    }
+
+    fn value(&mut self, value: &Value) {
+        match value {
+            Value::Integer(value) => {
+                if Self::first(&mut self.integers, value) {
+                    self.add(1, magnitude_bytes(value.inner().bits()));
+                }
+            }
+            Value::Decimal(value) => {
+                if Self::first(&mut self.decimals, value) {
+                    self.add(
+                        1,
+                        magnitude_bytes(value.inner().bits())
+                            .saturating_add(LOGICAL_DECIMAL_SCALE_BYTES),
+                    );
+                }
+            }
+            Value::String(value) => {
+                if Self::first(&mut self.strings, value) {
+                    self.add(1, value.len() as u64);
+                }
+            }
+            Value::Array(values) => {
+                if Self::first(&mut self.arrays, values) {
+                    self.add(
+                        1,
+                        (values.len() as u64).saturating_mul(LOGICAL_REFERENCE_BYTES),
+                    );
+                    for child in values.iter() {
+                        self.value(child);
+                    }
+                }
+            }
+            Value::Map(values) => {
+                if Self::first(&mut self.maps, values) {
+                    self.add(
+                        1,
+                        values.iter().fold(0_u64, |bytes, (key, _)| {
+                            bytes
+                                .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                                .saturating_add(key.len() as u64)
+                        }),
+                    );
+                    for child in values.values() {
+                        self.value(child);
+                    }
+                }
+            }
+            Value::Error(error) => self.error(error),
+            Value::Class(class) => self.class(class),
+            Value::Instance(instance) => self.instance(instance),
+            Value::Function(function) => self.function(function),
+            Value::Nil | Value::Bool(_) | Value::Number(_) => {}
+        }
+    }
+
+    fn error(&mut self, error: &Rc<ScriptError>) {
+        if !Self::first(&mut self.errors, error) {
+            return;
+        }
+        self.add(
+            1,
+            (error.code.len() as u64)
+                .saturating_add(error.message.len() as u64)
+                .saturating_add(LOGICAL_REFERENCE_BYTES.saturating_mul(2)),
+        );
+        self.value(&error.data);
+        if let Some(cause) = &error.cause {
+            self.error(cause);
+        }
+    }
+
+    fn class(&mut self, class: &Rc<Class>) {
+        if !Self::first(&mut self.classes, class) {
+            return;
+        }
+        let static_fields = class.static_fields.borrow();
+        let static_values = static_fields.values().cloned().collect::<Vec<_>>();
+        let static_field_bytes = static_fields.iter().fold(0_u64, |bytes, (key, _)| {
+            bytes
+                .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                .saturating_add(key.len() as u64)
+        });
+        drop(static_fields);
+        let method_bytes = class
+            .instance_methods
+            .keys()
+            .chain(class.static_methods.keys())
+            .fold(0_u64, |bytes, key| {
+                bytes
+                    .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                    .saturating_add(key.len() as u64)
+            });
+        self.add(
+            1,
+            (class.name.len() as u64)
+                .saturating_add(LOGICAL_REFERENCE_BYTES.saturating_mul(2))
+                .saturating_add(method_bytes)
+                .saturating_add(static_field_bytes),
+        );
+        if let Some(superclass) = &class.superclass {
+            self.class(superclass);
+        }
+        if let Some(constructor) = &class.constructor {
+            self.function(constructor);
+        }
+        for method in class
+            .instance_methods
+            .values()
+            .chain(class.static_methods.values())
+        {
+            self.function(method);
+        }
+        for value in static_values {
+            self.value(&value);
+        }
+    }
+
+    fn instance(&mut self, instance: &Rc<Instance>) {
+        if !Self::first(&mut self.instances, instance) {
+            return;
+        }
+        let fields = instance.fields.borrow();
+        let values = fields.values().cloned().collect::<Vec<_>>();
+        let field_bytes = fields.iter().fold(0_u64, |bytes, (key, _)| {
+            bytes
+                .saturating_add(LOGICAL_MAP_ENTRY_BYTES)
+                .saturating_add(key.len() as u64)
+        });
+        drop(fields);
+        self.add(1, LOGICAL_REFERENCE_BYTES.saturating_add(field_bytes));
+        self.class(&instance.class);
+        for value in values {
+            self.value(&value);
+        }
+    }
+
+    fn function(&mut self, function: &Rc<Function>) {
+        if !Self::first(&mut self.functions, function) {
+            return;
+        }
+        self.add(1, LOGICAL_REFERENCE_BYTES);
+        match &function.inner {
+            FunctionKind::Bytecode { env, .. } => self.environment(env),
+            FunctionKind::BoundMethod {
+                function,
+                receiver,
+                context,
+            } => {
+                self.function(function);
+                self.value(receiver);
+                self.class(&context.owner);
+            }
+            FunctionKind::ReceiverBound {
+                function,
+                captured_receiver,
+            } => {
+                self.function(function);
+                if let Some(receiver) = captured_receiver {
+                    self.value(receiver);
+                }
+            }
+            FunctionKind::Native { .. }
+            | FunctionKind::ResourceBuiltin { .. }
+            | FunctionKind::UnboundMethod { .. } => {}
+        }
+    }
+
+    fn environment(&mut self, environment: &Env) {
+        if BUILTIN_ENVIRONMENT.with(|builtins| Rc::ptr_eq(environment, builtins))
+            || !Self::first(&mut self.environments, environment)
+        {
+            return;
+        }
+        self.add(1, 0);
+        let environment = environment.borrow();
+        let values = environment
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(slot, _)| environment.initialized.get(*slot).copied().unwrap_or(true))
+            .map(|(_, (_, value))| value.clone())
+            .collect::<Vec<_>>();
+        let parent = environment.parent.clone();
+        drop(environment);
+        for value in values {
+            self.value(&value);
+        }
+        if let Some(parent) = parent {
+            self.environment(&parent);
+        }
     }
 }
 
@@ -3047,6 +3281,18 @@ impl Context {
     /// Compilation and verification errors do not replace the previous record.
     pub fn last_execution(&self) -> ExecutionStats {
         self.last_execution
+    }
+    /// Returns a cycle-safe snapshot of QuickCoffee-managed values currently
+    /// retained by this context.
+    ///
+    /// The shared standard-library parent and opaque host callback internals
+    /// are excluded. Shared values and closure/environment cycles are counted
+    /// once by identity; values held only by the embedding host are outside the
+    /// context root and are not included.
+    pub fn retained_memory(&self) -> RetainedMemory {
+        let mut census = RetainedMemoryCensus::default();
+        census.environment(&self.global);
+        census.snapshot
     }
     /// Installs or replaces an immutable global value visible to later runs.
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
