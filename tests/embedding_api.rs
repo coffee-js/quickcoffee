@@ -3,7 +3,7 @@ use quickcoffee::{
     IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, Runtime, TryFromValue, Value,
     ValueKind,
 };
-use std::collections::BTreeMap;
+use std::{cell::Cell, collections::BTreeMap};
 
 #[test]
 fn public_embedding_surface_runs_shared_programs_with_host_state() {
@@ -185,6 +185,131 @@ fn context_builder_applies_mixed_bindings_in_declaration_order() {
         native_wins.eval("configured()").unwrap().as_number(),
         Some(3.)
     );
+}
+
+#[test]
+fn contextual_natives_cooperate_with_fuel_limits_telemetry_and_typed_state() {
+    let limits = ResourceLimits::default().with_max_string_bytes(128);
+    let runtime = Runtime::new();
+    let mut context = runtime
+        .context_builder()
+        .fuel(100)
+        .resource_limits(limits)
+        .host_state(Cell::new(40_u64))
+        .contextual_native("host_step", |call, args| {
+            assert!(args.is_empty());
+            assert_eq!(call.resource_limits().max_string_bytes(), 128);
+            assert!(call.fuel_remaining() < 100);
+            assert!(!call.is_cancelled());
+            assert!(call.host_state::<String>().is_none());
+            let counter = call
+                .host_state::<Cell<u64>>()
+                .ok_or_else(|| Error::runtime("missing counter state"))?;
+            counter.set(counter.get() + 1);
+            call.consume_fuel(5)?;
+            call.record_managed_allocation(2, 7);
+            Ok(Value::from(counter.get() as f64))
+        })
+        .build();
+
+    let before = context.retained_memory();
+    assert_eq!(context.eval("host_step()").unwrap().as_number(), Some(41.));
+    assert_eq!(context.host_state::<Cell<u64>>().unwrap().get(), 41);
+    assert_eq!(context.retained_memory(), before);
+    let stats = context.last_execution();
+    assert_eq!(stats.fuel_remaining, 100 - stats.instructions - 5);
+    assert_eq!(stats.managed_objects_allocated, 2);
+    assert_eq!(stats.managed_bytes_allocated, 7);
+    assert_eq!(stats.value_allocations, 0);
+
+    context.set_host_state(String::from("replacement"));
+    assert!(context.host_state::<Cell<u64>>().is_none());
+    assert_eq!(
+        context.host_state::<String>().map(String::as_str),
+        Some("replacement")
+    );
+    context.clear_host_state();
+    assert!(context.host_state::<String>().is_none());
+}
+
+#[test]
+fn contextual_native_resource_stops_are_uncatchable_labeled_and_account_failures() {
+    let token = CancellationToken::new();
+    let callback_token = token.clone();
+    let mut cancelled = Context::new()
+        .with_cancellation_token(token)
+        .with_contextual_native("cancel_host", move |call, _| {
+            callback_token.cancel();
+            call.check_cancelled()?;
+            Ok(Value::Nil)
+        });
+    let error = cancelled
+        .eval_named(
+            "native-cancel.coffee",
+            "try cancel_host() catch problem then 42",
+        )
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Cancellation));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("native-cancel.coffee")
+    );
+
+    let mut exhausted =
+        Context::new()
+            .with_fuel(50)
+            .with_contextual_native("host_work", |call, _| {
+                call.record_managed_allocation(4, 9);
+                call.consume_fuel(u64::MAX)?;
+                Ok(Value::Nil)
+            });
+    let error = exhausted
+        .eval("try host_work() catch problem then 42")
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::Fuel));
+    let stats = exhausted.last_execution();
+    assert_eq!(stats.fuel_remaining, 0);
+    assert_eq!(stats.managed_objects_allocated, 4);
+    assert_eq!(stats.managed_bytes_allocated, 9);
+
+    let mut failed = Context::new()
+        .with_fuel(50)
+        .with_contextual_native("host_fail", |call, _| {
+            call.consume_fuel(3)?;
+            call.record_managed_allocation(6, 11);
+            Err(Error::runtime("contextual host failed"))
+        });
+    let error = failed.eval("host_fail()").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "contextual host failed");
+    let stats = failed.last_execution();
+    assert_eq!(stats.fuel_remaining, 50 - stats.instructions - 3);
+    assert_eq!(stats.managed_objects_allocated, 6);
+    assert_eq!(stats.managed_bytes_allocated, 11);
+}
+
+#[test]
+fn runtime_contexts_do_not_share_host_state_implicitly() {
+    let runtime = Runtime::new();
+    let make_context = |initial| {
+        runtime
+            .context_builder()
+            .host_state(Cell::new(initial))
+            .contextual_native("state", |call, _| {
+                let state = call
+                    .host_state::<Cell<u64>>()
+                    .ok_or_else(|| Error::runtime("missing state"))?;
+                state.set(state.get() + 1);
+                Ok(Value::from(state.get() as f64))
+            })
+            .build()
+    };
+    let mut first = make_context(10_u64);
+    let mut second = make_context(20_u64);
+    assert_eq!(first.eval("state()").unwrap().as_number(), Some(11.));
+    assert_eq!(second.eval("state()").unwrap().as_number(), Some(21.));
+    assert_eq!(first.host_state::<Cell<u64>>().unwrap().get(), 11);
+    assert_eq!(second.host_state::<Cell<u64>>().unwrap().get(), 21);
 }
 
 #[test]

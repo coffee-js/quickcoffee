@@ -10,6 +10,7 @@ use num_bigint::BigInt;
 use num_integer::Integer as NumInteger;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 use std::{
+    any::Any,
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
@@ -1811,8 +1812,113 @@ impl CancellationToken {
     }
 }
 
+/// Type-erased host state owned by one execution Context.
+///
+/// The state is never exposed to QuickCoffee code, included in retained-memory
+/// accounting, or stored in Runtime compilation caches. Interior mutability is
+/// explicit in the host-provided type, such as `RefCell<T>`.
+#[derive(Clone)]
+pub struct HostState(Rc<dyn Any>);
+impl HostState {
+    /// Wraps one same-thread `'static` host value.
+    pub fn new<T: 'static>(value: T) -> Self {
+        Self(Rc::new(value))
+    }
+
+    /// Returns the state when its concrete host type matches `T`.
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+
+    /// Clones and downcasts the shared state handle when its type matches `T`.
+    pub fn downcast<T: 'static>(&self) -> Option<Rc<T>> {
+        self.0.clone().downcast().ok()
+    }
+
+    /// Reports whether this state contains `T`.
+    pub fn is<T: 'static>(&self) -> bool {
+        self.0.is::<T>()
+    }
+}
+
+/// Per-invocation controls available to an opt-in contextual native callback.
+pub struct NativeCallContext {
+    cancellation: Option<CancellationToken>,
+    resource_limits: ResourceLimits,
+    host_state: Option<HostState>,
+    fuel_remaining: u64,
+    managed_objects_allocated: u64,
+    managed_bytes_allocated: u64,
+}
+impl NativeCallContext {
+    /// Returns the deterministic value-size policy for the current execution.
+    pub fn resource_limits(&self) -> ResourceLimits {
+        self.resource_limits
+    }
+
+    /// Returns fuel left after charges already made by this callback.
+    pub fn fuel_remaining(&self) -> u64 {
+        self.fuel_remaining
+    }
+
+    /// Charges deterministic host work against the current execution's fuel.
+    ///
+    /// Insufficient fuel consumes the remainder and returns an uncatchable
+    /// [`ResourceLimit::Fuel`] error. Charges remain visible if the callback
+    /// subsequently returns another error.
+    pub fn consume_fuel(&mut self, amount: u64) -> Result<(), Error> {
+        let Some(remaining) = self.fuel_remaining.checked_sub(amount) else {
+            self.fuel_remaining = 0;
+            return Err(Error::resource(
+                ResourceLimit::Fuel,
+                "execution fuel exhausted by host callback",
+            ));
+        };
+        self.fuel_remaining = remaining;
+        Ok(())
+    }
+
+    /// Reports whether the embedding host requested cancellation.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+    }
+
+    /// Returns an uncatchable cancellation error when cancellation was requested.
+    pub fn check_cancelled(&self) -> Result<(), Error> {
+        if self.is_cancelled() {
+            Err(Error::resource(
+                ResourceLimit::Cancellation,
+                "execution cancelled by host",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Clones the Context-owned state handle when its concrete type matches `T`.
+    pub fn host_state<T: 'static>(&self) -> Option<Rc<T>> {
+        self.host_state.as_ref()?.downcast()
+    }
+
+    /// Records logical managed allocation performed by host work.
+    ///
+    /// These counters saturating-add to the current [`ExecutionStats`] even if
+    /// the callback returns an error. They do not change legacy
+    /// [`ExecutionStats::value_allocations`] and are telemetry rather than a
+    /// transient-memory hard limit.
+    pub fn record_managed_allocation(&mut self, objects: u64, bytes: u64) {
+        self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(objects);
+        self.managed_bytes_allocated = self.managed_bytes_allocated.saturating_add(bytes);
+    }
+}
+
 /// A host callback callable from QuickCoffee code.
 pub type NativeFunction = Rc<dyn Fn(&[Value]) -> Result<Value, Error>>;
+/// A host callback with cooperative execution controls and typed host state.
+pub type ContextualNativeFunction =
+    Rc<dyn Fn(&mut NativeCallContext, &[Value]) -> Result<Value, Error>>;
 
 fn native_value(function: NativeFunction) -> Value {
     Value::Function(Rc::new(Function {
@@ -1820,6 +1926,12 @@ fn native_value(function: NativeFunction) -> Value {
             function,
             allocation_profile: None,
         },
+    }))
+}
+
+fn contextual_native_value(function: ContextualNativeFunction) -> Value {
+    Value::Function(Rc::new(Function {
+        inner: FunctionKind::ContextualNative { function },
     }))
 }
 /// Opaque class metadata created only by verified QuickCoffee bytecode.
@@ -1855,6 +1967,9 @@ enum FunctionKind {
     Native {
         function: NativeFunction,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
+    },
+    ContextualNative {
+        function: ContextualNativeFunction,
     },
     ResourceBuiltin {
         function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
@@ -2781,6 +2896,7 @@ pub struct ContextBuilder {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
+    host_state: Option<HostState>,
     bindings: Vec<(String, Value)>,
 }
 impl ContextBuilder {
@@ -2791,6 +2907,7 @@ impl ContextBuilder {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
+            host_state: None,
             bindings: Vec::new(),
         }
     }
@@ -2819,6 +2936,12 @@ impl ContextBuilder {
         self
     }
 
+    /// Installs type-safe host state owned by the new Context.
+    pub fn host_state<T: 'static>(mut self, state: T) -> Self {
+        self.host_state = Some(HostState::new(state));
+        self
+    }
+
     /// Adds an immutable host global to the new Context.
     pub fn global(mut self, name: impl Into<String>, value: Value) -> Self {
         self.bindings.push((name.into(), value));
@@ -2835,6 +2958,16 @@ impl ContextBuilder {
         self
     }
 
+    /// Adds an opaque host callback with cooperative execution controls.
+    pub fn contextual_native<F>(mut self, name: impl Into<String>, function: F) -> Self
+    where
+        F: Fn(&mut NativeCallContext, &[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.bindings
+            .push((name.into(), contextual_native_value(Rc::new(function))));
+        self
+    }
+
     /// Builds an isolated Context attached to the configured Runtime.
     pub fn build(self) -> Context {
         let global = BUILTIN_ENVIRONMENT.with(|builtins| env(Some(builtins.clone())));
@@ -2846,6 +2979,7 @@ impl ContextBuilder {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation,
+            host_state: self.host_state,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -2868,6 +3002,7 @@ pub struct Context {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
+    host_state: Option<HostState>,
     last_execution: ExecutionStats,
     retained_memory_high_water: RetainedMemory,
 }
@@ -2886,6 +3021,7 @@ thread_local! {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
+            host_state: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         };
@@ -3194,6 +3330,7 @@ impl RetainedMemoryCensus {
                 }
             }
             FunctionKind::Native { .. }
+            | FunctionKind::ContextualNative { .. }
             | FunctionKind::ResourceBuiltin { .. }
             | FunctionKind::UnboundMethod { .. } => {}
         }
@@ -3363,6 +3500,7 @@ impl RetainedMemoryTransaction {
                 }
             }
             FunctionKind::Native { .. }
+            | FunctionKind::ContextualNative { .. }
             | FunctionKind::ResourceBuiltin { .. }
             | FunctionKind::UnboundMethod { .. } => {}
         }
@@ -3873,6 +4011,7 @@ impl Context {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
+            host_state: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -3948,6 +4087,23 @@ impl Context {
     pub fn clear_cancellation_token(&mut self) {
         self.cancellation = None;
     }
+    /// Returns this Context with type-safe, script-invisible host state.
+    pub fn with_host_state<T: 'static>(mut self, state: T) -> Self {
+        self.set_host_state(state);
+        self
+    }
+    /// Installs or replaces type-safe, script-invisible host state.
+    pub fn set_host_state<T: 'static>(&mut self, state: T) {
+        self.host_state = Some(HostState::new(state));
+    }
+    /// Removes the current host state from future contextual native calls.
+    pub fn clear_host_state(&mut self) {
+        self.host_state = None;
+    }
+    /// Returns the Context-owned host state when its concrete type matches `T`.
+    pub fn host_state<T: 'static>(&self) -> Option<&T> {
+        self.host_state.as_ref()?.downcast_ref()
+    }
     /// Returns counters from the most recent successful or failed execution.
     /// Compilation and verification errors do not replace the previous record.
     pub fn last_execution(&self) -> ExecutionStats {
@@ -4013,10 +4169,14 @@ impl Context {
     where
         F: Fn(&[Value]) -> Result<Value, Error> + 'static,
     {
-        self.add_shared_native(name, Rc::new(f));
+        self.set_global(name, native_value(Rc::new(f)));
     }
-    fn add_shared_native(&mut self, name: impl Into<String>, function: NativeFunction) {
-        self.set_global(name, native_value(function));
+    /// Registers a host callback with cooperative execution controls and typed state.
+    pub fn add_contextual_native<F>(&mut self, name: impl Into<String>, function: F)
+    where
+        F: Fn(&mut NativeCallContext, &[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.set_global(name, contextual_native_value(Rc::new(function)));
     }
     fn add_builtin<F>(
         &mut self,
@@ -4077,6 +4237,14 @@ impl Context {
         self.add_native(name, f);
         self
     }
+    /// Returns this Context after registering a contextual host callback.
+    pub fn with_contextual_native<F>(mut self, name: impl Into<String>, function: F) -> Self
+    where
+        F: Fn(&mut NativeCallContext, &[Value]) -> Result<Value, Error> + 'static,
+    {
+        self.add_contextual_native(name, function);
+        self
+    }
     /// Compiles, verifies, and executes source in this context.
     pub fn eval(&mut self, source: &str) -> Result<Value, Error> {
         let program = match &self.runtime {
@@ -4117,6 +4285,7 @@ impl Context {
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
+            host_state: self.host_state.clone(),
             name_loads: 0,
             name_stores: 0,
             calls: 0,
@@ -4151,6 +4320,7 @@ impl Context {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation.clone(),
+            host_state: self.host_state.clone(),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         }
@@ -4775,6 +4945,7 @@ struct Vm {
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
+    host_state: Option<HostState>,
     name_loads: u64,
     name_stores: u64,
     calls: u64,
@@ -5233,6 +5404,7 @@ impl Vm {
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
+            host_state: self.host_state.clone(),
             name_loads: self.name_loads,
             name_stores: self.name_stores,
             calls: self.calls,
@@ -6673,6 +6845,32 @@ fn call_with_context(
                 }
                 if let Some(allocation_profile) = allocation_profile {
                     vm.record_managed_allocation(allocation_profile(args, &value));
+                }
+                frames
+                    .last_mut()
+                    .expect("call has a caller frame")
+                    .stack
+                    .push(value);
+            }
+            FunctionKind::ContextualNative { function } => {
+                let mut context = NativeCallContext {
+                    cancellation: vm.cancellation.clone(),
+                    resource_limits: vm.resource_limits,
+                    host_state: vm.host_state.clone(),
+                    fuel_remaining: vm.fuel,
+                    managed_objects_allocated: 0,
+                    managed_bytes_allocated: 0,
+                };
+                let result = function(&mut context, args);
+                vm.fuel = context.fuel_remaining;
+                vm.record_managed_allocation(ManagedAllocation {
+                    legacy_value_allocations: 0,
+                    objects: context.managed_objects_allocated,
+                    bytes: context.managed_bytes_allocated,
+                });
+                let value = result?;
+                if vm.value_limits_active && value_needs_resource_check(&value) {
+                    check_value_resources(&value, vm.resource_limits)?;
                 }
                 frames
                     .last_mut()

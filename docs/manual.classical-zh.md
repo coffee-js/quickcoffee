@@ -86,6 +86,8 @@
 
 `Runtime::context_builder` 所成诸 Context 各守其全局、导出、燃料、止令、计数与留存之忆，惟共用有界且已验之 Program/Module 编译藏。
 
+特置 contextual native 得以 `NativeCallContext` 察止令、扣燃料、记托管分配，并取有型而脚本不见之 `HostState`，无暗授之权。
+
 `cargo run --example embed` 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 
 宿主可用 `Value::kind()` 别其类，`Value::is_nil()` 验 nil，不窥其内容器。
@@ -163,6 +165,7 @@ class BoundCounter
 
 bound_callback = new BoundCounter(40).callback()
 bound_callback()
+
 
 
 

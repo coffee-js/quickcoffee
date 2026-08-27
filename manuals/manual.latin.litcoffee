@@ -70,6 +70,8 @@ Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum 
 
 `Runtime::context_builder` contextus separatos creat qui tantum caches finitas Program/Module verificatorum communicant; globalia, exportata aestimata, alimentum, cancellatio, statistica et memoria retenta cuique contextui propria manent.
 
+Native contextualis opt-in per `NativeCallContext` cancellationem explorat, alimentum consumit, allocationes administratas refert, et `HostState` typatum scriptis invisibile accedit sine auctoritate ambiente.
+
 `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
 
 Hospes `Value::kind()` ad genus discernendum et `Value::is_nil()` ad nil probandum utitur, sine interioribus vasorum.
