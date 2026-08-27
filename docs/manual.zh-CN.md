@@ -48,7 +48,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qcoffee --json` 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
 
-Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.resource_limit()` 可分辨 fuel、调用深度、取消、JSON 六类边界、`StringBytes`、`ArrayItems`、`MapEntries`、`IntegerBits`、`DecimalCoefficientBits` 与 `DecimalScale`，宿主回调仍可返回 `Error::runtime("message")`，`error.position()` 可给出从 1 开始的源码行。
+Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.resource_limit()` 可分辨 fuel、调用深度、取消、JSON 六类边界、`StringBytes`、`ArrayItems`、`MapEntries`、`IntegerBits`、`DecimalCoefficientBits`、`DecimalScale`、`CollectionOperationItems`、`TextOperationBytes` 与 retained-memory 边界，宿主回调仍可返回 `Error::runtime("message")`，`error.position()` 可给出从 1 开始的源码行。
 
 `Engine::compile_program` 创建时验证一次；`Context::run_program` 重复执行时复用不可变的已验证字节码。
 
@@ -94,7 +94,7 @@ Cargo 包元数据指向仓库、docs.rs API、README 与许可证，便于嵌�
 
 严格或数值比较可成链，保留中间值且前段失败会短路。
 
-标准库皆为普通函数：print、len、type、error、range、str、trim、contains、starts_with、ends_with、sort、concat、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split 与 assert；RFC 0139 字符串查询严格且不读取 locale，trim 使用固定 Unicode White_Space 表；RFC 0140 sort 返回同质有限标量的新稳定数组，String 使用无 locale 的 Unicode scalar 顺序；RFC 0144 concat 只不可变地连接两个 String 或两个 Array，并在分配前检查资源边界；`error(code, message, data, cause)` 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。
+标准库皆为普通函数：print、len、type、error、range、str、trim、contains、starts_with、ends_with、replace_all、sort、concat、parse_json、encode_json、integer、number、decimal、decimal_div、round_decimal、abs、sum、min、max、keys、values、join、split 与 assert；RFC 0139 字符串查询严格且不读取 locale，trim 使用固定 Unicode White_Space 表；RFC 0140 sort 返回同质有限标量的新稳定数组，String 使用无 locale 的 Unicode scalar 顺序；RFC 0144 concat 只不可变地连接两个 String 或两个 Array；RFC 0150 replace_all 从左到右执行非重叠字面量替换且不重扫插入文本，两者都在分配前检查资源边界；`error(code, message, data, cause)` 构造密封的 RFC 0136 Error，catch 绑定 Error，资源错误仍不可捕获。
 
 
 RFC 0137 Decimal 字面量使用 m 后缀；精确除法拒绝循环小数，decimal_div 与 round_decimal 要求显式 scale 和舍入模式。
@@ -186,6 +186,7 @@ trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
 contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
 sort(['中', 'a', '☕']) == ['a', '☕', '中']
 concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
+replace_all('coffee coffee', 'coffee', 'bean') == 'bean bean'
 
 
 

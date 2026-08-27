@@ -1163,6 +1163,56 @@ fn concat_checks_output_and_operation_limits_before_copying() {
 }
 
 #[test]
+fn literal_replacement_checks_input_and_output_before_allocation() {
+    let defaults = ResourceLimits::default();
+    let constrained = defaults.with_max_text_operation_bytes(5);
+    assert_eq!(constrained.max_text_operation_bytes(), 5);
+
+    let mut context = Context::new();
+    context.eval("text = 'banana'").unwrap();
+    context.set_resource_limits(constrained);
+    let error = context
+        .eval_named(
+            "virtual://replace-limits.coffee",
+            "try replace_all(text, 'a', 'x') catch ignored then 'caught'",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TextOperationBytes)
+    );
+    assert!(
+        error
+            .message()
+            .contains("replace_all input exceeds 5 UTF-8 bytes")
+    );
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("virtual://replace-limits.coffee")
+    );
+    assert_eq!(context.eval("text").unwrap().as_str(), Some("banana"));
+
+    context.set_resource_limits(
+        defaults
+            .with_max_text_operation_bytes(6)
+            .with_max_string_bytes(7),
+    );
+    let error = context.eval("replace_all(text, 'a', 'xxx')").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    assert_eq!(context.eval("text").unwrap().as_str(), Some("banana"));
+
+    context.set_resource_limits(defaults);
+    assert_eq!(
+        context
+            .eval("replace_all(text, 'a', 'x')")
+            .unwrap()
+            .as_str(),
+        Some("bxnxnx")
+    );
+}
+
+#[test]
 fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
     let defaults = ResourceLimits::default();
     let constrained = defaults

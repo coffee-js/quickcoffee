@@ -3175,6 +3175,10 @@ fn concat_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
     ManagedAllocation::legacy_shallow(legacy, value)
 }
 
+fn replace_all_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
+    ManagedAllocation::legacy_shallow(u64::from(matches!(value, Value::String(_))), value)
+}
+
 fn legacy_json_value_allocations(value: &Value) -> u64 {
     match value {
         Value::Integer(_) | Value::Decimal(_) | Value::String(_) => 1,
@@ -3383,6 +3387,74 @@ fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> 
             "concat expects two strings or two arrays of the same type",
         )),
     }
+}
+
+fn replace_all_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 3 {
+        return Err(Error::runtime("replace_all expects three string arguments"));
+    }
+    let (Value::String(input), Value::String(needle), Value::String(replacement)) =
+        (&xs[0], &xs[1], &xs[2])
+    else {
+        return Err(Error::runtime("replace_all expects strings"));
+    };
+    if needle.is_empty() {
+        return Err(Error::runtime("replace_all needle must not be empty"));
+    }
+
+    let operation_limit = limits.max_text_operation_bytes();
+    if input.len() > operation_limit {
+        return Err(Error::resource(
+            ResourceLimit::TextOperationBytes,
+            format!("replace_all input exceeds {operation_limit} UTF-8 bytes"),
+        ));
+    }
+
+    let matches = input.match_indices(needle.as_ref()).count();
+    let output_len = checked_replacement_output_len(
+        input.len(),
+        needle.len(),
+        replacement.len(),
+        matches,
+        limits,
+    )?;
+    check_string_len_resource(output_len, limits)?;
+
+    let mut output = String::with_capacity(output_len);
+    let mut cursor = 0;
+    for (index, matched) in input.match_indices(needle.as_ref()) {
+        output.push_str(&input[cursor..index]);
+        output.push_str(replacement);
+        cursor = index + matched.len();
+    }
+    output.push_str(&input[cursor..]);
+    Ok(Value::String(Rc::from(output)))
+}
+
+fn checked_replacement_output_len(
+    input_len: usize,
+    needle_len: usize,
+    replacement_len: usize,
+    matches: usize,
+    limits: ResourceLimits,
+) -> Result<usize, Error> {
+    let output_len = if replacement_len >= needle_len {
+        replacement_len
+            .checked_sub(needle_len)
+            .and_then(|growth| growth.checked_mul(matches))
+            .and_then(|growth| input_len.checked_add(growth))
+    } else {
+        needle_len
+            .checked_sub(replacement_len)
+            .and_then(|shrink| shrink.checked_mul(matches))
+            .and_then(|shrink| input_len.checked_sub(shrink))
+    };
+    output_len.ok_or_else(|| {
+        Error::resource(
+            ResourceLimit::StringBytes,
+            format!("string exceeds {} bytes", limits.max_string_bytes()),
+        )
+    })
 }
 
 fn valid_error_code(code: &str) -> bool {
@@ -3823,6 +3895,7 @@ impl Context {
             };
             Ok(Value::Bool(input.ends_with(suffix.as_ref())))
         });
+        self.add_resource_builtin("replace_all", replace_all_builtin, replace_all_allocations);
         self.add_resource_builtin("sort", sort_builtin, sorted_array_allocations);
         self.add_resource_builtin("concat", concat_builtin, concat_allocations);
         self.install_json_builtins();
@@ -7460,6 +7533,14 @@ fn slice_bound(value: Value, len: usize, name: &str) -> Result<usize, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_replacement_length_rejects_arithmetic_overflow() {
+        let limits = ResourceLimits::default().with_max_string_bytes(usize::MAX);
+        let error = checked_replacement_output_len(usize::MAX, 1, 2, 1, limits).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Resource);
+        assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    }
 
     #[test]
     fn static_pattern_fast_path_prevalidates_and_counts_rest_backings() {
