@@ -2505,6 +2505,7 @@ pub struct Context {
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
     last_execution: ExecutionStats,
+    retained_memory_high_water: RetainedMemory,
 }
 
 thread_local! {
@@ -2521,6 +2522,7 @@ thread_local! {
             resource_limits: ResourceLimits::default(),
             cancellation: None,
             last_execution: ExecutionStats::default(),
+            retained_memory_high_water: RetainedMemory::default(),
         };
         context.install_builtins();
         global
@@ -3214,6 +3216,10 @@ impl Context {
             resource_limits: ResourceLimits::default(),
             cancellation: None,
             last_execution: ExecutionStats::default(),
+            retained_memory_high_water: RetainedMemory {
+                objects: 1,
+                bytes: 0,
+            },
         }
     }
     /// Returns a builder-style context with the supplied fuel budget.
@@ -3293,6 +3299,32 @@ impl Context {
         let mut census = RetainedMemoryCensus::default();
         census.environment(&self.global);
         census.snapshot
+    }
+    /// Samples this context's currently retained managed-memory graph.
+    ///
+    /// The returned value has the same meaning as [`Context::retained_memory`].
+    /// This explicit host operation also updates the component-wise lifetime
+    /// high-water record returned by [`Context::retained_memory_high_water`].
+    /// It deliberately does not run automatically after VM instructions or
+    /// executions, so it is not a full live-memory peak and has no dispatch
+    /// overhead when an embedding host does not request it.
+    pub fn sample_retained_memory(&mut self) -> RetainedMemory {
+        let snapshot = self.retained_memory();
+        self.retained_memory_high_water.objects = self
+            .retained_memory_high_water
+            .objects
+            .max(snapshot.objects);
+        self.retained_memory_high_water.bytes =
+            self.retained_memory_high_water.bytes.max(snapshot.bytes);
+        snapshot
+    }
+    /// Returns the component-wise maximum of explicit retained-memory samples.
+    ///
+    /// A new context starts with its empty writable global environment sampled.
+    /// This record lasts for the context lifetime and is not an allocator, RSS,
+    /// or instruction-by-instruction live-memory peak.
+    pub fn retained_memory_high_water(&self) -> RetainedMemory {
+        self.retained_memory_high_water
     }
     /// Installs or replaces an immutable global value visible to later runs.
     pub fn set_global(&mut self, name: impl Into<String>, value: Value) {
@@ -3439,6 +3471,7 @@ impl Context {
             resource_limits: self.resource_limits,
             cancellation: self.cancellation.clone(),
             last_execution: ExecutionStats::default(),
+            retained_memory_high_water: RetainedMemory::default(),
         }
     }
     pub(crate) fn get_local(&self, name: &str) -> Option<Value> {

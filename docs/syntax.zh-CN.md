@@ -16,6 +16,8 @@
 
 `Context::retained_memory()` 读取该 Context global 可达值的确定性 logical object/byte 快照，会对共享值与循环去重，并跳过共享 builtin 和宿主 callback 内部；它不是 RSS、峰值或硬内存上限。
 
+需要可重复观测高水位的嵌入方，应在选定的业务边界显式调用 `Context::sample_retained_memory()`，再用 `Context::retained_memory_high_water()` 读取 Context 生命周期内各字段的最大已采样值。普查不会在每条 VM 指令或每次执行后自动运行，因此它不是完整的 live-memory 峰值，也不是硬限制。
+
 `qbench --compare-qjs PATH --compare-iterations 1 --repeat 11 --json` 输出独立的 `quickcoffee.qcompare.v1` 同机对比；PATH 完全由调用者提供，记录覆盖标量循环、函数调用、数组构造/索引/遍历、映射读取/不可变更新和 Unicode 标量遍历/索引，并分别包含启动、编译、预编译热执行与端到端 CLI 总耗时，不能与进程内 `qbench.v1` 混比。JavaScript 的字符串下标是 UTF-16 code unit；Unicode 索引负载以 `Array.from` 预解码标量来匹配 QuickCoffee 的结果语义，此适配不表示底层操作同构。
 
 这是 RFC 0001 的中文索引；未列出的 CoffeeScript 2016 特性不是“隐式兼容”，而是明确不支持。Cargo 包元数据提供仓库、README、许可证和 docs.rs API 链接。

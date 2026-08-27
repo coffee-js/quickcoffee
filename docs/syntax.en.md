@@ -18,6 +18,8 @@ The bundled `qtest --json` runner emits one stable JSON result per file for CI a
 
 `Context::retained_memory()` reads a deterministic logical object/byte snapshot of values reachable from that Context's globals. It deduplicates shared values and cycles, excludes the shared builtins and host callback internals, and is neither RSS nor a peak or hard memory limit.
 
+An embedder that needs a repeatable observation high water calls `Context::sample_retained_memory()` at its chosen business boundary, then reads the component-wise lifetime maximum with `Context::retained_memory_high_water()`. Sampling is deliberately explicit: it does not traverse the graph after every VM instruction or execution, so it is not a full live-memory peak or a hard limit.
+
 `qbench --compare-qjs PATH --compare-iterations 1 --repeat 11 --json` emits a separate `quickcoffee.qcompare.v1` same-machine comparison. The caller supplies PATH; the suite covers scalar loops, function calls, array construction/indexing/iteration, map lookup/functional update, and Unicode scalar iteration/indexing. Records separate startup, compilation, precompiled hot execution, and end-to-end CLI time, so they must not be compared directly with in-process `qbench.v1` fields. Because JavaScript string indexing addresses UTF-16 code units, the Unicode indexing workload predecodes scalars with `Array.from` to match QuickCoffee's result semantics; that adapter does not make the underlying operations identical.
 
 Integer ranges are ascending or descending: `[2..4]` is `[2, 3, 4]`, `[4..2]` is `[4, 3, 2]`, and exclusive forms omit the end (`[4...2]` is `[4, 3]`). Bounds must be finite integers and oversized ranges are rejected.

@@ -67,6 +67,27 @@ fn module_exports_are_counted_only_after_the_host_retains_them_in_context() {
 }
 
 #[test]
+fn module_execution_and_host_roots_need_explicit_high_water_samples() {
+    let engine = Engine::new();
+    let module = engine
+        .compile_module("memory", "export payload = ['coffee', 'beans']")
+        .unwrap();
+    let mut context = Context::new();
+    let initial_high_water = context.retained_memory_high_water();
+    let exports = context
+        .run_module(&module, &MemoryModuleLoader::new())
+        .unwrap();
+    assert_eq!(context.retained_memory_high_water(), initial_high_water);
+
+    context.set_global("payload", exports.get("payload").unwrap().clone());
+    assert_eq!(context.retained_memory_high_water(), initial_high_water);
+    let snapshot = context.sample_retained_memory();
+    assert!(snapshot.objects > initial_high_water.objects);
+    assert!(snapshot.bytes > initial_high_water.bytes);
+    assert_eq!(context.retained_memory_high_water(), snapshot);
+}
+
+#[test]
 fn modules_export_classes_without_exposing_their_receiver_state() {
     let engine = Engine::new();
     let main = engine
