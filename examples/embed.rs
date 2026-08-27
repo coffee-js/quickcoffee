@@ -1,5 +1,6 @@
 use quickcoffee::{
-    CancellationToken, CapabilityKey, CapabilityKind, Error, ResourceLimits, Runtime, Value,
+    CancellationToken, CapabilityKey, CapabilityKind, CompileLimits, Error, ResourceLimits,
+    Runtime, Value,
 };
 use std::cell::Cell;
 
@@ -7,6 +8,13 @@ fn main() -> Result<(), Error> {
     let cancellation = CancellationToken::new();
     let audit = CapabilityKey::<Cell<u64>>::new(CapabilityKind::Logging, "audit-count");
     let runtime = Runtime::builder()
+        .compile_limits(
+            CompileLimits::default()
+                .with_max_source_bytes(1_000_000)
+                .with_max_bytecode_instructions(1_000_000)
+                .with_max_module_graph_modules(1_024)
+                .with_max_module_graph_source_bytes(16_000_000),
+        )
         .program_cache_entries(64)
         .module_cache_entries(64)
         .build();

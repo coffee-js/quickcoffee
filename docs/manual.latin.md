@@ -24,6 +24,8 @@ Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Cont
 
 `Engine::fingerprint_module_graph` per eundem loader totum graphum legit et verificat sine exsecutione, clavem u64 versionatam fontibus, nominibus canonicis, import/export et marginibus sensibilem reddens.
 
+`CompileLimits` separatim bytes fontis crudi, instructiones bytecodicis recursivas, modulos unicos et fontem cumulatum graphi finiunt; graphus totus ante ullum scriptum modulorum currens probatur, et `qcoffee` optiones pares `--max-*` praebet.
+
 `qcoffee --check FILE` fontem verificat sine cursu.
 
 `qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit.

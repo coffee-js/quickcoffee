@@ -22,6 +22,8 @@ Embedded modules may use named import/export; `Engine::compile_module` and `Cont
 
 Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
 
+`CompileLimits` separately bound raw source bytes, recursive bytecode instructions, unique modules, and cumulative module-graph source; module execution preflights the complete graph before any script runs, and `qcoffee` exposes matching `--max-*` options.
+
 `IntoValue` and `TryFromValue` convert owned host scalars, Vec, `BTreeMap<String, T>`, and Option recursively without running a script; nil alone maps to None, and Number, Integer, Decimal, and other kinds never coerce across their boundaries.
 
 `qcoffee --check FILE` parses, compiles, and verifies without executing FILE.

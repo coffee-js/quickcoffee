@@ -22,6 +22,8 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 嵌入宿主可用 `Context::with_fuel`、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。
 
+`CompileLimits` 另行限制原始 source bytes、递归 bytecode instructions、唯一模块数和累计模块图 source；模块执行会在任何脚本运行前预检完整静态图，`qcoffee` 提供对应的 `--max-*` 选项。
+
 `IntoValue` 与 `TryFromValue` 可递归转换拥有型宿主标量、Vec、`BTreeMap<String, T>` 与 Option，不执行脚本；只有 nil 映射为 None，Number、Integer、Decimal 及其他类别之间绝不 coercion。
 
 `qcoffee --check FILE` 只解析、编译并验证 FILE，不执行它。

@@ -1,5 +1,7 @@
 /// Stable reason for a resource-boundary failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+#[repr(u8)]
 pub enum ResourceLimit {
     /// The per-run instruction budget was exhausted.
     Fuel,
@@ -39,6 +41,106 @@ pub enum ResourceLimit {
     RetainedManagedObjects,
     /// A Context would retain more logical managed payload bytes than permitted.
     RetainedManagedBytes,
+    // Append new categories so existing resource-stop discriminants and the
+    // monolithic VM dispatch slow paths remain stable.
+    /// One raw QuickCoffee source exceeded its configured UTF-8 byte boundary.
+    SourceBytes = 20,
+    /// One Program or Module exceeded its recursive bytecode instruction boundary.
+    BytecodeInstructions = 21,
+    /// One static module graph exceeded its unique canonical-module boundary.
+    ModuleGraphModules = 22,
+    /// One static module graph exceeded its cumulative raw source byte boundary.
+    ModuleGraphSourceBytes = 23,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResourceLimit;
+
+    #[test]
+    fn legacy_resource_discriminants_stay_stable() {
+        assert_eq!(ResourceLimit::Fuel as u8, 0);
+        assert_eq!(ResourceLimit::CallDepth as u8, 1);
+        assert_eq!(ResourceLimit::Cancellation as u8, 2);
+        assert_eq!(ResourceLimit::RetainedManagedBytes as u8, 18);
+        assert_eq!(ResourceLimit::SourceBytes as u8, 20);
+        assert_eq!(ResourceLimit::BytecodeInstructions as u8, 21);
+        assert_eq!(ResourceLimit::ModuleGraphModules as u8, 22);
+        assert_eq!(ResourceLimit::ModuleGraphSourceBytes as u8, 23);
+    }
+}
+
+/// Deterministic source, bytecode, and static module-graph boundaries.
+///
+/// These limits apply before execution and remain separate from per-Context
+/// [`ResourceLimits`]. Raw source is counted before `.litcoffee`
+/// preprocessing, bytecode instructions include recursively nested function
+/// and pattern-default chunks, and graph totals charge each canonical module
+/// once. Hosts can replace every default explicitly through the builder-style
+/// methods below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompileLimits {
+    max_source_bytes: usize,
+    max_bytecode_instructions: usize,
+    max_module_graph_modules: usize,
+    max_module_graph_source_bytes: usize,
+}
+
+impl Default for CompileLimits {
+    fn default() -> Self {
+        Self {
+            max_source_bytes: 1_000_000,
+            max_bytecode_instructions: 1_000_000,
+            max_module_graph_modules: 1_024,
+            max_module_graph_source_bytes: 16_000_000,
+        }
+    }
+}
+
+impl CompileLimits {
+    /// Returns the maximum raw UTF-8 bytes accepted for one source.
+    pub fn max_source_bytes(&self) -> usize {
+        self.max_source_bytes
+    }
+
+    /// Returns a policy with the per-source UTF-8 byte boundary replaced.
+    pub fn with_max_source_bytes(mut self, limit: usize) -> Self {
+        self.max_source_bytes = limit;
+        self
+    }
+
+    /// Returns the maximum recursively reachable bytecode instructions in one artifact.
+    pub fn max_bytecode_instructions(&self) -> usize {
+        self.max_bytecode_instructions
+    }
+
+    /// Returns a policy with the recursive bytecode instruction boundary replaced.
+    pub fn with_max_bytecode_instructions(mut self, limit: usize) -> Self {
+        self.max_bytecode_instructions = limit;
+        self
+    }
+
+    /// Returns the maximum unique canonical modules in one static graph.
+    pub fn max_module_graph_modules(&self) -> usize {
+        self.max_module_graph_modules
+    }
+
+    /// Returns a policy with the unique canonical-module boundary replaced.
+    pub fn with_max_module_graph_modules(mut self, limit: usize) -> Self {
+        self.max_module_graph_modules = limit;
+        self
+    }
+
+    /// Returns the maximum cumulative raw UTF-8 source bytes in one static module graph.
+    pub fn max_module_graph_source_bytes(&self) -> usize {
+        self.max_module_graph_source_bytes
+    }
+
+    /// Returns a policy with the cumulative module-graph source boundary replaced.
+    pub fn with_max_module_graph_source_bytes(mut self, limit: usize) -> Self {
+        self.max_module_graph_source_bytes = limit;
+        self
+    }
 }
 
 /// Deterministic data-size boundaries applied by an execution [`crate::Context`].

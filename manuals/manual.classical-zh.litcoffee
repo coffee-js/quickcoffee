@@ -8,6 +8,8 @@
 
 数列与 Unicode 字符负索引，-一取其末。
 
+`CompileLimits` 别限原 source 之 bytes、递归 bytecode 之 instructions、模块之数与图中 source 总量；模块未尽预验，则一文不行，`qcoffee` 亦有相应 `--max-*` 之选。
+
 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无公开原型之链、全局或游离之 this、eval 与内嵌之文；今已有缩进 class、构造、受限接收者、new、私有 extends 之链、静析之 super，及可逸出而不泄接收者之 =>。
 
     class BoundCounter

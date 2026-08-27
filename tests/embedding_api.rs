@@ -1,7 +1,8 @@
 use quickcoffee::{
-    CancellationToken, CapabilityKey, CapabilityKind, Context, Decimal, DiagnosticLabelKind,
-    Engine, Error, ErrorKind, HostCapabilities, Integer, IntoValue, ResourceLimit, ResourceLimits,
-    RetainedMemory, Runtime, TryFromValue, Value, ValueKind,
+    CancellationToken, CapabilityKey, CapabilityKind, Chunk, CompileLimits, Constant, Context,
+    Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionStats, HostCapabilities,
+    Instruction, Integer, IntoValue, Program, ResourceLimit, ResourceLimits, RetainedMemory,
+    Runtime, TryFromValue, Value, ValueKind,
 };
 use std::{cell::Cell, collections::BTreeMap};
 
@@ -310,6 +311,82 @@ fn runtime_contexts_do_not_share_host_state_implicitly() {
     assert_eq!(second.eval("state()").unwrap().as_number(), Some(21.));
     assert_eq!(first.host_state::<Cell<u64>>().unwrap().get(), 11);
     assert_eq!(second.host_state::<Cell<u64>>().unwrap().get(), 21);
+}
+
+#[test]
+fn compile_limits_bound_raw_source_recursive_bytecode_and_foreign_programs() {
+    let defaults = CompileLimits::default();
+    assert_eq!(defaults.max_source_bytes(), 1_000_000);
+    assert_eq!(defaults.max_bytecode_instructions(), 1_000_000);
+    assert_eq!(defaults.max_module_graph_modules(), 1_024);
+    assert_eq!(defaults.max_module_graph_source_bytes(), 16_000_000);
+
+    let source = "f = (fallback = -> 1) -> fallback()\nf()";
+    let ordinary = Engine::new().compile_program(source).unwrap();
+    assert!(ordinary.instruction_count() > 2);
+    let source_limited = CompileLimits::default().with_max_source_bytes(source.len() - 1);
+    let error = Engine::new()
+        .with_compile_limits(source_limited)
+        .compile_program_named("policy.coffee", source)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+    assert_eq!(error.position().unwrap().line, 1);
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("policy.coffee")
+    );
+
+    let bytecode_limited =
+        CompileLimits::default().with_max_bytecode_instructions(ordinary.instruction_count() - 1);
+    let error = Engine::new()
+        .with_compile_limits(bytecode_limited)
+        .compile_program_named("policy.coffee", source)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+    assert_eq!(error.position().unwrap().line, 1);
+
+    let literate = "A prose line with `inline_code`.\n\n    true";
+    let error = Engine::new()
+        .with_compile_limits(CompileLimits::default().with_max_source_bytes(literate.len() - 1))
+        .compile_program_named("policy.litcoffee", literate)
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_source_bytes(4))
+        .build();
+    assert_eq!(runtime.compile_limits().max_source_bytes(), 4);
+    assert_eq!(
+        runtime
+            .compile_program("1 + 1")
+            .unwrap_err()
+            .resource_limit(),
+        Some(ResourceLimit::SourceBytes)
+    );
+    assert_eq!(runtime.cache_stats().program_misses, 0);
+    runtime.compile_program("true").unwrap();
+    assert_eq!(runtime.cache_stats().program_misses, 1);
+
+    let raw = Program::from(Chunk {
+        constants: vec![Constant::Value(Value::from(1_f64))],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    });
+    assert_eq!(raw.instruction_count(), 2);
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_bytecode_instructions(1))
+        .build();
+    let mut context = runtime.new_context();
+    let error = context.run_program(&raw).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+    assert_eq!(context.last_execution(), ExecutionStats::default());
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use quickcoffee::{
-    CapabilityKey, CapabilityKind, Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION,
-    MemoryModuleLoader, ModuleLoader, ModuleSource, ResourceLimit, ResourceLimits,
-    RestrictedFileModuleLoader, Runtime, Value,
+    CapabilityKey, CapabilityKind, CompileLimits, Context, Engine, ErrorKind,
+    MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader, ModuleSource,
+    ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
     cell::Cell,
@@ -154,6 +154,112 @@ fn module_children_inherit_typed_capability_handles() {
         .unwrap();
     assert_eq!(exports.get("value").and_then(Value::as_number), Some(41.));
     assert_eq!(context.capability(audit).unwrap().get(), 41);
+}
+
+#[test]
+fn compile_limits_bound_module_bytecode_and_preflight_graphs_before_execution() {
+    let entry_source =
+        "import { left } from 'left'\nimport { right } from 'right'\nexport total = left + right";
+    let left_source = "export left = tick()";
+    let right_source = "export right = tick()";
+    let ordinary = Engine::new().compile_module("main", entry_source).unwrap();
+    assert!(ordinary.instruction_count() > 1);
+    let error = Engine::new()
+        .with_compile_limits(
+            CompileLimits::default()
+                .with_max_bytecode_instructions(ordinary.instruction_count() - 1),
+        )
+        .compile_module("main", entry_source)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("left", left_source);
+    loader.insert("right", right_source);
+    let module_limits = CompileLimits::default().with_max_module_graph_modules(2);
+    let runtime = Runtime::builder().compile_limits(module_limits).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let calls = Rc::new(Cell::new(0_u64));
+    let observed = calls.clone();
+    let mut context = runtime
+        .context_builder()
+        .native("tick", move |_| {
+            observed.set(observed.get() + 1);
+            Ok(Value::from(1_f64))
+        })
+        .build();
+    let error = context.run_module(&entry, &loader).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphModules)
+    );
+    assert_eq!(calls.get(), 0);
+    let error = Engine::new()
+        .with_compile_limits(module_limits)
+        .fingerprint_module_graph(&entry, &loader)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphModules)
+    );
+
+    let graph_bytes = entry_source.len() + left_source.len() + right_source.len();
+    let byte_limits = CompileLimits::default().with_max_module_graph_source_bytes(graph_bytes - 1);
+    let runtime = Runtime::builder().compile_limits(byte_limits).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let mut context = runtime.new_context();
+    let error = context.run_module(&entry, &loader).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphSourceBytes)
+    );
+    assert_eq!(context.last_execution().instructions, 0);
+    let error = Engine::new()
+        .with_compile_limits(byte_limits)
+        .fingerprint_module_graph(&entry, &loader)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphSourceBytes)
+    );
+
+    let exact = CompileLimits::default().with_max_module_graph_source_bytes(graph_bytes);
+    let runtime = Runtime::builder().compile_limits(exact).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let mut context = runtime
+        .context_builder()
+        .native("tick", |_| Ok(Value::from(1_f64)))
+        .build();
+    assert_eq!(
+        context
+            .run_module(&entry, &loader)
+            .unwrap()
+            .get("total")
+            .and_then(Value::as_number),
+        Some(2_f64)
+    );
+}
+
+#[test]
+fn restricted_file_loader_bounds_source_before_full_read() {
+    let root = module_temp("source-limit");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("main.coffee"), "export value = true").unwrap();
+    let loader = RestrictedFileModuleLoader::new(&root)
+        .unwrap()
+        .with_max_source_bytes(4);
+    let error = loader.load_entry("main").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("main.coffee")
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -600,7 +706,7 @@ fn module_cycles_are_rejected_and_resources_cover_dependencies() {
             .contains("circular module dependency: main -> a -> b -> a")
     );
 
-    loader.insert("a", "loop 1");
+    loader.insert("a", "loop 1\nexport value = 1");
     let error = Context::new()
         .with_fuel(8)
         .run_module(&main, &loader)

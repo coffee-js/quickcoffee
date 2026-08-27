@@ -24,6 +24,8 @@
 
 `Engine::fingerprint_module_graph` तेनैव loader द्वारा सम्पूर्णं स्थिर-graph पठित्वा सत्यापयति, न चालयति; version-युक्ता u64-कुञ्जी dependency-source, canonical-name, import/export तथा edge-परिवर्तनं ज्ञापयति।
 
+`CompileLimits` पृथक् raw-source-bytes, recursive-bytecode-instructions, unique-modules तथा cumulative-module-graph-source सीमयति; सम्पूर्ण-graph पूर्वं सत्यापिते एव module-script चलति, `qcoffee` समान `--max-*` विकल्पान् ददाति।
+
 `qcoffee --check FILE` स्रोतं verify करोति, न चालयति।
 
 `qcoffee --interactive` (वा `-i`) एकं Context पङ्क्ति-क्रमेण धारयति; `:help` दर्शयति, `:quit` निर्गच्छति।

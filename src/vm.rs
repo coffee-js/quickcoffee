@@ -1,7 +1,7 @@
 use crate::{
-    ResourceLimit, ResourceLimits,
+    CompileLimits, ResourceLimit, ResourceLimits,
     bytecode::{Chunk, Constant, Instruction, Pattern},
-    compile, json,
+    json,
     lowering::{self, ChunkSourceMap, CompiledSourceMap},
     module::Module,
     parser,
@@ -1556,9 +1556,50 @@ pub struct Error {
     kind: ErrorKind,
     message: String,
     labels: Vec<DiagnosticLabel>,
-    resource_limit: Option<ResourceLimit>,
+    resource_limit: ResourceLimitSlot,
     script_error: Option<Rc<ScriptError>>,
     verification_site: Option<VerificationSite>,
+}
+#[derive(Clone, Copy)]
+struct ResourceLimitSlot(u8);
+impl ResourceLimitSlot {
+    // This was the niche value used by `Option<ResourceLimit>` before compile
+    // limits were added. Keep it stable because Error construction occurs in
+    // the VM dispatch loop's cold paths and affects their surrounding layout.
+    const NONE: Self = Self(19);
+
+    fn some(limit: ResourceLimit) -> Self {
+        Self(limit as u8)
+    }
+
+    fn get(self) -> Option<ResourceLimit> {
+        match self.0 {
+            0 => Some(ResourceLimit::Fuel),
+            1 => Some(ResourceLimit::CallDepth),
+            2 => Some(ResourceLimit::Cancellation),
+            3 => Some(ResourceLimit::JsonInputBytes),
+            4 => Some(ResourceLimit::JsonOutputBytes),
+            5 => Some(ResourceLimit::JsonStringBytes),
+            6 => Some(ResourceLimit::JsonContainerItems),
+            7 => Some(ResourceLimit::JsonValueCount),
+            8 => Some(ResourceLimit::JsonNestingDepth),
+            9 => Some(ResourceLimit::IntegerBits),
+            10 => Some(ResourceLimit::DecimalCoefficientBits),
+            11 => Some(ResourceLimit::DecimalScale),
+            12 => Some(ResourceLimit::CollectionOperationItems),
+            13 => Some(ResourceLimit::TextOperationBytes),
+            14 => Some(ResourceLimit::StringBytes),
+            15 => Some(ResourceLimit::ArrayItems),
+            16 => Some(ResourceLimit::MapEntries),
+            17 => Some(ResourceLimit::RetainedManagedObjects),
+            18 => Some(ResourceLimit::RetainedManagedBytes),
+            20 => Some(ResourceLimit::SourceBytes),
+            21 => Some(ResourceLimit::BytecodeInstructions),
+            22 => Some(ResourceLimit::ModuleGraphModules),
+            23 => Some(ResourceLimit::ModuleGraphSourceBytes),
+            _ => None,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy)]
 struct VerificationSite {
@@ -1571,7 +1612,7 @@ impl fmt::Debug for Error {
             .field("kind", &self.kind)
             .field("message", &self.message)
             .field("labels", &self.labels)
-            .field("resource_limit", &self.resource_limit)
+            .field("resource_limit", &self.resource_limit.get())
             .field("script_error", &self.script_error)
             .finish()
     }
@@ -1582,7 +1623,7 @@ impl Error {
             kind: ErrorKind::Parse,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1592,7 +1633,7 @@ impl Error {
             kind: ErrorKind::Verify,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1603,7 +1644,7 @@ impl Error {
             kind: ErrorKind::Runtime,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1629,17 +1670,17 @@ impl Error {
             kind: ErrorKind::Runtime,
             message,
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: Some(script_error),
             verification_site: None,
         }
     }
-    fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
+    pub(crate) fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
         Self {
             kind: ErrorKind::Resource,
             message: message.into(),
             labels: Vec::new(),
-            resource_limit: Some(limit),
+            resource_limit: ResourceLimitSlot::some(limit),
             script_error: None,
             verification_site: None,
         }
@@ -1668,7 +1709,7 @@ impl Error {
     }
     /// Returns the crossed resource boundary for a resource error.
     pub fn resource_limit(&self) -> Option<ResourceLimit> {
-        self.resource_limit
+        self.resource_limit.get()
     }
     /// Returns the structured script/domain error when this Runtime error carries one.
     pub fn script_error(&self) -> Option<&ScriptError> {
@@ -1679,7 +1720,7 @@ impl Error {
             kind: ErrorKind::Runtime,
             message: script_error.message.to_string(),
             labels: script_error.trusted_labels.clone(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: Some(script_error),
             verification_site: None,
         }
@@ -2031,7 +2072,6 @@ impl NativeCallContext {
     pub fn resource_limits(&self) -> ResourceLimits {
         self.resource_limits
     }
-
     /// Returns fuel left after charges already made by this callback.
     pub fn fuel_remaining(&self) -> u64 {
         self.fuel_remaining
@@ -2359,7 +2399,9 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
 
 /// A reusable compiler that does not hold execution state.
 #[derive(Clone, Default)]
-pub struct Engine;
+pub struct Engine {
+    compile_limits: CompileLimits,
+}
 
 const DEFAULT_PROGRAM_CACHE_ENTRIES: usize = 64;
 const DEFAULT_MODULE_CACHE_ENTRIES: usize = 64;
@@ -2449,10 +2491,11 @@ struct RuntimeInner {
 #[derive(Clone)]
 pub struct Runtime(Rc<RuntimeInner>);
 
-/// Configures a [`Runtime`] and its bounded compilation caches.
+/// Configures a [`Runtime`], its compile limits, and bounded compilation caches.
 pub struct RuntimeBuilder {
     program_cache_entries: usize,
     module_cache_entries: usize,
+    compile_limits: CompileLimits,
 }
 
 /// A read-only cumulative snapshot of one Runtime's compilation caches.
@@ -2488,6 +2531,106 @@ struct ProgramInner {
     debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
 }
+
+#[inline(never)]
+fn collect_pattern_chunks<'a>(pattern: &'a Pattern, chunks: &mut Vec<&'a Chunk>) {
+    let mut patterns = vec![pattern];
+    while let Some(pattern) = patterns.pop() {
+        match pattern {
+            Pattern::Default { pattern, default } => {
+                patterns.push(pattern);
+                chunks.push(default.as_ref());
+            }
+            Pattern::Array(items) => patterns.extend(items),
+            Pattern::Map(fields) | Pattern::MapRest { fields, .. } => {
+                patterns.extend(fields.iter().map(|(_, pattern)| pattern));
+            }
+            Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => {}
+        }
+    }
+}
+
+// Keep this raw-bytecode validation traversal after the short VM arithmetic
+// helpers under the single-codegen-unit release profile. Their hot loops are
+// measurably sensitive to unrelated code placement.
+#[inline(never)]
+pub(crate) fn count_bcs(chunk: &Chunk) -> usize {
+    let mut count = 0_usize;
+    let mut chunks = vec![chunk];
+    let mut visited = BTreeSet::new();
+    while let Some(chunk) = chunks.pop() {
+        if !visited.insert(chunk as *const Chunk as usize) {
+            continue;
+        }
+        count = count.saturating_add(chunk.code.len());
+        for constant in &chunk.constants {
+            if let Constant::Function { params, chunk, .. } = constant {
+                chunks.push(chunk.as_ref());
+                for pattern in params {
+                    collect_pattern_chunks(pattern, &mut chunks);
+                }
+            }
+        }
+        for instruction in &chunk.code {
+            match instruction {
+                Instruction::Destructure(pattern) => collect_pattern_chunks(pattern, &mut chunks),
+                Instruction::IterNext { patterns, .. } => {
+                    for pattern in patterns {
+                        collect_pattern_chunks(pattern, &mut chunks);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    count
+}
+
+// Compiler-produced chunks form a tree, so they do not need the identity set
+// required for arbitrary public `Chunk` graphs.
+#[inline(never)]
+pub(crate) fn count_new(chunk: &Chunk) -> usize {
+    fn count_pattern(pattern: &Pattern) -> usize {
+        match pattern {
+            Pattern::Default { pattern, default } => {
+                count_pattern(pattern).saturating_add(count_new(default))
+            }
+            Pattern::Array(items) => items.iter().fold(0_usize, |count, pattern| {
+                count.saturating_add(count_pattern(pattern))
+            }),
+            Pattern::Map(fields) | Pattern::MapRest { fields, .. } => {
+                fields.iter().fold(0_usize, |count, (_, pattern)| {
+                    count.saturating_add(count_pattern(pattern))
+                })
+            }
+            Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => 0,
+        }
+    }
+
+    let constants = chunk.constants.iter().fold(0_usize, |count, constant| {
+        let Constant::Function { params, chunk, .. } = constant else {
+            return count;
+        };
+        params
+            .iter()
+            .fold(count.saturating_add(count_new(chunk)), |count, pattern| {
+                count.saturating_add(count_pattern(pattern))
+            })
+    });
+    chunk.code.iter().fold(
+        chunk.code.len().saturating_add(constants),
+        |count, instruction| match instruction {
+            Instruction::Destructure(pattern) => count.saturating_add(count_pattern(pattern)),
+            Instruction::IterNext { patterns, .. } => {
+                patterns.iter().fold(count, |count, pattern| {
+                    count.saturating_add(count_pattern(pattern))
+                })
+            }
+            _ => count,
+        },
+    )
+}
+
 #[derive(Debug)]
 struct ProgramExecutionPlan {
     chunks: BTreeMap<usize, Rc<ChunkBindingSlots>>,
@@ -2703,19 +2846,26 @@ impl ProgramExecutionPlan {
 }
 #[derive(Debug)]
 struct ProgramDebugInfo {
-    source_name: Option<Rc<str>>,
+    source_name: Option<Rc<String>>,
     instruction_spans: BTreeMap<usize, ChunkSourceMap>,
+    instruction_count: usize,
 }
 impl ProgramDebugInfo {
-    fn new(chunk: &Rc<Chunk>, source_map: CompiledSourceMap, source_name: Option<&str>) -> Self {
+    fn new(
+        chunk: &Rc<Chunk>,
+        source_map: CompiledSourceMap,
+        source_name: Option<&str>,
+        instruction_count: usize,
+    ) -> Self {
         let mut instruction_spans = BTreeMap::new();
         instruction_spans.insert(Rc::as_ptr(chunk) as usize, source_map.top);
         for (nested, source_map) in source_map.nested {
             instruction_spans.insert(Rc::as_ptr(&nested) as usize, source_map);
         }
         Self {
-            source_name: source_name.map(Rc::from),
+            source_name: source_name.map(|source_name| Rc::new(source_name.to_owned())),
             instruction_spans,
+            instruction_count,
         }
     }
     fn span(&self, chunk: &Rc<Chunk>, pc: usize) -> Option<SourceSpan> {
@@ -2726,7 +2876,10 @@ impl ProgramDebugInfo {
         }
         let span = *source_map.spans.get(span_id as usize - 1)?;
         let mut span = span.into_source_span();
-        span.source_name = self.source_name.as_deref().map(str::to_owned);
+        span.source_name = self
+            .source_name
+            .as_deref()
+            .map(|source_name| source_name.to_owned());
         Some(span)
     }
 }
@@ -2748,9 +2901,15 @@ impl Program {
         chunk: Chunk,
         source_map: CompiledSourceMap,
         source_name: Option<&str>,
+        instruction_count: usize,
     ) -> Self {
         let chunk = Rc::new(chunk);
-        let debug_info = Rc::new(ProgramDebugInfo::new(&chunk, source_map, source_name));
+        let debug_info = Rc::new(ProgramDebugInfo::new(
+            &chunk,
+            source_map,
+            source_name,
+            instruction_count,
+        ));
         let execution_plan = Rc::new(ProgramExecutionPlan::new(&chunk));
         Self(Rc::new(ProgramInner {
             chunk,
@@ -2784,27 +2943,116 @@ impl Program {
     pub fn fingerprint(&self) -> u64 {
         self.0.chunk.fingerprint()
     }
-    fn ensure_verified(&self) -> Result<(), Error> {
-        if self.0.verified.get() {
-            Ok(())
-        } else {
-            self.verify()
+    /// Returns recursively reachable bytecode instructions in this artifact.
+    ///
+    /// Shared nested chunks are counted once.
+    pub fn instruction_count(&self) -> usize {
+        self.0.debug_info.as_ref().map_or_else(
+            || count_bcs(&self.0.chunk),
+            |debug_info| debug_info.instruction_count,
+        )
+    }
+    #[cold]
+    fn verify_for_bytecode_limit(&self, limit: usize) -> Result<(), Error> {
+        let instruction_count = self.instruction_count();
+        if instruction_count > limit {
+            return Err(Error::resource(
+                ResourceLimit::BytecodeInstructions,
+                format!("bytecode exceeds configured recursive instruction limit of {limit}"),
+            ));
         }
+        if !self.0.verified.get() {
+            self.0.chunk.verify()?;
+            self.0.verified.set(true);
+        }
+        Ok(())
+    }
+    fn ensure_verified_for_bytecode_limit(&self, limit: usize) -> Result<(), Error> {
+        self.verify_for_bytecode_limit(limit)
     }
 }
 impl Engine {
-    /// Creates a stateless compiler.
+    /// Creates a compiler with the default deterministic compilation limits.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+    /// Returns this compiler with a replacement source/bytecode/graph policy.
+    pub fn with_compile_limits(mut self, limits: CompileLimits) -> Self {
+        self.compile_limits = limits;
+        self
+    }
+    /// Returns this compiler's source, bytecode, and module-graph policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.compile_limits
+    }
+    pub(crate) fn check_source_limit(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<(), Error> {
+        if source.len() <= self.compile_limits.max_source_bytes() {
+            return Ok(());
+        }
+        let error = Error::resource(
+            ResourceLimit::SourceBytes,
+            format!(
+                "source exceeds configured UTF-8 byte limit of {}",
+                self.compile_limits.max_source_bytes()
+            ),
+        )
+        .at_line(1);
+        Err(match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        })
+    }
+    pub(crate) fn check_bytecode_limit(
+        &self,
+        source_name: Option<&str>,
+        instruction_count: usize,
+    ) -> Result<(), Error> {
+        if instruction_count <= self.compile_limits.max_bytecode_instructions() {
+            return Ok(());
+        }
+        let error = Error::resource(
+            ResourceLimit::BytecodeInstructions,
+            format!(
+                "bytecode exceeds configured recursive instruction limit of {}",
+                self.compile_limits.max_bytecode_instructions()
+            ),
+        )
+        .at_line(1);
+        Err(match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        })
+    }
+    fn compile_chunk_source(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<Chunk, Error> {
+        self.check_source_limit(source_name, source)?;
+        let attach_name = |error: Error| match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        };
+        let prepared = crate::source::prepare(source_name, source).map_err(attach_name)?;
+        let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
+            .map_err(attach_name)?;
+        let (chunk, instruction_count) = lowering::compile(&ast).map_err(attach_name)?;
+        self.check_bytecode_limit(source_name, instruction_count)?;
+        chunk.verify().map_err(attach_name)?;
+        Ok(chunk)
     }
     /// Compiles and verifies source into an owned bytecode chunk.
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
-        compile(source)
+        self.compile_chunk_source(None, source)
     }
     /// Compiles and verifies source while attaching an opaque host-provided
     /// name to any source labels produced on failure.
     pub fn compile_named(&self, source_name: &str, source: &str) -> Result<Chunk, Error> {
-        crate::compile_named(source_name, source)
+        self.compile_chunk_source(Some(source_name), source)
     }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
@@ -2834,6 +3082,7 @@ impl Engine {
         source_name: Option<&str>,
         source: &str,
     ) -> Result<Program, Error> {
+        self.check_source_limit(source_name, source)?;
         let attach_name = |error: Error| match source_name {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
@@ -2842,14 +3091,23 @@ impl Engine {
         let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
             .map_err(attach_name)?;
         let (chunk, source_map) = lowering::compile_mapped(&ast).map_err(attach_name)?;
+        let instruction_count = source_map.instruction_count;
+        self.check_bytecode_limit(source_name, instruction_count)?;
         lowering::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
-        Ok(Program::from_compiled(chunk, source_map, source_name))
+        Ok(Program::from_compiled(
+            chunk,
+            source_map,
+            source_name,
+            instruction_count,
+        ))
     }
     fn check_program_source(
         &self,
         source_name: Option<&str>,
         source: &str,
     ) -> Result<(), Vec<Error>> {
+        self.check_source_limit(source_name, source)
+            .map_err(|error| vec![error])?;
         let attach_name = |error: Error| match source_name {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
@@ -2860,6 +3118,8 @@ impl Engine {
             .map_err(|errors| errors.into_iter().map(attach_name).collect::<Vec<Error>>())?;
         let (chunk, source_map) =
             lowering::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
+        self.check_bytecode_limit(source_name, source_map.instruction_count)
+            .map_err(|error| vec![error])?;
         lowering::verify_mapped(&chunk, &source_map).map_err(|error| vec![attach_name(error)])?;
         Ok(())
     }
@@ -2870,11 +3130,12 @@ impl Default for RuntimeBuilder {
         Self {
             program_cache_entries: DEFAULT_PROGRAM_CACHE_ENTRIES,
             module_cache_entries: DEFAULT_MODULE_CACHE_ENTRIES,
+            compile_limits: CompileLimits::default(),
         }
     }
 }
 impl RuntimeBuilder {
-    /// Creates a builder with 64 Program and 64 Module cache entries.
+    /// Creates a builder with default compile limits and 64 entries per cache.
     pub fn new() -> Self {
         Self::default()
     }
@@ -2896,10 +3157,16 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Sets the source, bytecode, and static module-graph policy.
+    pub fn compile_limits(mut self, limits: CompileLimits) -> Self {
+        self.compile_limits = limits;
+        self
+    }
+
     /// Builds a Runtime with independent bounded Program and Module caches.
     pub fn build(self) -> Runtime {
         Runtime(Rc::new(RuntimeInner {
-            engine: Engine::new(),
+            engine: Engine::new().with_compile_limits(self.compile_limits),
             programs: RefCell::new(CompileCache::new(self.program_cache_entries)),
             modules: RefCell::new(CompileCache::new(self.module_cache_entries)),
         }))
@@ -2950,6 +3217,7 @@ impl Runtime {
         source_name: Option<&str>,
         source: &str,
     ) -> Result<Program, Error> {
+        self.0.engine.check_source_limit(source_name, source)?;
         let key = SourceCacheKey {
             name: source_name.map(str::to_owned),
             source: source.to_owned(),
@@ -2988,6 +3256,11 @@ impl Runtime {
     pub fn clear_compile_caches(&self) {
         self.0.programs.borrow_mut().clear();
         self.0.modules.borrow_mut().clear();
+    }
+
+    /// Returns the Runtime-wide source, bytecode, and static module-graph policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.0.engine.compile_limits()
     }
 
     /// Returns the Runtime's stateless compiler for uncached Chunk, check, and
@@ -4269,6 +4542,12 @@ impl Context {
     pub fn resource_limits(&self) -> ResourceLimits {
         self.resource_limits
     }
+    /// Returns the Runtime-owned compilation policy used by this Context.
+    ///
+    /// Standalone contexts created with [`Context::new`] use the default policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.engine.compile_limits()
+    }
     /// Returns this context configured to observe an embedding-host cancellation token.
     pub fn with_cancellation_token(mut self, token: CancellationToken) -> Self {
         self.set_cancellation_token(token);
@@ -4534,7 +4813,9 @@ impl Context {
     }
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
-        program.ensure_verified()?;
+        program.ensure_verified_for_bytecode_limit(
+            self.engine.compile_limits().max_bytecode_instructions(),
+        )?;
         let retained_transaction = if retained_memory_limits_active(self.resource_limits) {
             check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
             Some(RetainedMemoryTransaction::capture(&self.global))
@@ -8386,6 +8667,15 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<Option<HostBindingsViewHandle>>(),
             std::mem::size_of::<Option<HostState>>()
+        );
+    }
+
+    #[test]
+    fn program_debug_info_preserves_legacy_allocation_width() {
+        assert_eq!(
+            std::mem::size_of::<ProgramDebugInfo>(),
+            std::mem::size_of::<Option<Rc<str>>>()
+                + std::mem::size_of::<BTreeMap<usize, ChunkSourceMap>>()
         );
     }
 

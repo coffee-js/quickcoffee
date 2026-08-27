@@ -1,22 +1,61 @@
 //! Command-line entry point for the `qcoffee` interpreter.
 
-use quickcoffee::{Context, Engine, Error, RestrictedFileModuleLoader, Value};
+use quickcoffee::{
+    CompileLimits, Context, Engine, Error, RestrictedFileModuleLoader, Runtime, Value,
+};
 use std::{
-    env, fs,
-    io::{self, BufRead, IsTerminal, Write},
+    env, fmt, fs,
+    io::{self, BufRead, IsTerminal, Read, Write},
     process::ExitCode,
 };
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY [--fingerprint] | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--max-source-bytes N] [--max-bytecode-instructions N] [--max-module-graph-modules N] [--max-module-graph-source-bytes N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY [--fingerprint] | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
     );
 }
-fn read_source(path: &str) -> Result<String, String> {
-    if path == "-" {
-        io::read_to_string(io::stdin()).map_err(|error| format!("read error: {error}"))
+
+enum ReadSourceError {
+    Io(String),
+    SourceBytes(usize),
+}
+impl fmt::Display for ReadSourceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(message) => write!(formatter, "read error: {message}"),
+            Self::SourceBytes(limit) => write!(
+                formatter,
+                "resource error: source exceeds configured UTF-8 byte limit of {limit}"
+            ),
+        }
+    }
+}
+fn read_limited(reader: impl Read, limit: usize) -> Result<String, ReadSourceError> {
+    let mut source = String::new();
+    reader
+        .take((limit as u64).saturating_add(1))
+        .read_to_string(&mut source)
+        .map_err(|error| ReadSourceError::Io(error.to_string()))?;
+    if source.len() > limit {
+        Err(ReadSourceError::SourceBytes(limit))
     } else {
-        fs::read_to_string(path).map_err(|error| format!("read error: {error}"))
+        Ok(source)
+    }
+}
+fn read_source(path: &str, limit: usize) -> Result<String, ReadSourceError> {
+    if path == "-" {
+        read_limited(io::stdin().lock(), limit)
+    } else {
+        let file = fs::File::open(path).map_err(|error| ReadSourceError::Io(error.to_string()))?;
+        if file
+            .metadata()
+            .map_err(|error| ReadSourceError::Io(error.to_string()))?
+            .len()
+            > limit as u64
+        {
+            return Err(ReadSourceError::SourceBytes(limit));
+        }
+        read_limited(file, limit)
     }
 }
 fn json_escape(value: &str) -> String {
@@ -136,6 +175,14 @@ fn json_io_error(stage: &str, message: &str) -> String {
         json_escape(message)
     )
 }
+fn json_read_error(error: &ReadSourceError) -> String {
+    match error {
+        ReadSourceError::Io(message) => json_io_error("read", &format!("read error: {message}")),
+        ReadSourceError::SourceBytes(limit) => format!(
+            "{{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of {limit}\",\"line\":null}}"
+        ),
+    }
+}
 fn module_exports_value(exports: &quickcoffee::ModuleExports) -> Value {
     Value::map(
         exports
@@ -143,10 +190,16 @@ fn module_exports_value(exports: &quickcoffee::ModuleExports) -> Value {
             .map(|(name, value)| (name.to_owned(), value.clone())),
     )
 }
-fn repl(fuel: u64, script_args: Vec<String>, stats: bool) -> ExitCode {
+fn repl(
+    fuel: u64,
+    script_args: Vec<String>,
+    stats: bool,
+    compile_limits: CompileLimits,
+) -> ExitCode {
     let stdin = io::stdin();
     let show_prompt = stdin.is_terminal() && io::stdout().is_terminal();
-    let mut context = Context::new().with_fuel(fuel);
+    let runtime = Runtime::builder().compile_limits(compile_limits).build();
+    let mut context = runtime.new_context().with_fuel(fuel);
     context.set_global(
         "argv",
         Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
@@ -223,6 +276,8 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let mut fuel = 1_000_000u64;
     let mut fuel_set = false;
+    let mut compile_limits = CompileLimits::default();
+    let mut compile_limits_set = false;
     let mut source = None;
     let mut source_name = None;
     let mut dump = false;
@@ -264,10 +319,51 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--max-source-bytes" => match args.next().and_then(|s| s.parse().ok()) {
+                Some(limit) => {
+                    compile_limits = compile_limits.with_max_source_bytes(limit);
+                    compile_limits_set = true;
+                }
+                None => {
+                    eprintln!("--max-source-bytes requires a non-negative integer");
+                    return ExitCode::from(2);
+                }
+            },
+            "--max-bytecode-instructions" => match args.next().and_then(|s| s.parse().ok()) {
+                Some(limit) => {
+                    compile_limits = compile_limits.with_max_bytecode_instructions(limit);
+                    compile_limits_set = true;
+                }
+                None => {
+                    eprintln!("--max-bytecode-instructions requires a non-negative integer");
+                    return ExitCode::from(2);
+                }
+            },
+            "--max-module-graph-modules" => match args.next().and_then(|s| s.parse().ok()) {
+                Some(limit) => {
+                    compile_limits = compile_limits.with_max_module_graph_modules(limit);
+                    compile_limits_set = true;
+                }
+                None => {
+                    eprintln!("--max-module-graph-modules requires a non-negative integer");
+                    return ExitCode::from(2);
+                }
+            },
+            "--max-module-graph-source-bytes" => match args.next().and_then(|s| s.parse().ok()) {
+                Some(limit) => {
+                    compile_limits = compile_limits.with_max_module_graph_source_bytes(limit);
+                    compile_limits_set = true;
+                }
+                None => {
+                    eprintln!("--max-module-graph-source-bytes requires a non-negative integer");
+                    return ExitCode::from(2);
+                }
+            },
             "--stats" => stats = true,
             "--json" => json = true,
             "--quit" => {
                 if fuel_set
+                    || compile_limits_set
                     || source.is_some()
                     || dump
                     || fingerprint
@@ -321,17 +417,18 @@ fn main() -> ExitCode {
                 }
                 dump = true;
                 match args.next() {
-                    Some(path) if path == "-" || !path.starts_with('-') => match read_source(&path)
-                    {
-                        Ok(text) => {
-                            source = Some(text);
-                            source_name = Some(path);
+                    Some(path) if path == "-" || !path.starts_with('-') => {
+                        match read_source(&path, compile_limits.max_source_bytes()) {
+                            Ok(text) => {
+                                source = Some(text);
+                                source_name = Some(path);
+                            }
+                            Err(error) => {
+                                eprintln!("{error}");
+                                return ExitCode::from(1);
+                            }
                         }
-                        Err(error) => {
-                            eprintln!("{error}");
-                            return ExitCode::from(1);
-                        }
-                    },
+                    }
                     Some(_) => {
                         eprintln!("--dump-bytecode requires a file");
                         return ExitCode::from(2);
@@ -361,14 +458,14 @@ fn main() -> ExitCode {
                 }
                 check = true;
                 match args.next() {
-                    Some(path) => match read_source(&path) {
+                    Some(path) => match read_source(&path, compile_limits.max_source_bytes()) {
                         Ok(text) => {
                             source = Some(text);
                             source_name = Some(path);
                         }
                         Err(error) => {
                             if json {
-                                println!("{}", json_io_error("read", &error));
+                                println!("{}", json_read_error(&error));
                             } else {
                                 eprintln!("{error}");
                             }
@@ -409,32 +506,34 @@ fn main() -> ExitCode {
                     }
                 }
             }
-            "-" if source.is_none() && module_root.is_none() => match read_source("-") {
-                Ok(text) => {
-                    source = Some(text);
-                    source_name = Some("-".to_owned());
-                }
-                Err(error) => {
-                    if json {
-                        println!("{}", json_io_error("read", &error));
-                    } else {
-                        eprintln!("{error}");
+            "-" if source.is_none() && module_root.is_none() => {
+                match read_source("-", compile_limits.max_source_bytes()) {
+                    Ok(text) => {
+                        source = Some(text);
+                        source_name = Some("-".to_owned());
                     }
-                    return ExitCode::from(1);
+                    Err(error) => {
+                        if json {
+                            println!("{}", json_read_error(&error));
+                        } else {
+                            eprintln!("{error}");
+                        }
+                        return ExitCode::from(1);
+                    }
                 }
-            },
+            }
             path if !path.starts_with('-') && module_root.is_some() && module_entry.is_none() => {
                 module_entry = Some(path.to_owned());
             }
             path if !path.starts_with('-') && source.is_none() && module_root.is_none() => {
-                match read_source(path) {
+                match read_source(path, compile_limits.max_source_bytes()) {
                     Ok(text) => {
                         source = Some(text);
                         source_name = Some(path.to_owned());
                     }
                     Err(error) => {
                         if json {
-                            println!("{}", json_io_error("read", &error));
+                            println!("{}", json_read_error(&error));
                         } else {
                             eprintln!("{error}");
                         }
@@ -465,7 +564,7 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(2);
         }
-        return repl(fuel, script_args, stats);
+        return repl(fuel, script_args, stats, compile_limits);
     }
     if let Some(root) = module_root {
         let Some(entry) = module_entry else {
@@ -478,7 +577,9 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(2);
         }
-        let loader = match RestrictedFileModuleLoader::new(&root) {
+        let loader = match RestrictedFileModuleLoader::new(&root)
+            .map(|loader| loader.with_max_source_bytes(compile_limits.max_source_bytes()))
+        {
             Ok(loader) => loader,
             Err(error) => {
                 if json {
@@ -500,8 +601,8 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         };
-        let engine = Engine::new();
-        let module = match engine.compile_module(source.name(), source.source()) {
+        let runtime = Runtime::builder().compile_limits(compile_limits).build();
+        let module = match runtime.compile_module(source.name(), source.source()) {
             Ok(module) => module,
             Err(error) => {
                 if json {
@@ -513,7 +614,7 @@ fn main() -> ExitCode {
             }
         };
         if fingerprint {
-            return match engine.fingerprint_module_graph(&module, &loader) {
+            return match runtime.engine().fingerprint_module_graph(&module, &loader) {
                 Ok(fingerprint) => {
                     println!("{fingerprint:016x}");
                     ExitCode::SUCCESS
@@ -524,7 +625,7 @@ fn main() -> ExitCode {
                 }
             };
         }
-        let mut context = Context::new().with_fuel(fuel);
+        let mut context = runtime.new_context().with_fuel(fuel);
         context.set_global(
             "argv",
             Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
@@ -582,7 +683,7 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let engine = Engine::new();
+    let engine = Engine::new().with_compile_limits(compile_limits);
     if check {
         let checked = match source_name.as_deref() {
             Some(source_name) => engine.check_program_named(source_name, &source),
@@ -621,7 +722,8 @@ fn main() -> ExitCode {
         println!("{:016x}", program.fingerprint());
         return ExitCode::SUCCESS;
     }
-    let mut context = Context::new().with_fuel(fuel);
+    let runtime = Runtime::builder().compile_limits(compile_limits).build();
+    let mut context = runtime.new_context().with_fuel(fuel);
     context.set_global(
         "argv",
         Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),

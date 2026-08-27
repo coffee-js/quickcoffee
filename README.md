@@ -94,6 +94,8 @@ QuickCoffee 已提供：
 | 只检查、不执行 | `qcoffee --check script.coffee` |
 | 稳定 JSON 输出 | `qcoffee --json script.coffee` |
 | 限制本次执行 fuel | `qcoffee --fuel 100000 script.coffee` |
+| 限制源码与字节码 | `qcoffee --max-source-bytes 1000000 --max-bytecode-instructions 1000000 script.coffee` |
+| 限制模块图 | `qcoffee --max-module-graph-modules 1024 --max-module-graph-source-bytes 16000000 --module-root modules app/main` |
 | 检查编译结果 | `qcoffee --dump-bytecode script.coffee` 或 `qcoffee --fingerprint script.coffee` |
 
 `.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 使用 GitHub 原生支持的 Literate CoffeeScript 形式：Markdown 正文保持未缩进，技术标识使用反引号行内代码，可执行代码块统一缩进四个空格并与正文留出空行。`` ```coffee `` 围栏只适用于生成后的普通 Markdown，不会成为 `.litcoffee` 的可执行代码。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成文档。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
@@ -117,7 +119,7 @@ fn evaluate_rule() -> Result<(), Error> {
 }
 ```
 
-生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要通过 `ContextBuilder` 提供 `CancellationToken`、global 与 native。contextual native 可通过 `NativeCallContext` 协作检查取消、扣减 fuel、记录分配遥测并访问类型化、脚本不可见的 Context-owned `HostState`。`HostCapabilities` 与 typed `CapabilityKey<T>` 进一步把 clock、random、logging、file、network 权限放进显式 allowlist；QuickCoffee 不提供这些系统能力的实现，callback 必须继续显式检查和记账。同步 callback 在调用线程内执行，panic 不会被 VM 捕获或保证回滚；Runtime/Context 因 `Rc` 保持 non-Send/non-Sync，只有 `CancellationToken` 可跨线程发出停止信号。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports、host state、capabilities 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
+生产嵌入应显式设置合适的 `CompileLimits`、fuel、调用深度和 `ResourceLimits`，并按需要通过 `ContextBuilder` 提供 `CancellationToken`、global 与 native。`CompileLimits` 在预处理与 cache-key 复制前限制原始 source，在验证和执行前限制递归 bytecode，并让模块执行与图指纹共享唯一模块数及累计 source bytes 预算；模块执行会在任何脚本运行前预检完整静态图。contextual native 可通过 `NativeCallContext` 协作检查取消、扣减 fuel、记录分配遥测并访问类型化、脚本不可见的 Context-owned `HostState`。`HostCapabilities` 与 typed `CapabilityKey<T>` 进一步把 clock、random、logging、file、network 权限放进显式 allowlist；QuickCoffee 不提供这些系统能力的实现，callback 必须继续显式检查和记账。同步 callback 在调用线程内执行，panic 不会被 VM 捕获或保证回滚；Runtime/Context 因 `Rc` 保持 non-Send/non-Sync，只有 `CancellationToken` 可跨线程发出停止信号。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports、host state、capabilities 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
 
 ## 当前状态与已知缺口
 
@@ -126,7 +128,7 @@ QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode �
 但它仍处于实验性 0.1：
 
 - CLI 已支持显式根目录的受限模块加载和非执行模块图指纹，但仍没有模块包或预编译 manifest；普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
-- 尚无完整内存预算或生命周期隔离；这些由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 跟踪。capability allowlist 已可显式配置，但具体系统能力仍必须由宿主实现并授权。
+- 原始 source、递归 bytecode、静态模块数与累计模块 source 已有独立上限，但尚无执行中 transient/live managed-memory 总预算或跨 Context 生命周期隔离；剩余工作由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 跟踪。capability allowlist 已可显式配置，但具体系统能力仍必须由宿主实现并授权。
 - 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
 - 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
 - 语言和嵌入 API 会继续通过 RFC 演进；需要长期稳定接口的项目应先锁定版本并运行自己的语义与资源测试。
@@ -162,4 +164,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0154](RFCs/0154-host-capabilities-and-embedding-stability.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0155](RFCs/0155-bounded-compilation-and-module-graphs.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
