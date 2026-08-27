@@ -306,9 +306,10 @@ fn qtest_reports_success_and_failure() {
         .output()
         .unwrap();
     assert!(listed.status.success());
+    let listed_path = PathBuf::from("tests/scripts").join("stdlib.coffee");
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout),
-        "tests/scripts/stdlib.coffee\n"
+        format!("{}\n", listed_path.display())
     );
     let missing_filter = Command::new(bin("qtest"))
         .args(["--filter", "does-not-exist", "tests/scripts"])
