@@ -1,6 +1,7 @@
 use quickcoffee::{
-    Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader,
-    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
+    CapabilityKey, CapabilityKind, Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION,
+    MemoryModuleLoader, ModuleLoader, ModuleSource, ResourceLimit, ResourceLimits,
+    RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
     cell::Cell,
@@ -130,6 +131,29 @@ fn module_children_inherit_contextual_native_host_state() {
         .unwrap();
     assert_eq!(exports.get("value").and_then(Value::as_number), Some(42.));
     assert_eq!(context.host_state::<Cell<u64>>().unwrap().get(), 42);
+}
+
+#[test]
+fn module_children_inherit_typed_capability_handles() {
+    let audit = CapabilityKey::<Cell<u64>>::new(CapabilityKind::Logging, "module-audit");
+    let entry = Engine::new()
+        .compile_module("main", "export value = host_audit()")
+        .unwrap();
+    let mut context = Context::builder()
+        .capability(audit, Cell::new(40_u64))
+        .contextual_native("host_audit", move |call, _| {
+            let sink = call
+                .capability(audit)
+                .ok_or_else(|| quickcoffee::Error::runtime("missing module logging capability"))?;
+            sink.set(sink.get() + 1);
+            Ok(Value::from(sink.get() as f64))
+        })
+        .build();
+    let exports = context
+        .run_module(&entry, &MemoryModuleLoader::new())
+        .unwrap();
+    assert_eq!(exports.get("value").and_then(Value::as_number), Some(41.));
+    assert_eq!(context.capability(audit).unwrap().get(), 41);
 }
 
 #[test]

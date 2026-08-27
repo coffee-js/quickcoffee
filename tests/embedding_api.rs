@@ -1,7 +1,7 @@
 use quickcoffee::{
-    CancellationToken, Context, Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, Integer,
-    IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, Runtime, TryFromValue, Value,
-    ValueKind,
+    CancellationToken, CapabilityKey, CapabilityKind, Context, Decimal, DiagnosticLabelKind,
+    Engine, Error, ErrorKind, HostCapabilities, Integer, IntoValue, ResourceLimit, ResourceLimits,
+    RetainedMemory, Runtime, TryFromValue, Value, ValueKind,
 };
 use std::{cell::Cell, collections::BTreeMap};
 
@@ -310,6 +310,84 @@ fn runtime_contexts_do_not_share_host_state_implicitly() {
     assert_eq!(second.eval("state()").unwrap().as_number(), Some(21.));
     assert_eq!(first.host_state::<Cell<u64>>().unwrap().get(), 11);
     assert_eq!(second.host_state::<Cell<u64>>().unwrap().get(), 21);
+}
+
+#[test]
+fn typed_capability_allowlists_are_explicit_isolated_and_unretained() {
+    let audit = CapabilityKey::<Cell<u64>>::new(CapabilityKind::Logging, "audit");
+    let wrong_audit = CapabilityKey::<String>::new(CapabilityKind::Logging, "audit");
+    let clock = CapabilityKey::<u64>::new(CapabilityKind::Clock, "request-time");
+    assert_eq!(audit.kind(), CapabilityKind::Logging);
+    assert_eq!(audit.name(), "audit");
+
+    let mut capabilities = HostCapabilities::new();
+    assert!(capabilities.is_empty());
+    capabilities.insert(audit, Cell::new(1));
+    assert_eq!(capabilities.len(), 1);
+    assert_eq!(
+        capabilities.descriptors().collect::<Vec<_>>(),
+        vec![(CapabilityKind::Logging, "audit")]
+    );
+    assert!(capabilities.contains(audit));
+    assert!(!capabilities.contains(wrong_audit));
+    assert!(!capabilities.remove(wrong_audit));
+    let original_audit = capabilities.get(audit).unwrap();
+
+    let runtime = Runtime::new();
+    let mut context = runtime
+        .context_builder()
+        .fuel(100)
+        .capabilities(capabilities.clone())
+        .capability(clock, 7_u64)
+        .contextual_native("host_audit", move |call, args| {
+            assert!(args.is_empty());
+            call.check_cancelled()?;
+            call.consume_fuel(2)?;
+            assert!(call.capability(wrong_audit).is_none());
+            let sink = call
+                .capability(audit)
+                .ok_or_else(|| Error::runtime("logging capability denied"))?;
+            let time = call
+                .capability(clock)
+                .ok_or_else(|| Error::runtime("clock capability denied"))?;
+            sink.set(sink.get() + 1);
+            call.record_managed_allocation(1, 2);
+            Ok(Value::from((sink.get() + *time) as f64))
+        })
+        .build();
+
+    let retained = context.retained_memory();
+    assert_eq!(context.eval("host_audit()").unwrap().as_number(), Some(9.));
+    assert_eq!(original_audit.get(), 2);
+    assert_eq!(context.capability(clock).as_deref(), Some(&7));
+    assert!(context.capability(wrong_audit).is_none());
+    assert!(context.get_global("audit").is_none());
+    assert_eq!(context.last_execution().managed_objects_allocated, 1);
+    assert_eq!(context.last_execution().managed_bytes_allocated, 2);
+    assert_eq!(context.retained_memory(), retained);
+
+    context.set_capability(audit, Cell::new(40));
+    assert_eq!(original_audit.get(), 2);
+    assert_eq!(context.capability(audit).unwrap().get(), 40);
+    assert!(context.remove_capability(clock));
+    assert!(!context.remove_capability(clock));
+    assert_eq!(context.capabilities().len(), 1);
+    assert_eq!(context.retained_memory(), retained);
+    context.clear_capabilities();
+    assert!(context.capabilities().is_empty());
+
+    let independent = runtime.context_builder().build();
+    assert!(independent.capabilities().is_empty());
+    assert!(independent.capability(audit).is_none());
+
+    let mut denied = Context::new().with_contextual_native("host_audit", move |call, _| {
+        call.capability(audit)
+            .map(|_| Value::Nil)
+            .ok_or_else(|| Error::runtime("logging capability denied"))
+    });
+    let error = denied.eval("host_audit()").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "logging capability denied");
 }
 
 #[test]

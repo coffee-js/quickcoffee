@@ -88,6 +88,8 @@
 
 特置 contextual native 得以 `NativeCallContext` 察止令、扣燃料、记托管分配，并取有型而脚本不见之 `HostState`，无暗授之权。
 
+`HostCapabilities` 與 `CapabilityKey<T>` 明列 clock、random、logging、file、network 之柄；模組承其柄，異 Context 默不相通，宿主仍須明察止令、扣燃料、記分配。
+
 `cargo run --example embed` 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 
 宿主可用 `Value::kind()` 别其类，`Value::is_nil()` 验 nil，不窥其内容器。
@@ -165,6 +167,7 @@ class BoundCounter
 
 bound_callback = new BoundCounter(40).callback()
 bound_callback()
+
 
 
 

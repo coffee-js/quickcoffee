@@ -14,6 +14,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
+    marker::PhantomData,
     rc::Rc,
     sync::{
         Arc,
@@ -1841,11 +1842,169 @@ impl HostState {
     }
 }
 
+/// Auditable categories for explicitly installed host capabilities.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum CapabilityKind {
+    /// A host-selected clock or deterministic time source.
+    Clock,
+    /// A host-selected random or deterministic entropy source.
+    Random,
+    /// A host-selected logging or audit sink.
+    Logging,
+    /// A host-selected filesystem authority.
+    File,
+    /// A host-selected network authority.
+    Network,
+}
+
+/// A typed, script-invisible key for one host capability allowlist slot.
+///
+/// The category and static name identify the slot. `T` is checked when a host
+/// callback retrieves the opaque handle; constructing the same slot with a
+/// different `T` therefore returns `None` rather than exposing the value.
+pub struct CapabilityKey<T: 'static> {
+    kind: CapabilityKind,
+    name: &'static str,
+    marker: PhantomData<fn() -> T>,
+}
+impl<T: 'static> CapabilityKey<T> {
+    /// Defines a typed capability slot without installing any authority.
+    pub const fn new(kind: CapabilityKind, name: &'static str) -> Self {
+        Self {
+            kind,
+            name,
+            marker: PhantomData,
+        }
+    }
+
+    /// Returns the auditable capability category.
+    pub const fn kind(self) -> CapabilityKind {
+        self.kind
+    }
+
+    /// Returns the host-defined static slot name.
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    fn id(self) -> CapabilityId {
+        CapabilityId {
+            kind: self.kind,
+            name: self.name,
+        }
+    }
+}
+impl<T: 'static> Clone for CapabilityKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: 'static> Copy for CapabilityKey<T> {}
+impl<T: 'static> fmt::Debug for CapabilityKey<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityKey")
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CapabilityId {
+    kind: CapabilityKind,
+    name: &'static str,
+}
+
+/// A Context-owned allowlist of typed, script-invisible host capabilities.
+///
+/// The table owns no ambient authority by default. Values stay outside script
+/// globals, serialization, Runtime compilation caches, and managed-memory
+/// census. Contextual callbacks explicitly account capability work through
+/// [`NativeCallContext`] fuel, cancellation, and allocation APIs.
+#[derive(Clone, Default)]
+pub struct HostCapabilities {
+    entries: BTreeMap<CapabilityId, HostState>,
+}
+impl HostCapabilities {
+    /// Creates an empty capability allowlist.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Installs or replaces one typed capability slot.
+    pub fn insert<T: 'static>(&mut self, key: CapabilityKey<T>, capability: T) {
+        self.entries.insert(key.id(), HostState::new(capability));
+    }
+
+    /// Clones the opaque capability handle when the slot and type match.
+    pub fn get<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.entries.get(&key.id())?.downcast()
+    }
+
+    /// Reports whether a slot exists with the requested concrete type.
+    pub fn contains<T: 'static>(&self, key: CapabilityKey<T>) -> bool {
+        self.entries
+            .get(&key.id())
+            .is_some_and(|capability| capability.is::<T>())
+    }
+
+    /// Removes a slot only when its stored concrete type matches `T`.
+    pub fn remove<T: 'static>(&mut self, key: CapabilityKey<T>) -> bool {
+        let id = key.id();
+        if !self
+            .entries
+            .get(&id)
+            .is_some_and(|capability| capability.is::<T>())
+        {
+            return false;
+        }
+        self.entries.remove(&id);
+        true
+    }
+
+    /// Removes every installed capability.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Returns the number of allowlisted slots.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Reports whether the allowlist contains no slots.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterates installed category/name descriptors in deterministic order.
+    ///
+    /// Concrete host types and values remain opaque.
+    pub fn descriptors(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (CapabilityKind, &'static str)> + '_ {
+        self.entries.keys().map(|id| (id.kind, id.name))
+    }
+}
+
+#[derive(Clone, Default)]
+struct HostBindings {
+    state: Option<HostState>,
+    capabilities: HostCapabilities,
+}
+impl HostBindings {
+    fn is_empty(&self) -> bool {
+        self.state.is_none() && self.capabilities.is_empty()
+    }
+}
+
 /// Per-invocation controls available to an opt-in contextual native callback.
 pub struct NativeCallContext {
     cancellation: Option<CancellationToken>,
     resource_limits: ResourceLimits,
-    host_state: Option<HostState>,
+    host_bindings: Option<Rc<HostBindings>>,
     fuel_remaining: u64,
     managed_objects_allocated: u64,
     managed_bytes_allocated: u64,
@@ -1899,7 +2058,12 @@ impl NativeCallContext {
 
     /// Clones the Context-owned state handle when its concrete type matches `T`.
     pub fn host_state<T: 'static>(&self) -> Option<Rc<T>> {
-        self.host_state.as_ref()?.downcast()
+        self.host_bindings.as_ref()?.state.as_ref()?.downcast()
+    }
+
+    /// Clones an allowlisted opaque capability when its slot and type match.
+    pub fn capability<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.host_bindings.as_ref()?.capabilities.get(key)
     }
 
     /// Records logical managed allocation performed by host work.
@@ -1948,7 +2112,7 @@ pub struct Instance {
     class: Rc<Class>,
     fields: RefCell<BTreeMap<String, Value>>,
 }
-/// Opaque callable values are constructed by QuickCoffee or `Context::add_native`.
+/// Opaque callable values are constructed by QuickCoffee or Context native registration APIs.
 pub struct Function {
     inner: FunctionKind,
 }
@@ -2898,7 +3062,7 @@ pub struct ContextBuilder {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: HostBindings,
     bindings: Vec<(String, Value)>,
 }
 impl ContextBuilder {
@@ -2909,7 +3073,7 @@ impl ContextBuilder {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: HostBindings::default(),
             bindings: Vec::new(),
         }
     }
@@ -2940,7 +3104,19 @@ impl ContextBuilder {
 
     /// Installs type-safe host state owned by the new Context.
     pub fn host_state<T: 'static>(mut self, state: T) -> Self {
-        self.host_state = Some(HostState::new(state));
+        self.host_bindings.state = Some(HostState::new(state));
+        self
+    }
+
+    /// Copies a typed capability allowlist into the new Context.
+    pub fn capabilities(mut self, capabilities: HostCapabilities) -> Self {
+        self.host_bindings.capabilities = capabilities;
+        self
+    }
+
+    /// Installs one typed, script-invisible host capability.
+    pub fn capability<T: 'static>(mut self, key: CapabilityKey<T>, capability: T) -> Self {
+        self.host_bindings.capabilities.insert(key, capability);
         self
     }
 
@@ -2981,7 +3157,7 @@ impl ContextBuilder {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation,
-            host_state: self.host_state,
+            host_bindings: (!self.host_bindings.is_empty()).then(|| Rc::new(self.host_bindings)),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -3004,7 +3180,7 @@ pub struct Context {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: Option<Rc<HostBindings>>,
     last_execution: ExecutionStats,
     retained_memory_high_water: RetainedMemory,
 }
@@ -3023,7 +3199,7 @@ thread_local! {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         };
@@ -4013,7 +4189,7 @@ impl Context {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -4089,6 +4265,21 @@ impl Context {
     pub fn clear_cancellation_token(&mut self) {
         self.cancellation = None;
     }
+    fn host_bindings_mut(&mut self) -> &mut HostBindings {
+        Rc::make_mut(
+            self.host_bindings
+                .get_or_insert_with(|| Rc::new(HostBindings::default())),
+        )
+    }
+    fn compact_host_bindings(&mut self) {
+        if self
+            .host_bindings
+            .as_deref()
+            .is_some_and(HostBindings::is_empty)
+        {
+            self.host_bindings = None;
+        }
+    }
     /// Returns this Context with type-safe, script-invisible host state.
     pub fn with_host_state<T: 'static>(mut self, state: T) -> Self {
         self.set_host_state(state);
@@ -4096,15 +4287,70 @@ impl Context {
     }
     /// Installs or replaces type-safe, script-invisible host state.
     pub fn set_host_state<T: 'static>(&mut self, state: T) {
-        self.host_state = Some(HostState::new(state));
+        self.host_bindings_mut().state = Some(HostState::new(state));
     }
     /// Removes the current host state from future contextual native calls.
     pub fn clear_host_state(&mut self) {
-        self.host_state = None;
+        if let Some(bindings) = self.host_bindings.as_mut() {
+            Rc::make_mut(bindings).state = None;
+            self.compact_host_bindings();
+        }
     }
     /// Returns the Context-owned host state when its concrete type matches `T`.
     pub fn host_state<T: 'static>(&self) -> Option<&T> {
-        self.host_state.as_ref()?.downcast_ref()
+        self.host_bindings.as_ref()?.state.as_ref()?.downcast_ref()
+    }
+    /// Replaces the typed capability allowlist used by future native calls.
+    pub fn set_capabilities(&mut self, capabilities: HostCapabilities) {
+        if capabilities.is_empty()
+            && self
+                .host_bindings
+                .as_deref()
+                .is_none_or(|bindings| bindings.state.is_none())
+        {
+            self.host_bindings = None;
+        } else {
+            self.host_bindings_mut().capabilities = capabilities;
+        }
+    }
+    /// Returns a snapshot of this Context's capability allowlist.
+    pub fn capabilities(&self) -> HostCapabilities {
+        self.host_bindings
+            .as_ref()
+            .map_or_else(HostCapabilities::new, |bindings| {
+                bindings.capabilities.clone()
+            })
+    }
+    /// Installs or replaces one typed, script-invisible host capability.
+    pub fn set_capability<T: 'static>(&mut self, key: CapabilityKey<T>, capability: T) {
+        self.host_bindings_mut()
+            .capabilities
+            .insert(key, capability);
+    }
+    /// Returns this Context after installing one typed host capability.
+    pub fn with_capability<T: 'static>(mut self, key: CapabilityKey<T>, capability: T) -> Self {
+        self.set_capability(key, capability);
+        self
+    }
+    /// Clones an allowlisted opaque capability when its slot and type match.
+    pub fn capability<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.host_bindings.as_ref()?.capabilities.get(key)
+    }
+    /// Removes one capability only when its slot and concrete type match.
+    pub fn remove_capability<T: 'static>(&mut self, key: CapabilityKey<T>) -> bool {
+        let Some(bindings) = self.host_bindings.as_mut() else {
+            return false;
+        };
+        let removed = Rc::make_mut(bindings).capabilities.remove(key);
+        self.compact_host_bindings();
+        removed
+    }
+    /// Removes every capability from future contextual native calls.
+    pub fn clear_capabilities(&mut self) {
+        if let Some(bindings) = self.host_bindings.as_mut() {
+            Rc::make_mut(bindings).capabilities.clear();
+            self.compact_host_bindings();
+        }
     }
     /// Returns counters from the most recent successful or failed execution.
     /// Compilation and verification errors do not replace the previous record.
@@ -4287,7 +4533,7 @@ impl Context {
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self.host_bindings.clone(),
             name_loads: 0,
             name_stores: 0,
             calls: 0,
@@ -4322,7 +4568,7 @@ impl Context {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self.host_bindings.clone(),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         }
@@ -4947,7 +5193,7 @@ struct Vm {
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: Option<Rc<HostBindings>>,
     name_loads: u64,
     name_stores: u64,
     calls: u64,
@@ -5406,7 +5652,7 @@ impl Vm {
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self.host_bindings.clone(),
             name_loads: self.name_loads,
             name_stores: self.name_stores,
             calls: self.calls,
@@ -7039,7 +7285,7 @@ fn call_with_context(
                 let mut context = NativeCallContext {
                     cancellation: vm.cancellation.clone(),
                     resource_limits: vm.resource_limits,
-                    host_state: vm.host_state.clone(),
+                    host_bindings: vm.host_bindings.clone(),
                     fuel_remaining: vm.fuel,
                     managed_objects_allocated: 0,
                     managed_bytes_allocated: 0,

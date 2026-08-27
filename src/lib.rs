@@ -21,9 +21,10 @@ pub use module::{
 };
 pub use resource::{ResourceLimit, ResourceLimits};
 pub use vm::{
-    CancellationToken, Context, ContextBuilder, ContextualNativeFunction, Decimal, DiagnosticLabel,
-    DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionStats, Function, HostState, Integer,
-    IntoValue, NativeCallContext, NativeFunction, Program, RetainedMemory, Runtime, RuntimeBuilder,
+    CancellationToken, CapabilityKey, CapabilityKind, Context, ContextBuilder,
+    ContextualNativeFunction, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
+    ErrorKind, ExecutionStats, Function, HostCapabilities, HostState, Integer, IntoValue,
+    NativeCallContext, NativeFunction, Program, RetainedMemory, Runtime, RuntimeBuilder,
     RuntimeCacheStats, ScriptError, SourcePosition, SourceSpan, TryFromValue, Value, ValueKind,
 };
 

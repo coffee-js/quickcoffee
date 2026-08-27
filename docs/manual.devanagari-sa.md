@@ -76,6 +76,8 @@ host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्श�
 
 Opt-in contextual native `NativeCallContext` द्वारा cancellation परीक्षते, fuel घटयति, managed-allocation telemetry लिखति, typed script-अदृश्य `HostState` प्राप्नोति, ambient authority न ददाति।
 
+`HostCapabilities` तथा `CapabilityKey<T>` clock, random, logging, file, network handles Context-स्वामिके allowlist मध्ये स्थापयतः; module handles अनुवर्तते, पृथक् Context स्वतः न साझीकुरुतः, host cancellation, fuel, allocation स्पष्टतया गणयति।
+
 `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
 
 Host `Value::kind()` द्वारा प्रकारं विभजति, `Value::is_nil()` द्वारा nil परीक्षते, आन्तरिक-container न पश्यति।
