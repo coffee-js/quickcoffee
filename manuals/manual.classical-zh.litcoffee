@@ -38,6 +38,8 @@
 
 嵌入之模块可名 import/export；`Engine::compile_module`、`Context::run_module` 惟由宿主 `ModuleLoader` 得其文，模块全局私有，而全图共其 fuel。
 
+`Engine::fingerprint_module_graph` 经同一 loader 载而验全图，未尝行之；所得版本化 u64 键，随依赖之文、规范名、import/export 与边而变。
+
 `qcoffee --check FILE` 者，析编验其文而不行也。
 
 `qcoffee --interactive`（或 `-i`）者，逐行共用一 Context；`:help` 示命，`:quit` 出之。
@@ -71,6 +73,8 @@
 `Program::fingerprint` 出确定 u64 码键，便宿主缓存，而不改执行。
 
 `qcoffee --fingerprint FILE` 出十六位小写字节码键，先验之而不行其文。
+
+`qcoffee --fingerprint --module-root ROOT ENTRY` 明授受限根，出别域 v1 全图之键，而诸模块皆不行。
 
 `qbench --json` 每负载出一计时录，皆有语义护栏；`--iterations` 定其试数。
 

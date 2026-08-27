@@ -16,3 +16,7 @@
 ## 验收
 
 CLI 集成测试必须验证输出格式、同一文件的重复稳定性、不同源码的指纹差异、`--fingerprint` 不执行副作用，以及与其他执行模式的互斥规则。
+
+## 2026-08-27：模块图扩展
+
+RFC 0151 复用该 inspection flag：`qcoffee --fingerprint --module-root ROOT ENTRY` 通过显式受限 loader 加载并验证静态模块图，输出独立 v1 canonical graph fingerprint 且不执行模块。普通 `--fingerprint FILE` 的 bytecode 值和权限边界不变；两类模式都输出 16 位小写十六进制 `u64`，但属于不同编码域。

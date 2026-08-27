@@ -19,3 +19,7 @@ RFC 0133 已把受限文件模块加载器作为显式宿主能力交付，但 `
 ## 验收
 
 黑盒 CLI 测试必须覆盖嵌套导入、扩展名推断、导出结果、argv、JSON、统计、fuel、缺失 root/entry、依赖 parse 错误来源、循环、词法越界、支持平台上的符号链接逃逸以及所有执行模式冲突。中英文语法索引、可执行手册和 README 必须说明只有该显式开关授予此能力；debug/release、Clippy、rustdoc、crate package、文档和性能门禁必须通过。
+
+## 2026-08-27：非执行图检查
+
+RFC 0151 修订第 4 条：`--fingerprint` 可与 `--module-root ROOT ENTRY` 明确组合，仅加载并验证图后输出模块图指纹，不执行模块。它仍与 `--json`、`--stats`、普通源码、check、反汇编和交互模式互斥；没有 `--module-root` 的普通 fingerprint 绝不取得文件图权限。

@@ -60,7 +60,7 @@ print counter.increment()
 | 配置归并、表单/事件数据整形 | 适合 | 有不可变数组/Map、spread、解构、推导、Unicode 字符串和精确 JSON。 |
 | class 形式的业务模型 | 适合 | 支持构造、继承、覆盖、`super` 和安全逸出的 receiver-bound `=>`。 |
 | 受控嵌入式策略/插件 | 条件适合 | 宿主可注入全局值/原生函数，并设置 fuel、调用深度、数据资源限制和取消。 |
-| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.coffee` 模块图；尚无模块包或模块图指纹。 |
+| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.coffee` / `.litcoffee` 模块图，并可非执行地生成依赖敏感图指纹；尚无模块包。 |
 | HTTP、文件 I/O、异步任务、定时调度 | 尚不适合 | 语言没有隐式环境能力、事件循环或异步语法；这些应由宿主以明确 capability 提供。 |
 | 直接替换 JavaScript/CoffeeScript 项目 | 不适合 | 语义刻意不同，且缺少正则、日期时间、字节/流、生成器等能力。 |
 
@@ -89,6 +89,7 @@ QuickCoffee 已提供：
 | 执行文件并传参 | `qcoffee script.coffee -- first second`（脚本中读取 `argv`） |
 | 从标准输入执行 | `qcoffee - < script.coffee` |
 | 运行受限模块图 | `qcoffee --module-root modules app/main -- first` |
+| 检查模块图指纹 | `qcoffee --fingerprint --module-root modules app/main` |
 | 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
 | 只检查、不执行 | `qcoffee --check script.coffee` |
 | 稳定 JSON 输出 | `qcoffee --json script.coffee` |
@@ -113,7 +114,7 @@ fn evaluate_rule() -> Result<(), Error> {
 }
 ```
 
-生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载见[模块示例](examples/modules.rs)。
+生产嵌入应显式设置合适的 fuel、调用深度和 `ResourceLimits`，并按需要提供 `CancellationToken`、`with_global` 与 `with_native`。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 还可设置 retained object/byte 的执行提交上限：启用后超限会回滚本轮 Context 状态，但它不限制运行中临时分配，也不是 RSS 或逐指令 live-memory 预算。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离和 capability 设计。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
 
 ## 当前状态与已知缺口
 
@@ -121,7 +122,7 @@ QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode �
 
 但它仍处于实验性 0.1：
 
-- CLI 已支持显式根目录的受限模块加载，但仍没有模块包或模块图指纹；普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
+- CLI 已支持显式根目录的受限模块加载和非执行模块图指纹，但仍没有模块包或预编译 manifest；普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
 - 尚无完整内存预算、生命周期隔离或稳定的 capability table；这些由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 和 [#77](https://github.com/coffee-js/quickcoffee/issues/77) 跟踪。
 - 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
 - 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
@@ -158,4 +159,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0150](RFCs/0150-resource-bounded-literal-replacement.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0151](RFCs/0151-deterministic-module-graph-fingerprints.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

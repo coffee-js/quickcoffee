@@ -22,6 +22,8 @@ Fons legitur, in bytecodicem verificatum compilatur, et cum limite fuel currit.
 
 Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Context::run_module` fontem solum per `ModuleLoader` hospitis accipiunt, globalia privata servant, et fuel per graphum communicant.
 
+`Engine::fingerprint_module_graph` per eundem loader totum graphum legit et verificat sine exsecutione, clavem u64 versionatam fontibus, nominibus canonicis, import/export et marginibus sensibilem reddens.
+
 `qcoffee --check FILE` fontem verificat sine cursu.
 
 `qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit.
@@ -55,6 +57,8 @@ Errores hospitis `ErrorKind::Parse`, Verify, Runtime habent atque detail sine te
 `Program::fingerprint` clavem u64 determinatam praebet ad memoriam hospitis sine mutatione exsecutionis.
 
 `qcoffee --fingerprint FILE` eandem clavem hexadecimali parvis litteris sedecim signorum ostendit, sine documento exsecuto.
+
+`qcoffee --fingerprint --module-root ROOT ENTRY` radicem restrictam aperte concedit et clavem v1 totius graphi eiusdem formae ostendit, nullo modulo exsecuto.
 
 `qbench --json` unam mensurae lineam pro unoquoque onere custodito emittit; `--iterations` numerum exemplorum regit.
 

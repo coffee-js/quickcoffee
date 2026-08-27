@@ -16,3 +16,7 @@ RFC 0078 的指纹必须适合作为长期缓存键。若直接哈希 Rust `Debu
 ## 验收
 
 核心测试必须覆盖共享程序与复制句柄稳定、常量内容变化可区分、函数/模式/映射递归编码，以及验证后的 CLI 指纹仍不执行脚本。实现不得依赖 Rust 调试格式化。
+
+## 2026-08-27：版本域规则
+
+RFC 0151 的模块图指纹复用同一显式 FNV-1a encoder，但以 `quickcoffee.module-graph` domain 和公开的 `MODULE_GRAPH_FINGERPRINT_VERSION` 建立独立版本域。它编码每个节点的既有 Program 指纹而不改变本 RFC 的 bytecode golden；图编码语义变化必须递增图版本，不能静默改变既有 bytecode 指纹。

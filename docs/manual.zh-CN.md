@@ -16,7 +16,9 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 嵌入模块可写 import { public as local } from 'name' 与 export；`Engine::compile_module` 和 `Context::run_module` 只经宿主 `ModuleLoader` 取源码，模块全局私有且整张图共享 fuel。
 
-`qcoffee --module-root ROOT ENTRY` 只为本次执行显式授予一个受限文件模块根；ENTRY 相对根目录，导入仍须 ./ 或 ../，成功输出排序后的导出 Map（JSON 为 exports 记录）。fuel、stats 与 argv 可用；单文件、stdin、-e、REPL、check、反汇编和指纹模式绝不取得此能力。
+`Engine::fingerprint_module_graph` 经同一 loader 加载并验证完整静态图但不执行，返回依赖源码、规范名、import/export 与边均敏感的版本化 u64 缓存键。
+
+`qcoffee --module-root ROOT ENTRY` 只为本次操作显式授予一个受限文件模块根；ENTRY 相对根目录，导入仍须 ./ 或 ../。普通模式执行图并输出排序后的导出 Map（JSON 为 exports 记录）；组合 `--fingerprint` 则只输出 16 位图指纹，不执行模块。单文件、stdin、-e、REPL、check 与反汇编绝不取得此能力。
 
 嵌入宿主可用 `Context::with_fuel`、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。
 
@@ -55,6 +57,8 @@ Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.r
 `Program::fingerprint` 提供确定性的 u64 字节码缓存键，不改变执行语义。
 
 `qcoffee --fingerprint FILE` 以 16 位小写十六进制输出同一已验证字节码键，且不执行文件。
+
+`qcoffee --fingerprint --module-root ROOT ENTRY` 以相同格式输出独立 v1 模块图指纹，且不执行任何模块。
 
 `qbench --json` 为每个带语义护栏的负载输出一条计时记录；`--iterations` 设置样本次数。
 
