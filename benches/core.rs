@@ -60,6 +60,12 @@ fn main() {
             expected: "99",
         },
         Workload {
+            name: "stdlib-literal-replace",
+            source: "text = 'coffee-☕-coffee-☕-coffee'\nreplace_all(text, 'coffee', 'bean') == 'bean-☕-bean-☕-bean'",
+            iterations: 20_000,
+            expected: "true",
+        },
+        Workload {
             name: "postfix-loops",
             source: "sum = 0\ni = 0\ni = i + 1 while i < 100\nsum + i",
             iterations: 20_000,

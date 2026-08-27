@@ -46,7 +46,7 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qcoffee --json` emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 
-Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, and `CollectionOperationItems`. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
+Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, and retained-memory boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
 
 `Engine::compile_program` verifies once; `Context::run_program` reuses the immutable verified bytecode for repeated embedding calls.
 
@@ -92,7 +92,7 @@ Identifiers use Unicode XID rules; combining marks may continue a name and no no
 
 Chained strict or numeric comparisons keep the middle value once and short-circuit.
 
-The standard library is ordinary functions: print, len, type, error, range, str, trim, contains, starts_with, ends_with, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. RFC 0139 string queries are strict and locale-free; trim uses a pinned Unicode White_Space table. RFC 0140 sort returns a new stable array of homogeneous finite scalar values and uses locale-free Unicode-scalar String order. RFC 0144 concat immutably joins exactly two Strings or two Arrays and checks resource limits before allocation. `error(code, message, data, cause)` creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
+The standard library is ordinary functions: print, len, type, error, range, str, trim, contains, starts_with, ends_with, replace_all, sort, concat, parse_json, encode_json, integer, number, decimal, decimal_div, round_decimal, abs, sum, min, max, keys, values, join, split, and assert. RFC 0139 string queries are strict and locale-free; trim uses a pinned Unicode White_Space table. RFC 0140 sort returns a new stable array of homogeneous finite scalar values and uses locale-free Unicode-scalar String order. RFC 0144 concat immutably joins exactly two Strings or two Arrays. RFC 0150 replace_all performs left-to-right non-overlapping literal replacement without rescanning inserted text; both growing operations check resource limits before allocation. `error(code, message, data, cause)` creates a sealed RFC 0136 Error; catch binds Error and resource failures remain uncatchable. Aggregators accept homogeneous finite Number, Integer, or Decimal arrays.
 
 
 RFC 0137 Decimal literals use an m suffix; exact division rejects repeating results, while decimal_div and round_decimal require an explicit scale and rounding mode.
@@ -186,6 +186,7 @@ trimmed_text = trim('\u{3000}coffee ☕\u{3000}')
 contains(trimmed_text, '☕') and starts_with(trimmed_text, 'coffee') and ends_with(trimmed_text, '☕')
 sort(['中', 'a', '☕']) == ['a', '☕', '中']
 concat([1, 2], [3]) == [1, 2, 3] and concat('coffee ', '☕') == 'coffee ☕'
+replace_all('coffee coffee', 'coffee', 'bean') == 'bean bean'
 
 
 

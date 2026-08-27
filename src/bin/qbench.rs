@@ -109,6 +109,11 @@ const WORKLOADS: &[Workload] = &[
         expected: "99",
     },
     Workload {
+        name: "stdlib-literal-replace",
+        source: "text = 'coffee-☕-coffee-☕-coffee'\nreplace_all(text, 'coffee', 'bean') == 'bean-☕-bean-☕-bean'",
+        expected: "true",
+    },
+    Workload {
         name: "closures-and-ranges",
         source: "base = 1\nadd = (n) -> n + base\nsum = 0\nfor n in [1...50] then sum = sum + add(n)\nsum",
         expected: "1274",

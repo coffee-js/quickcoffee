@@ -50,6 +50,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. Array 连接还以左右输入项数总和复用 `CollectionOperationItems`，在复制任一元素之前拒绝超限工作。该操作边界与结果 `ArrayItems` 边界独立，宿主可分别收紧。
 3. 失败不修改输入且不返回部分结果；资源错误仍不可被脚本捕获。String 连接不读取 locale 或宿主 Unicode 表，Array 连接只按不可变 Value 语义克隆现有项。
 
+## 2026-08-27：字面量文本替换
+
+1. RFC 0150 增加 `max_text_operation_bytes`，默认 1,000,000 UTF-8 bytes，并以 `TextOperationBytes` 标识扫描输入越界；它独立于 `StringBytes` 的单值/输出边界。
+2. `replace_all` 在扫描 `text` 前检查操作输入，在分配前以 checked arithmetic 计算并检查最终 String bytes；空 needle、错误类型或参数数量仍是可捕获的 Runtime error。
+3. 匹配从左到右、非重叠且不重新扫描插入文本；失败不修改输入、不返回部分结果，资源错误不可被脚本捕获。模块子 Context 继承同一策略。
+
 ## 2026-08-27：保留托管图快照
 
 1. RFC 0146 的累计分配遥测不等于 retained-memory；RFC 0147 新增 `Context::retained_memory()`，以稳定逻辑对象/bytes 单位读取当前 Context 所有可达的托管值，不执行脚本且不改变执行统计。

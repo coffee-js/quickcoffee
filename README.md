@@ -73,7 +73,7 @@ QuickCoffee 已提供：
 - 严格的 Bool 条件与数值运算；`Number`、任意精度 `Integer` 与精确 `Decimal` 彼此分型，转换必须显式。
 - 数组、无原型 Map、spread、严格递归解构、范围、切片、列表推导，以及 Unicode 标量级字符串索引和遍历。
 - 函数、默认参数、rest 参数、闭包、`try` / `catch` / `finally`、`throw`、`return`、循环与 `switch`。
-- JSON 编解码、稳定标量排序、`trim` / `contains` / `starts_with` 等确定性标准库函数；JSON 保留 Integer/Decimal 精度。
+- JSON 编解码、稳定标量排序、`trim` / `contains` / `starts_with` / `replace_all` 等确定性标准库函数；JSON 保留 Integer/Decimal 精度。
 - 受限 class：`constructor`、实例/静态方法、`new`、私有继承链、静态解析的 `super`，以及只在合法 class 成员内可用的 `this`、`@` 和 `=>`。
 - 编译检查、结构化诊断、字节码反汇编/指纹，以及可复用的 `Program` 嵌入 API。
 
@@ -158,4 +158,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0149](RFCs/0149-transactional-retained-memory-limits.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0150](RFCs/0150-resource-bounded-literal-replacement.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

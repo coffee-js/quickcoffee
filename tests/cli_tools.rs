@@ -1085,6 +1085,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "stdlib-string-queries",
         "stdlib-stable-sort",
         "stdlib-concat",
+        "stdlib-literal-replace",
         "closures-and-ranges",
         "call-containing-local-loop",
         "captured-local-loop",
@@ -1231,6 +1232,25 @@ fn qbench_json_is_guarded_and_machine_readable() {
     let selected_stdout = String::from_utf8_lossy(&selected.stdout);
     assert_eq!(selected_stdout.lines().count(), 1);
     assert!(selected_stdout.contains("\"name\":\"map-spread\""));
+    let replacement = Command::new(bin("qbench"))
+        .args([
+            "--only",
+            "stdlib-literal-replace",
+            "--json",
+            "--iterations",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(replacement.status.success());
+    let replacement_stdout = String::from_utf8_lossy(&replacement.stdout);
+    assert_eq!(replacement_stdout.lines().count(), 1);
+    assert!(replacement_stdout.contains("\"name\":\"stdlib-literal-replace\""));
+    assert!(replacement_stdout.contains("\"profile_calls\":1,\"profile_container_ops\":0"));
+    assert!(replacement_stdout.contains("\"profile_value_allocations\":1"));
+    assert!(replacement_stdout.contains("\"profile_environment_allocations\":0"));
+    assert!(replacement_stdout.contains("\"profile_managed_objects_allocated\":1"));
+    assert!(replacement_stdout.contains("\"profile_managed_bytes_allocated\":22"));
     let member = Command::new(bin("qbench"))
         .args([
             "--only",

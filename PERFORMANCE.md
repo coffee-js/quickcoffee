@@ -758,6 +758,8 @@ make bench
 
 `qbench` 的每条 `quickcoffee.qbench.v1` 记录现在追加一次不计时执行的 `profile_*` 字段。热点计数来自 RFC 0122；`profile_value_allocations` 记录新建的引用计数字符串、数组、映射与字节码函数后备存储，`profile_environment_allocations` 记录 QuickCoffee 函数调用环境。它们是确定性历史事件数，不是字节数、存活对象数或系统分配器调用次数。RFC 0146 另增 `profile_managed_objects_allocated` 与 `profile_managed_bytes_allocated`，覆盖完整语言值类别和规范化 payload 增长；两者不等于 RSS、retained 或 peak memory。编译期常量和嵌入宿主回调内部的分配均不计入。
 
+`stdlib-literal-replace` 在混合 ASCII/多字节 Unicode 文本中执行三次固定字面量替换，并以完整结果比较作为语义护栏；它同时存在于 `qbench --json` 与 `cargo bench --bench core`。负载隔离普通 resource builtin 调度、两次原字符串扫描与单次精确容量输出分配。profile 必须保持一个托管 String 对象、零脚本 callback；`max_text_operation_bytes` 在扫描前限制输入，`max_string_bytes` 在分配前限制最终 UTF-8 输出。优化不得改为重叠匹配、重扫插入文本、regex、locale 或 normalization 语义。
+
 可用一个迭代快速复现计时和单次执行剖析；调整 `--iterations` 或 `--repeat` 只改变计时样本，不会放大 `profile_*`：
 
 ```sh

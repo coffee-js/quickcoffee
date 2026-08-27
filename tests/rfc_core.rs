@@ -2044,6 +2044,51 @@ fn concat_is_immutable_strict_and_deterministic() {
     assert_eq!(context.last_execution().value_allocations, 1);
 }
 #[test]
+fn literal_replace_all_is_strict_non_rescanning_and_deterministic() {
+    assert_eq!(eval("replace_all('banana', 'na', 'X')").to_string(), "baXX");
+    assert_eq!(
+        eval("replace_all('☕ coffee ☕', '☕', '茶')").to_string(),
+        "茶 coffee 茶"
+    );
+    assert_eq!(eval("replace_all('aaaa', 'aa', 'b')").to_string(), "bb");
+    assert_eq!(eval("replace_all('a', 'a', 'aa')").to_string(), "aa");
+    assert_eq!(
+        eval("try replace_all('text', '', 'x') catch problem then problem.code").as_str(),
+        Some("runtime")
+    );
+    assert_eq!(
+        eval("replace_all('coffee', 'tea', 'bean')").to_string(),
+        "coffee"
+    );
+
+    for source in [
+        "replace_all()",
+        "replace_all('text', 't')",
+        "replace_all('text', 't', 'x', 'extra')",
+        "replace_all(1, '1', 'one')",
+        "replace_all('text', 1, 'one')",
+        "replace_all('text', 't', 1)",
+        "replace_all('text', '', 'x')",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+
+    let mut context = Context::new();
+    assert_eq!(
+        context
+            .eval("replace_all('coffee', 'tea', 'bean')")
+            .unwrap()
+            .to_string(),
+        "coffee"
+    );
+    assert_eq!(context.last_execution().value_allocations, 1);
+    assert_eq!(context.last_execution().managed_objects_allocated, 1);
+    assert_eq!(context.last_execution().managed_bytes_allocated, 6);
+}
+#[test]
 fn array_destructuring_is_strict_and_has_an_explicit_ignore_name() {
     assert_eq!(
         eval("left, right = [20, 22]\nleft + right").as_number(),
