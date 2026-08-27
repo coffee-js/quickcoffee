@@ -1443,6 +1443,100 @@ fn managed_allocation_telemetry_survives_errors_and_pattern_rollback() {
 }
 
 #[test]
+fn transient_managed_allocation_limits_are_per_run_atomic_and_uncatchable() {
+    let source = "make = -> ['temporary']\nmake()\nmake()\n42";
+    let mut baseline = Context::new();
+    assert_eq!(baseline.eval(source).unwrap().as_number(), Some(42.));
+    let expected = baseline.last_execution();
+    assert!(expected.managed_objects_allocated > 1);
+    assert!(expected.managed_bytes_allocated > 1);
+
+    let exact_limits = ResourceLimits::default()
+        .with_max_transient_managed_objects(expected.managed_objects_allocated)
+        .with_max_transient_managed_bytes(expected.managed_bytes_allocated);
+    let mut exact = Context::new().with_resource_limits(exact_limits);
+    assert_eq!(exact.eval(source).unwrap().as_number(), Some(42.));
+    assert_eq!(exact.last_execution(), expected);
+    assert_eq!(exact.eval(source).unwrap().as_number(), Some(42.));
+    assert_eq!(exact.last_execution(), expected);
+
+    let mut object_limited = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_transient_managed_objects(expected.managed_objects_allocated - 1),
+    );
+    let error = object_limited
+        .eval_named(
+            "transient-objects.coffee",
+            "try\n  make = -> ['temporary']\n  make()\n  make()\n  42\ncatch ignored\n  99",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("transient-objects.coffee")
+    );
+    assert!(
+        object_limited.last_execution().managed_objects_allocated
+            > expected.managed_objects_allocated - 1
+    );
+    assert!(object_limited.get_global("make").is_none());
+
+    let mut byte_limited = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_transient_managed_bytes(expected.managed_bytes_allocated - 1),
+    );
+    let error = byte_limited.eval(source).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedBytes)
+    );
+    assert!(
+        byte_limited.last_execution().managed_bytes_allocated
+            > expected.managed_bytes_allocated - 1
+    );
+    assert!(byte_limited.get_global("make").is_none());
+
+    let defaults = ResourceLimits::default();
+    assert_eq!(defaults.max_transient_managed_objects(), u64::MAX);
+    assert_eq!(defaults.max_transient_managed_bytes(), u64::MAX);
+}
+
+#[test]
+fn contextual_native_allocation_limits_override_callback_errors_and_keep_stats() {
+    let mut objects = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_objects(1))
+        .with_contextual_native("host_work", |call, _| {
+            call.record_managed_allocation(2, 0);
+            Err(Error::runtime("host failure after allocation"))
+        });
+    let error = objects
+        .eval("try host_work() catch ignored then 42")
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(objects.last_execution().managed_objects_allocated, 2);
+
+    let mut bytes = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_bytes(8))
+        .with_contextual_native("host_work", |call, _| {
+            call.record_managed_allocation(0, 9);
+            Ok(Value::Nil)
+        });
+    let error = bytes.eval("host_work()").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedBytes)
+    );
+    assert_eq!(bytes.last_execution().managed_bytes_allocated, 9);
+}
+
+#[test]
 fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
     let mut context = Context::new().with_fuel(1_000).with_max_call_depth(3);
     assert_eq!(context.max_call_depth(), 3);

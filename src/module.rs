@@ -838,6 +838,26 @@ fn execute_prepared_module(
             context.set_global(local, value.clone());
         }
     }
+    let limits = host.resource_limits();
+    let remaining_objects = if limits.max_transient_managed_objects() == u64::MAX {
+        u64::MAX
+    } else {
+        limits
+            .max_transient_managed_objects()
+            .saturating_sub(stats.managed_objects_allocated)
+    };
+    let remaining_bytes = if limits.max_transient_managed_bytes() == u64::MAX {
+        u64::MAX
+    } else {
+        limits
+            .max_transient_managed_bytes()
+            .saturating_sub(stats.managed_bytes_allocated)
+    };
+    context.set_resource_limits(
+        limits
+            .with_max_transient_managed_objects(remaining_objects)
+            .with_max_transient_managed_bytes(remaining_bytes),
+    );
     let result = context.run_program(&module.program);
     let execution = context.last_execution();
     *fuel = execution.fuel_remaining;
@@ -851,8 +871,12 @@ fn execute_prepared_module(
     stats.exception_ops += execution.exception_ops;
     stats.value_allocations += execution.value_allocations;
     stats.environment_allocations += execution.environment_allocations;
-    stats.managed_objects_allocated += execution.managed_objects_allocated;
-    stats.managed_bytes_allocated += execution.managed_bytes_allocated;
+    stats.managed_objects_allocated = stats
+        .managed_objects_allocated
+        .saturating_add(execution.managed_objects_allocated);
+    stats.managed_bytes_allocated = stats
+        .managed_bytes_allocated
+        .saturating_add(execution.managed_bytes_allocated);
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

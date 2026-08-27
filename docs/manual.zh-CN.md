@@ -20,7 +20,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qcoffee --module-root ROOT ENTRY` 只为本次操作显式授予一个受限文件模块根；ENTRY 相对根目录，导入仍须 ./ 或 ../。普通模式执行图并输出排序后的导出 Map（JSON 为 exports 记录）；组合 `--fingerprint` 则只输出 16 位图指纹，不执行模块。单文件、stdin、-e、REPL、check 与反汇编绝不取得此能力。
 
-嵌入宿主可用 `Context::with_fuel`、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。
+嵌入宿主可用 `Context::with_fuel`、with_max_call_depth、with_resource_limits 和 with_cancellation_token 分别限制指令、递归、一般 String UTF-8 bytes、Array 项数、Map 条目、JSON 数据大小、Integer bit、Decimal coefficient bit/scale、retained-state 提交量、单轮累计 managed allocation 与取消执行；常量、全局、native 返回、成员读取及生成值都按当前 Context 策略复核。资源错误不被脚本 catch 吞掉，JSON 语法错误仍可捕获。瞬时分配预算也累计创建后丢弃的值，但不是 RSS 或逐时刻 live-memory 峰值。
 
 `CompileLimits` 另行限制原始 source bytes、递归 bytecode instructions、唯一模块数和累计模块图 source；模块执行会在任何脚本运行前预检完整静态图，`qcoffee` 提供对应的 `--max-*` 选项。
 

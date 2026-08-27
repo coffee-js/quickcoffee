@@ -51,6 +51,10 @@ pub enum ResourceLimit {
     ModuleGraphModules = 22,
     /// One static module graph exceeded its cumulative raw source byte boundary.
     ModuleGraphSourceBytes = 23,
+    /// One execution exceeded its cumulative logical managed-object allocation boundary.
+    TransientManagedObjects = 24,
+    /// One execution exceeded its cumulative logical managed payload-byte allocation boundary.
+    TransientManagedBytes = 25,
 }
 
 #[cfg(test)]
@@ -67,6 +71,8 @@ mod tests {
         assert_eq!(ResourceLimit::BytecodeInstructions as u8, 21);
         assert_eq!(ResourceLimit::ModuleGraphModules as u8, 22);
         assert_eq!(ResourceLimit::ModuleGraphSourceBytes as u8, 23);
+        assert_eq!(ResourceLimit::TransientManagedObjects as u8, 24);
+        assert_eq!(ResourceLimit::TransientManagedBytes as u8, 25);
     }
 }
 
@@ -143,7 +149,8 @@ impl CompileLimits {
     }
 }
 
-/// Deterministic data-size boundaries applied by an execution [`crate::Context`].
+/// Deterministic data-size, retained-state, and per-run allocation boundaries
+/// applied by an execution [`crate::Context`].
 ///
 /// The defaults preserve RFC 0135/0137/0138's original fixed numeric and JSON guards. A policy is
 /// copied into a context with [`crate::Context::with_resource_limits`] or
@@ -167,6 +174,8 @@ pub struct ResourceLimits {
     max_map_entries: usize,
     max_retained_managed_objects: u64,
     max_retained_managed_bytes: u64,
+    max_transient_managed_objects: u64,
+    max_transient_managed_bytes: u64,
 }
 
 impl Default for ResourceLimits {
@@ -188,6 +197,8 @@ impl Default for ResourceLimits {
             max_map_entries: 100_000,
             max_retained_managed_objects: u64::MAX,
             max_retained_managed_bytes: u64::MAX,
+            max_transient_managed_objects: u64::MAX,
+            max_transient_managed_bytes: u64::MAX,
         }
     }
 }
@@ -379,6 +390,32 @@ impl ResourceLimits {
     /// Returns a policy with the retained managed-byte commit boundary replaced.
     pub fn with_max_retained_managed_bytes(mut self, limit: u64) -> Self {
         self.max_retained_managed_bytes = limit;
+        self
+    }
+
+    /// Returns the maximum logical managed objects allocated during one execution.
+    ///
+    /// The default `u64::MAX` disables this optional cumulative transient-allocation guard.
+    pub fn max_transient_managed_objects(&self) -> u64 {
+        self.max_transient_managed_objects
+    }
+
+    /// Returns a policy with the per-execution managed-object allocation boundary replaced.
+    pub fn with_max_transient_managed_objects(mut self, limit: u64) -> Self {
+        self.max_transient_managed_objects = limit;
+        self
+    }
+
+    /// Returns the maximum logical managed payload bytes allocated during one execution.
+    ///
+    /// The default `u64::MAX` disables this optional cumulative transient-allocation guard.
+    pub fn max_transient_managed_bytes(&self) -> u64 {
+        self.max_transient_managed_bytes
+    }
+
+    /// Returns a policy with the per-execution managed-byte allocation boundary replaced.
+    pub fn with_max_transient_managed_bytes(mut self, limit: u64) -> Self {
+        self.max_transient_managed_bytes = limit;
         self
     }
 }

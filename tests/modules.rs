@@ -543,6 +543,45 @@ fn module_children_inherit_retained_memory_commit_limits() {
 }
 
 #[test]
+fn module_graphs_share_one_transient_managed_allocation_budget() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { dependency } from 'dependency'\nexport result = concat('', dependency)",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export dependency = concat('', 'coffee')");
+
+    let mut baseline = Context::new();
+    let exports = baseline.run_module(&main, &loader).unwrap();
+    assert_eq!(
+        exports.get("result").and_then(Value::as_str),
+        Some("coffee")
+    );
+    let expected = baseline.last_execution();
+    assert_eq!(expected.managed_objects_allocated, 2);
+    assert_eq!(expected.managed_bytes_allocated, 12);
+
+    let exact_limits = ResourceLimits::default()
+        .with_max_transient_managed_objects(expected.managed_objects_allocated)
+        .with_max_transient_managed_bytes(expected.managed_bytes_allocated);
+    let mut exact = Context::new().with_resource_limits(exact_limits);
+    assert!(exact.run_module(&main, &loader).is_ok());
+    assert_eq!(exact.last_execution(), expected);
+
+    let mut limited = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_objects(1));
+    let error = limited.run_module(&main, &loader).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(limited.last_execution().managed_objects_allocated, 2);
+}
+
+#[test]
 fn modules_export_classes_without_exposing_their_receiver_state() {
     let engine = Engine::new();
     let main = engine

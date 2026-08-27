@@ -28,7 +28,9 @@ fn main() -> Result<(), Error> {
                 .with_max_json_output_bytes(256_000)
                 .with_max_integer_bits(4_096)
                 .with_max_decimal_coefficient_bits(4_096)
-                .with_max_decimal_scale(256),
+                .with_max_decimal_scale(256)
+                .with_max_transient_managed_objects(100_000)
+                .with_max_transient_managed_bytes(16_000_000),
         )
         .cancellation_token(cancellation.clone())
         .host_state(Cell::new(0_u64))

@@ -74,6 +74,12 @@ fuel 能限制无限循环，却不能明确区分资源耗尽与普通运行时
 2. 启用后，执行前先检查既有 Context；执行后再检查将提交的 retained 图。后者超限会恢复可达 Environment、Class static fields 与 Instance fields，并返回不可捕获 Resource error；数组由事务快照持有 Rc 而使用既有 copy-on-write，Map 本身不可变。
 3. 限额只约束顶层执行结束时 Context 将保留的状态，不限制同一轮中已丢弃的临时分配，也不承诺逐指令 live peak。模块子 Context 继承该策略；宿主 `set_global` 保持无失败 API，随后执行的 preflight 才会报告其预先存入的超限状态。
 
+## 2026-08-28：单轮累计 transient managed allocation 限制
+
+1. RFC 0156 增加 `max_transient_managed_objects` 与 `max_transient_managed_bytes`；默认 `u64::MAX` 禁用，超限原因分别是 `TransientManagedObjects` 与 `TransientManagedBytes`。它们复用 RFC 0146 logical allocation delta，每轮顶层执行重新计数，模块图共享聚合账本。
+2. VM 与已建模 builtin 在既有分配记账点更新统计后立即检查。contextual native 继续通过无失败的协作 API 报告 delta，VM 在 callback 返回后强制检查，资源越界优先于 callback 同时返回的普通错误；opaque native 与未报告宿主堆不在边界内。
+3. 启用策略时复用 RFC 0149 事务快照；本类别失败恢复脚本可变状态但保留失败点统计，宿主 side effect 不回滚。累计 transient budget 不是瞬时 live set、RSS、allocator capacity 或 retained graph；这些独立边界仍由 #76 跟踪。
+
 ## 验收
 
 `tests/embedding_api.rs` 必须覆盖 fuel、递归深度、预取消 token、替换 token、JSON/数值/通用语言值策略替换、资源错误不可被 `catch` 吞掉、共享 Program、宿主全局/native 返回、失败后恢复、源码标签及深度峰值；模块测试覆盖策略继承，JSON 单元测试覆盖边界类别。CLI JSON 必须输出 `kind:"resource"` 的资源错误；嵌入示例、中英文语法索引与可执行手册说明该 API。完整 `make check` 必须通过。

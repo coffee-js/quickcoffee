@@ -1597,6 +1597,8 @@ impl ResourceLimitSlot {
             21 => Some(ResourceLimit::BytecodeInstructions),
             22 => Some(ResourceLimit::ModuleGraphModules),
             23 => Some(ResourceLimit::ModuleGraphSourceBytes),
+            24 => Some(ResourceLimit::TransientManagedObjects),
+            25 => Some(ResourceLimit::TransientManagedBytes),
             _ => None,
         }
     }
@@ -2127,8 +2129,9 @@ impl NativeCallContext {
     ///
     /// These counters saturating-add to the current [`ExecutionStats`] even if
     /// the callback returns an error. They do not change legacy
-    /// [`ExecutionStats::value_allocations`] and are telemetry rather than a
-    /// transient-memory hard limit.
+    /// [`ExecutionStats::value_allocations`]. After the callback returns, the VM
+    /// applies the current per-run transient managed object/byte limits to the
+    /// reported totals; unreported host allocation remains outside that policy.
     pub fn record_managed_allocation(&mut self, objects: u64, bytes: u64) {
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(objects);
         self.managed_bytes_allocated = self.managed_bytes_allocated.saturating_add(bytes);
@@ -4024,6 +4027,51 @@ fn retained_memory_limits_active(limits: ResourceLimits) -> bool {
         || limits.max_retained_managed_bytes() < u64::MAX
 }
 
+fn transient_managed_allocation_limits_active(limits: &ResourceLimits) -> bool {
+    limits.max_transient_managed_objects() < u64::MAX
+        || limits.max_transient_managed_bytes() < u64::MAX
+}
+
+#[cold]
+fn transient_managed_objects_limit_error(actual: u64, limit: u64) -> Error {
+    Error::resource(
+        ResourceLimit::TransientManagedObjects,
+        format!("execution allocated {actual} managed objects, exceeding {limit}"),
+    )
+}
+
+#[cold]
+fn transient_managed_bytes_limit_error(actual: u64, limit: u64) -> Error {
+    Error::resource(
+        ResourceLimit::TransientManagedBytes,
+        format!("execution allocated {actual} managed bytes, exceeding {limit}"),
+    )
+}
+
+#[inline]
+fn check_transient_managed_allocation_limits(
+    objects: u64,
+    bytes: u64,
+    limits: &ResourceLimits,
+) -> Result<(), Error> {
+    if !transient_managed_allocation_limits_active(limits) {
+        return Ok(());
+    }
+    if objects > limits.max_transient_managed_objects() {
+        return Err(transient_managed_objects_limit_error(
+            objects,
+            limits.max_transient_managed_objects(),
+        ));
+    }
+    if bytes > limits.max_transient_managed_bytes() {
+        return Err(transient_managed_bytes_limit_error(
+            bytes,
+            limits.max_transient_managed_bytes(),
+        ));
+    }
+    Ok(())
+}
+
 fn check_retained_memory_limits(
     memory: RetainedMemory,
     limits: ResourceLimits,
@@ -4816,8 +4864,13 @@ impl Context {
         program.ensure_verified_for_bytecode_limit(
             self.engine.compile_limits().max_bytecode_instructions(),
         )?;
-        let retained_transaction = if retained_memory_limits_active(self.resource_limits) {
-            check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
+        let retained_limits_active = retained_memory_limits_active(self.resource_limits);
+        let transient_limits_active =
+            transient_managed_allocation_limits_active(&self.resource_limits);
+        let state_transaction = if retained_limits_active || transient_limits_active {
+            if retained_limits_active {
+                check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
+            }
             Some(RetainedMemoryTransaction::capture(&self.global))
         } else {
             None
@@ -4850,12 +4903,27 @@ impl Context {
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         self.last_execution = vm.stats();
-        if let Some(transaction) = retained_transaction {
-            if let Err(error) =
-                check_retained_memory_limits(self.retained_memory(), self.resource_limits)
-            {
+        if let Some(transaction) = state_transaction {
+            let transient_limit_failed = result.as_ref().is_err_and(|error| {
+                matches!(
+                    error.resource_limit(),
+                    Some(
+                        ResourceLimit::TransientManagedObjects
+                            | ResourceLimit::TransientManagedBytes
+                    )
+                )
+            });
+            if transient_limit_failed {
                 transaction.restore();
-                return Err(error);
+                return result;
+            }
+            if retained_limits_active {
+                if let Err(error) =
+                    check_retained_memory_limits(self.retained_memory(), self.resource_limits)
+                {
+                    transaction.restore();
+                    return Err(error);
+                }
             }
         }
         result
@@ -5546,7 +5614,7 @@ impl Vm {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
 
-    fn record_managed_allocation(&mut self, allocation: ManagedAllocation) {
+    fn record_managed_allocation(&mut self, allocation: ManagedAllocation) -> Result<(), Error> {
         self.value_allocations = self
             .value_allocations
             .saturating_add(allocation.legacy_value_allocations);
@@ -5556,25 +5624,35 @@ impl Vm {
         self.managed_bytes_allocated = self
             .managed_bytes_allocated
             .saturating_add(allocation.bytes);
+        check_transient_managed_allocation_limits(
+            self.managed_objects_allocated,
+            self.managed_bytes_allocated,
+            &self.resource_limits,
+        )
     }
 
-    fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) {
-        self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value));
+    fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
+        self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value))
     }
 
-    fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) {
-        self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value));
+    fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
+        self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value))
     }
 
-    fn record_stack_managed_allocation(&mut self, frame: &Frame) {
+    fn record_stack_managed_allocation(&mut self, frame: &Frame) -> Result<(), Error> {
         self.record_managed_allocation(shallow_managed_allocation(
             frame.stack.last().expect("managed numeric result"),
-        ));
+        ))
     }
 
-    fn record_environment_allocation(&mut self) {
+    fn record_environment_allocation(&mut self) -> Result<(), Error> {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
+        check_transient_managed_allocation_limits(
+            self.managed_objects_allocated,
+            self.managed_bytes_allocated,
+            &self.resource_limits,
+        )
     }
 
     // This boundary keeps argument-buffer plumbing out of the monolithic
@@ -5657,7 +5735,7 @@ impl Vm {
             class: class.clone(),
             fields: RefCell::new(BTreeMap::new()),
         }));
-        self.record_shallow_value_allocation(1, &instance);
+        self.record_shallow_value_allocation(1, &instance)?;
         if let Some((owner, constructor)) = find_constructor(&class) {
             return Ok(Step::Call {
                 target: CallTarget::Receiver {
@@ -5865,7 +5943,7 @@ impl Vm {
             static_methods: static_table,
             static_fields: RefCell::new(BTreeMap::new()),
         }));
-        self.record_shallow_value_allocation(1, &class);
+        self.record_shallow_value_allocation(1, &class)?;
         frame.stack.push(class);
         Ok(())
     }
@@ -6128,7 +6206,7 @@ impl Vm {
                             }
                             (bindings, ManagedAllocation::default())
                         };
-                        self.record_managed_allocation(allocations);
+                        self.record_managed_allocation(allocations)?;
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -6169,7 +6247,7 @@ impl Vm {
                             push_integer(frame, -x.inner(), self.resource_limits)?;
                             self.record_managed_allocation(shallow_managed_allocation(
                                 frame.stack.last().expect("integer result"),
-                            ));
+                            ))?;
                         }
                         Value::Decimal(x) => {
                             let value = Value::Decimal(Rc::new(resource_decimal(
@@ -6177,7 +6255,7 @@ impl Vm {
                                 x.scale,
                                 self.resource_limits,
                             )?));
-                            self.record_managed_allocation(shallow_managed_allocation(&value));
+                            self.record_managed_allocation(shallow_managed_allocation(&value))?;
                             frame.stack.push(value);
                         }
                         _ => {
@@ -6199,7 +6277,7 @@ impl Vm {
                             push_integer(frame, !x.inner(), self.resource_limits)?;
                             self.record_managed_allocation(shallow_managed_allocation(
                                 frame.stack.last().expect("integer result"),
-                            ));
+                            ))?;
                         }
                         _ => return Err(Error::runtime("'~' expects number or integer")),
                     },
@@ -6209,12 +6287,12 @@ impl Vm {
                     }
                     Instruction::Increment => {
                         if numeric_update(frame, true, &self.resource_limits)? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Decrement => {
                         if numeric_update(frame, false, &self.resource_limits)? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Add => {
@@ -6225,7 +6303,7 @@ impl Vm {
                             |a, b, _| Ok(a + b),
                             decimal_add,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Sub => {
@@ -6236,7 +6314,7 @@ impl Vm {
                             |a, b, _| Ok(a - b),
                             decimal_sub,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Mul => {
@@ -6247,7 +6325,7 @@ impl Vm {
                             integer_mul_resource,
                             decimal_mul,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Div => {
@@ -6258,7 +6336,7 @@ impl Vm {
                             |a, b, _| integer_div(a, b),
                             decimal_exact_div,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::FloorDiv => {
@@ -6269,7 +6347,7 @@ impl Vm {
                             |a, b, _| integer_floor_div(a, b),
                             decimal_floor_div,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Rem => {
@@ -6280,7 +6358,7 @@ impl Vm {
                             |a, b, _| integer_rem(a, b),
                             decimal_rem,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Modulo => {
@@ -6291,7 +6369,7 @@ impl Vm {
                             |a, b, _| integer_modulo(a, b),
                             decimal_modulo,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitAnd => {
@@ -6303,7 +6381,7 @@ impl Vm {
                             |a, b| a & b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitOr => {
@@ -6315,7 +6393,7 @@ impl Vm {
                             |a, b| a | b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitXor => {
@@ -6327,21 +6405,21 @@ impl Vm {
                             |a, b| a ^ b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftLeft => {
                         let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
                         numeric_shift(frame, false, &self.resource_limits)?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftRight => {
                         let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
                         numeric_shift(frame, true, &self.resource_limits)?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftRightUnsigned => {
@@ -6355,7 +6433,7 @@ impl Vm {
                             integer_pow,
                             decimal_pow,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Eq => compare(frame, equal)?,
@@ -6454,7 +6532,7 @@ impl Vm {
                                 });
                                 self.record_managed_allocation(shallow_managed_allocation(
                                     &Value::Error(script_error.clone()),
-                                ));
+                                ))?;
                                 Error::from_script_error(script_error)
                             }
                         });
@@ -6491,7 +6569,7 @@ impl Vm {
                                     bytes: (character_count as u64)
                                         .saturating_mul(LOGICAL_REFERENCE_BYTES)
                                         .saturating_add(value.len() as u64),
-                                });
+                                })?;
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(values),
@@ -6569,7 +6647,7 @@ impl Vm {
                                         vec![Value::String(Rc::from(key.as_str())), value.clone()]
                                     });
                                     if let Some(values) = &value {
-                                        self.record_shallow_value_allocation(1, &values[0]);
+                                        self.record_shallow_value_allocation(1, &values[0])?;
                                         *position += 1;
                                     }
                                     value
@@ -6602,7 +6680,7 @@ impl Vm {
                                     bindings.append(&mut pattern_bindings);
                                     allocations.add(pattern_allocations);
                                 }
-                                self.record_managed_allocation(allocations);
+                                self.record_managed_allocation(allocations)?;
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
                                     environment.set_local(&name, value);
@@ -6645,7 +6723,7 @@ impl Vm {
                         check_array_resource(*n, self.resource_limits)?;
                         let v = take(frame, *n)?;
                         let value = Value::Array(Rc::new(v));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Append => {
@@ -6662,7 +6740,7 @@ impl Vm {
                         if cloned_backing {
                             let mut allocation = managed_array_allocation(values.len());
                             allocation.legacy_value_allocations = 1;
-                            self.record_managed_allocation(allocation);
+                            self.record_managed_allocation(allocation)?;
                         }
                         frame.stack.push(Value::Array(values));
                     }
@@ -6686,7 +6764,7 @@ impl Vm {
                             values.extend(segment.iter().cloned());
                         }
                         let value = Value::Array(Rc::new(values));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::MergeMaps(n) => {
@@ -6704,7 +6782,7 @@ impl Vm {
                         }
                         check_map_resource(values.len(), self.resource_limits)?;
                         let value = Value::Map(Rc::new(values));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::MakeRange(inclusive) => {
@@ -6713,9 +6791,9 @@ impl Vm {
                         let exact = matches!(start, Value::Integer(_));
                         let value = range_values(start, end, *inclusive, self.resource_limits)?;
                         if exact {
-                            self.record_deep_value_allocation(1, &value);
+                            self.record_deep_value_allocation(1, &value)?;
                         } else {
-                            self.record_shallow_value_allocation(1, &value);
+                            self.record_shallow_value_allocation(1, &value)?;
                         }
                         frame.stack.push(value);
                     }
@@ -6726,7 +6804,7 @@ impl Vm {
                         }
                         let v = take(frame, keys.len())?;
                         let value = Value::Map(Rc::new(keys.iter().cloned().zip(v).collect()));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Stringify => {
@@ -6734,7 +6812,7 @@ impl Vm {
                         let value = string_value(&value);
                         check_string_resource(&value, self.resource_limits)?;
                         let value = Value::String(Rc::from(value));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Concat(n) => {
@@ -6755,7 +6833,7 @@ impl Vm {
                             output.push_str(&value);
                         }
                         let value = Value::String(Rc::from(output));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Index => {
@@ -6781,7 +6859,7 @@ impl Vm {
                         let value = member_value(target, name, false)?;
                         check_member_value_resources(&value, self.resource_limits)?;
                         if matches!(value, Value::Function(_)) {
-                            self.record_shallow_value_allocation(1, &value);
+                            self.record_shallow_value_allocation(1, &value)?;
                         }
                         frame.stack.push(value);
                     }
@@ -6800,7 +6878,7 @@ impl Vm {
                                 legacy_value_allocations: 0,
                                 objects: 0,
                                 bytes: LOGICAL_MAP_ENTRY_BYTES.saturating_add(name.len() as u64),
-                            });
+                            })?;
                         }
                         frame.stack.push(value);
                     }
@@ -6906,7 +6984,7 @@ impl Vm {
                                 allocation.bytes =
                                     allocation.bytes.saturating_add(LOGICAL_REFERENCE_BYTES);
                             }
-                            self.record_managed_allocation(allocation);
+                            self.record_managed_allocation(allocation)?;
                             frame.stack.push(value);
                         }
                         _ => return Err(Error::runtime("value used as function template")),
@@ -7050,10 +7128,18 @@ impl Vm {
                             let span = frames.last().and_then(|frame| {
                                 Self::source_span(frame, frame.pc.saturating_sub(1))
                             });
-                            let error = error.with_span_if_missing(span);
+                            let error = error.with_span_if_missing(span.clone());
                             let error = Self::with_call_stack(error, &frames, include_current_call);
-                            if !handle_error(self, &mut frames, &error) {
-                                return Err(error);
+                            match handle_error(self, &mut frames, &error) {
+                                Ok(true) => {}
+                                Ok(false) => return Err(error),
+                                Err(limit_error) => {
+                                    return Err(Self::with_call_stack(
+                                        limit_error.with_span_if_missing(span),
+                                        &frames,
+                                        false,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -7062,10 +7148,18 @@ impl Vm {
                     let span = frames
                         .last()
                         .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
-                    let error = error.with_span_if_missing(span);
+                    let error = error.with_span_if_missing(span.clone());
                     let error = Self::with_call_stack(error, &frames, false);
-                    if !handle_error(self, &mut frames, &error) {
-                        return Err(error);
+                    match handle_error(self, &mut frames, &error) {
+                        Ok(true) => {}
+                        Ok(false) => return Err(error),
+                        Err(limit_error) => {
+                            return Err(Self::with_call_stack(
+                                limit_error.with_span_if_missing(span),
+                                &frames,
+                                false,
+                            ));
+                        }
                     }
                 }
             }
@@ -7393,7 +7487,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_managed_allocation(allocation_profile(args, &value));
+                    vm.record_managed_allocation(allocation_profile(args, &value))?;
                 }
                 frames
                     .last_mut()
@@ -7410,7 +7504,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_managed_allocation(allocation_profile(args, &value));
+                    vm.record_managed_allocation(allocation_profile(args, &value))?;
                 }
                 frames
                     .last_mut()
@@ -7499,7 +7593,7 @@ fn call_with_context(
                 };
                 // ExecutionStats models one logical lexical frame per bytecode
                 // call even when an isolated fast frame needs no physical Env.
-                vm.record_environment_allocation();
+                vm.record_environment_allocation()?;
                 if fast_locals.is_none() {
                     for (index, pattern) in params.iter().enumerate() {
                         let value = args.get(index).cloned().unwrap_or(Value::Nil);
@@ -7524,7 +7618,7 @@ fn call_with_context(
                     }
                     if let Some(rest) = rest {
                         let value = Value::Array(Rc::new(args[params.len()..].to_vec()));
-                        vm.record_shallow_value_allocation(1, &value);
+                        vm.record_shallow_value_allocation(1, &value)?;
                         local.borrow_mut().set_local(rest, value);
                     }
                 }
@@ -7597,7 +7691,7 @@ fn call_with_context(
                     legacy_value_allocations: 0,
                     objects: context.managed_objects_allocated,
                     bytes: context.managed_bytes_allocated,
-                });
+                })?;
                 let value = result?;
                 if vm.value_limits_active && value_needs_resource_check(&value) {
                     check_value_resources(&value, vm.resource_limits)?;
@@ -7613,22 +7707,22 @@ fn call_with_context(
     }
     Ok(())
 }
-fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
+fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> Result<bool, Error> {
     if error.kind() == ErrorKind::Resource {
-        return false;
+        return Ok(false);
     }
     loop {
         let Some(frame) = frames.last_mut() else {
-            return false;
+            return Ok(false);
         };
         if let Some(handler) = frame.handlers.pop() {
             frame.stack.truncate(handler.stack_depth);
             frame.iterators.truncate(handler.iterator_depth);
             let caught = error.catch_value();
-            vm.record_shallow_value_allocation(1, &caught);
+            vm.record_shallow_value_allocation(1, &caught)?;
             frame.env.borrow_mut().set_local(&handler.name, caught);
             frame.pc = handler.catch_pc;
-            return true;
+            return Ok(true);
         }
         let has_caller = frames.len() > 1;
         if has_caller {
@@ -8454,7 +8548,7 @@ fn bind_pattern(
             for (index, pattern) in patterns.iter().enumerate() {
                 if let Pattern::Rest(name) = pattern {
                     let rest = Value::Array(Rc::new(values[index..].to_vec()));
-                    vm.record_shallow_value_allocation(1, &rest);
+                    vm.record_shallow_value_allocation(1, &rest)?;
                     bindings.push((name.clone(), rest.clone()));
                     if name != "_" {
                         env.borrow_mut().set_local(name, rest);
@@ -8528,7 +8622,7 @@ fn bind_pattern(
                 }
             }
             let rest_value = Value::Map(Rc::new(remaining));
-            vm.record_shallow_value_allocation(1, &rest_value);
+            vm.record_shallow_value_allocation(1, &rest_value)?;
             bindings.push((rest.clone(), rest_value.clone()));
             if rest != "_" {
                 env.borrow_mut().set_local(rest, rest_value);
@@ -8557,7 +8651,7 @@ fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
                 )?)
                 .ok_or_else(|| Error::runtime("string index out of range"))?;
             let value = Value::String(Rc::from(character.to_string()));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         (Value::Map(m), Value::String(k)) => m
@@ -8614,7 +8708,7 @@ fn slice(
             }
             check_array_resource(end - start, limits)?;
             let value = Value::Array(Rc::new(values[start..end].to_vec()));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         Value::String(text) => {
@@ -8639,7 +8733,7 @@ fn slice(
                 .map_or(text.len(), |(offset, _)| offset);
             check_string_len_resource(end_byte - start_byte, limits)?;
             let value = Value::String(Rc::from(&text[start_byte..end_byte]));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         _ => Err(Error::runtime("slice expects an array or string")),
