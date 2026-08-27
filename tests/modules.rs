@@ -111,6 +111,28 @@ fn runtime_module_cache_shares_compilation_but_never_evaluation_results() {
 }
 
 #[test]
+fn module_children_inherit_contextual_native_host_state() {
+    let entry = Engine::new()
+        .compile_module("main", "export value = host_value()")
+        .unwrap();
+    let mut context = Context::builder()
+        .host_state(Cell::new(41_u64))
+        .contextual_native("host_value", |call, _| {
+            let state = call
+                .host_state::<Cell<u64>>()
+                .ok_or_else(|| quickcoffee::Error::runtime("missing module host state"))?;
+            state.set(state.get() + 1);
+            Ok(Value::from(state.get() as f64))
+        })
+        .build();
+    let exports = context
+        .run_module(&entry, &MemoryModuleLoader::new())
+        .unwrap();
+    assert_eq!(exports.get("value").and_then(Value::as_number), Some(42.));
+    assert_eq!(context.host_state::<Cell<u64>>().unwrap().get(), 42);
+}
+
+#[test]
 fn module_graph_fingerprints_are_stable_versioned_and_dependency_sensitive() {
     assert_eq!(MODULE_GRAPH_FINGERPRINT_VERSION, 1);
     let engine = Engine::new();

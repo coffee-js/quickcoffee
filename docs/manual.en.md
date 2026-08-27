@@ -74,6 +74,8 @@ Embedders may call `Context::set_fuel` or set_resource_limits between runs witho
 
 `Runtime::context_builder` creates isolated contexts that share only bounded verified Program/Module compilation caches; globals, evaluated exports, fuel, cancellation, statistics, and retained-memory state remain context-owned.
 
+Opt-in contextual natives use `NativeCallContext` to poll cancellation, charge fuel, record managed allocation telemetry, and access typed script-invisible `HostState` without ambient authority.
+
 `cargo run --example embed` compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 
 A host can branch on `Value::kind()` and use `Value::is_nil()` without inspecting internal containers.

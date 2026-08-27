@@ -1,4 +1,5 @@
 use quickcoffee::{CancellationToken, Error, ResourceLimits, Runtime, Value};
+use std::cell::Cell;
 
 fn main() -> Result<(), Error> {
     let cancellation = CancellationToken::new();
@@ -19,14 +20,22 @@ fn main() -> Result<(), Error> {
                 .with_max_decimal_scale(256),
         )
         .cancellation_token(cancellation.clone())
+        .host_state(Cell::new(0_u64))
         .global("factor", Value::from(2_f64))
-        .native("host_add", |args| {
+        .contextual_native("host_add", |call, args| {
+            call.check_cancelled()?;
+            call.consume_fuel(args.len() as u64)?;
             if args.len() != 2 {
                 return Err(Error::runtime("host_add expects two numbers"));
             }
             let (Some(left), Some(right)) = (args[0].as_number(), args[1].as_number()) else {
                 return Err(Error::runtime("host_add expects two numbers"));
             };
+            let calls = call
+                .host_state::<Cell<u64>>()
+                .ok_or_else(|| Error::runtime("missing host state"))?;
+            calls.set(calls.get() + 1);
+            call.record_managed_allocation(0, 0);
             Ok(Value::from(left + right))
         })
         .build();
@@ -36,6 +45,10 @@ fn main() -> Result<(), Error> {
         "host_add(20, 22) * factor",
     )?;
     println!("{value}");
+    eprintln!(
+        "host calls={}",
+        context.host_state::<Cell<u64>>().expect("host state").get()
+    );
     let retained = context.sample_retained_memory();
     let retained_high_water = context.retained_memory_high_water();
     eprintln!(

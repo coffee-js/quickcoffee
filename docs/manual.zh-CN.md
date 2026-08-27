@@ -76,6 +76,8 @@ Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.r
 
 `Runtime::context_builder` 创建的隔离 Context 只共享有界且已验证的 Program/Module 编译缓存；globals、已求值 exports、fuel、取消、统计和 retained-memory 状态仍归各 Context。
 
+显式 contextual native 可用 `NativeCallContext` 轮询取消、扣减 fuel、记录 managed allocation 遥测并访问类型化且脚本不可见的 `HostState`，不取得 ambient authority。
+
 `cargo run --example embed` 可编译最小 Rust 宿主：设置全局、注册原生回调并执行 QuickCoffee。
 
 宿主可用 `Value::kind()` 分流类型，用 `Value::is_nil()` 判断 nil，无须检查内部容器。
