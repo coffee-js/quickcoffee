@@ -21,4 +21,5 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
       - run: make docs && make check
-      - run: git diff --exit-code -- docs
+      - run: git diff --exit-code
+      - run: test -z "$(git status --short)"

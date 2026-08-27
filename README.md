@@ -156,6 +156,6 @@ make check
 | 项目范围与不变设计原则 | [RFC 0000](RFCs/0000-project-scope.md) |
 | 性能测量与历史基线 | [PERFORMANCE.md](PERFORMANCE.md) |
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
-| 可执行语言手册 | [中文](docs/manual.zh-CN.html) · [English](docs/manual.en.html) |
+| 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
 [RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0146](RFCs/0146-deterministic-managed-allocation-telemetry.md) 是当前已采纳的语义、字节码和工具契约；测试是这些契约的可执行验收。

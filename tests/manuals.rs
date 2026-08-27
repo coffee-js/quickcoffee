@@ -1,5 +1,8 @@
 use quickcoffee::{Context, Value};
-use std::{path::PathBuf, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const MANUALS: &[(&str, &str)] = &[
     (
@@ -58,6 +61,34 @@ fn qdocco_checks_every_manual_source() {
                 .success()
         );
     }
+}
+
+#[test]
+fn repository_publishes_markdown_without_generated_html() {
+    let readme = include_str!("../README.md");
+    let makefile = include_str!("../Makefile");
+    let gitignore = include_str!("../.gitignore");
+
+    for locale in ["zh-CN", "classical-zh", "en", "latin", "devanagari-sa"] {
+        let markdown = format!("docs/manual.{locale}.md");
+        let html = format!("docs/manual.{locale}.html");
+        assert!(
+            Path::new(&markdown).is_file(),
+            "{markdown} should be published"
+        );
+        assert!(
+            !Path::new(&html).exists(),
+            "{html} is generated and must not be published"
+        );
+    }
+
+    assert!(readme.contains("docs/manual.zh-CN.md"));
+    assert!(readme.contains("docs/manual.en.md"));
+    assert!(!readme.contains("docs/manual.zh-CN.html"));
+    assert!(!readme.contains("docs/manual.en.html"));
+    assert!(makefile.contains("docs-html: doc-check"));
+    assert!(makefile.contains("target/manuals/manual.zh-CN.html"));
+    assert!(gitignore.lines().any(|line| line == "/docs/manual.*.html"));
 }
 
 fn binary(name: &str) -> String {
