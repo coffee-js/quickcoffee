@@ -60,6 +60,10 @@ fn vm_fuzz_target_is_bounded_seeded_and_part_of_smoke() {
             .count(),
         3
     );
+    assert_eq!(makefile.matches("-detect_leaks=0").count(), 1);
+    assert!(makefile.contains(
+        "fuzz run vm fuzz/corpus/vm fuzz/seed_corpus/vm -- -runs=1024 -seed=1 -max_len=16384 -detect_leaks=0"
+    ));
 }
 
 #[test]
