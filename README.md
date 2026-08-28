@@ -23,6 +23,8 @@ cargo install --path .
 qcoffee --version
 ```
 
+正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS x86_64 和 Windows x86_64 归档。每个归档包含四个 CLI、README、更新日志与双许可证，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；下载、校验和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and checksum verification are documented bilingually in the same guide.
+
 创建 `invoice.coffee`：
 
 ```coffee
@@ -156,6 +158,7 @@ make check
 | 你想了解什么 | 入口 |
 |---|---|
 | 当前语法、标准库和 CLI 边界 | [中文语法索引](docs/syntax.zh-CN.md) · [English syntax index](docs/syntax.en.md) |
+| 平台归档、校验和与发布门禁 | [发布与平台归档 / Releases](docs/releasing.md) |
 | 业务适用范围、性能判断和未完成能力 | [业务就绪度评估](docs/readiness.zh-CN.md) |
 | CoffeeScript 兼容性差异 | [特性矩阵](docs/coffeescript-2016-matrix.md) |
 | class / `this` / `new` / `extends` / `super` 的安全边界 | [RFC 0134](RFCs/0134-class-receivers-and-inheritance.md) |

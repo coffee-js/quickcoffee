@@ -158,6 +158,18 @@ impl RestrictedFileModuleLoader {
                 "invalid module target: {requested}"
             )));
         }
+        if !self
+            .root
+            .metadata(&canonical)
+            .map_err(|_| {
+                Error::runtime(format!("module source is not readable: {canonical_name}"))
+            })?
+            .is_file()
+        {
+            return Err(Error::runtime(format!(
+                "invalid module target: {requested}"
+            )));
+        }
         let mut file = self.root.open(&canonical).map_err(|_| {
             Error::runtime(format!("module source is not readable: {canonical_name}"))
         })?;

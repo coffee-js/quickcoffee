@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'CHANGELOG.md'
+      - 'LICENSE-APACHE'
+      - 'LICENSE-MIT'
+      - 'README.md'
+      - 'docs/releasing.md'
+      - 'scripts/release.py'
+      - 'scripts/test_release.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: validate version and changelog
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        name: Validate Cargo, changelog, and optional tag version
+        shell: bash
+        run: |
+          set -euo pipefail
+          arguments=()
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            arguments+=(--tag "${GITHUB_REF_NAME}")
+          fi
+          version="$(python3 scripts/release.py version "${arguments[@]}")"
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          python3 scripts/release.py notes \
+            --version "${version}" \
+            --output release-notes.md
+      - name: Test release tooling
+        run: python3 scripts/test_release.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quickcoffee-release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            python: python3
+          - os: macos-14
+            target: x86_64-apple-darwin
+            python: python3
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            python: python
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          targets: ${{ matrix.target }}
+      - name: Run release tests
+        run: cargo test --locked --release --target ${{ matrix.target }}
+      - name: Verify crate package
+        run: cargo package --locked
+      - name: Build release CLIs
+        run: cargo build --locked --release --target ${{ matrix.target }} --bins
+      - name: Smoke-check built CLIs
+        run: >-
+          ${{ matrix.python }} scripts/release.py smoke
+          --binary-dir target/${{ matrix.target }}/release
+          --version ${{ needs.validate.outputs.version }}
+          --target ${{ matrix.target }}
+      - name: Package and verify platform archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(${{ matrix.python }} scripts/release.py package \
+            --binary-dir "target/${{ matrix.target }}/release" \
+            --output-dir dist \
+            --target "${{ matrix.target }}")"
+          ${{ matrix.python }} scripts/release.py verify-archive \
+            --archive "${archive}" \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quickcoffee-${{ needs.validate.outputs.version }}-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  bundle:
+    name: verify release bundle and checksums
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: quickcoffee-${{ needs.validate.outputs.version }}-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: quickcoffee-release-notes
+          path: dist
+      - name: Create and verify checksum manifest
+        run: |
+          python3 scripts/release.py checksums \
+            --dist dist \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu \
+            --target x86_64-apple-darwin \
+            --target x86_64-pc-windows-msvc
+          python3 scripts/release.py verify-checksums \
+            --dist dist \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu \
+            --target x86_64-apple-darwin \
+            --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quickcoffee-${{ needs.validate.outputs.version }}-release
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [validate, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: quickcoffee-${{ needs.validate.outputs.version }}-release
+          path: dist
+      - name: Publish verified tag artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          dist/*.tar.gz dist/*.zip dist/SHA256SUMS
+          --verify-tag
+          --title "QuickCoffee ${{ needs.validate.outputs.version }}"
+          --notes-file dist/release-notes.md

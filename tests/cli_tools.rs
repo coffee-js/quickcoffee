@@ -24,6 +24,23 @@ fn bin(name: &str) -> String {
     );
     candidate.to_string_lossy().into_owned()
 }
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                escaped.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
 #[test]
 fn qdocco_renders_escaped_source_and_checks() {
     let temp = std::env::temp_dir().join(format!("qcoffee-{}", std::process::id()));
@@ -241,16 +258,18 @@ fn qtest_reports_success_and_failure() {
     assert!(directory.status.success());
     let directory_stdout = String::from_utf8_lossy(&directory.stdout);
     for fixture in [
-        "tests/scripts/arithmetic.coffee",
-        "tests/scripts/collections.coffee",
-        "tests/scripts/comprehension.coffee",
-        "tests/scripts/control-flow.coffee",
-        "tests/scripts/function.coffee",
-        "tests/scripts/stdlib.coffee",
+        "arithmetic.coffee",
+        "collections.coffee",
+        "comprehension.coffee",
+        "control-flow.coffee",
+        "function.coffee",
+        "stdlib.coffee",
     ] {
+        let fixture = PathBuf::from("tests/scripts").join(fixture);
         assert!(
-            directory_stdout.contains(fixture),
-            "qtest skipped {fixture}"
+            directory_stdout.contains(&fixture.to_string_lossy().into_owned()),
+            "qtest skipped {}",
+            fixture.display()
         );
     }
     let literate = std::env::temp_dir().join(format!(
@@ -287,9 +306,10 @@ fn qtest_reports_success_and_failure() {
         .output()
         .unwrap();
     assert!(listed.status.success());
+    let listed_path = PathBuf::from("tests/scripts").join("stdlib.coffee");
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout),
-        "tests/scripts/stdlib.coffee\n"
+        format!("{}\n", listed_path.display())
     );
     let missing_filter = Command::new(bin("qtest"))
         .args(["--filter", "does-not-exist", "tests/scripts"])
@@ -690,7 +710,8 @@ fn qcoffee_json_file_errors_include_the_opaque_input_path() {
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains(&format!("\"source\":\"{path}\"")));
+    let json_path = json_escape(path);
+    assert!(stdout.contains(&format!("\"source\":\"{json_path}\"")));
     assert!(stdout.ends_with(",\"line\":2}\n"));
     assert!(output.stderr.is_empty());
 
@@ -702,7 +723,7 @@ fn qcoffee_json_file_errors_include_the_opaque_input_path() {
     assert!(!runtime.status.success());
     let stdout = String::from_utf8_lossy(&runtime.stdout);
     assert!(stdout.contains("\"kind\":\"runtime\""));
-    assert!(stdout.contains(&format!("\"source\":\"{path}\"")));
+    assert!(stdout.contains(&format!("\"source\":\"{json_path}\"")));
     assert!(stdout.ends_with(",\"line\":2}\n"));
     assert!(runtime.stderr.is_empty());
     let _ = fs::remove_file(temp);
