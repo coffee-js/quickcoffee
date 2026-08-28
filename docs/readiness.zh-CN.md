@@ -1,6 +1,6 @@
 # QuickCoffee 0.2 前业务适用性与性能基线
 
-本文件是 2026-08-28 在 RFC 0000–0156 上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
+本文件是 2026-08-28 在 RFC 0000–0157 上的工程评估，不改变既有语言语义，也不是跨语言兼容性声明。动态优先级、验收状态和最新实测由 GitHub issues 维护。
 
 后续拆分由 [#65：语言业务适用性](https://github.com/coffee-js/quickcoffee/issues/65) 与 [#66：QuickJS 量级性能收敛](https://github.com/coffee-js/quickcoffee/issues/66) 跟踪。
 
@@ -8,7 +8,7 @@
 
 QuickCoffee 已适合**单文件、确定性、由宿主明确注入能力**的规则、校验、配置变换、数据整形和受限插件任务。其核心表达式、严格集合、函数/闭包、模式解构、列表推导、异常控制流、Unicode 字符串和资源边界已经足以承载这类业务逻辑。
 
-它尚不适合独立承担多文件服务、长期作业编排或需要丰富通用库的应用：嵌入 API 已有宿主控制的静态模块核心，CLI 也只能通过显式 `--module-root ROOT ENTRY` 启用受限 `.coffee` / `.litcoffee` 文件图，模块图指纹已经交付，但模块包与预编译 manifest 尚未交付；异步/并发、正则、日期时间和内建网络实现仍缺失。脚本已有无隐式 I/O、精确 Integer/Decimal 映射和 Context 可配置资源守卫的 JSON 编解码，RFC 0139–0140 提供固定 Unicode 查询与稳定标量排序，RFC 0144–0150 再增加资源有界的不可变 String/Array 连接与字面量字符串替换。RFC 0154 提供 Context-owned typed capability allowlist，但 clock、random、logging、file、network 的具体实现仍完全由宿主提供并授权。一般 String/Array/Map 单值边界、确定性 retained census、高水位采样及 Context retained-state 提交限制已经交付；RFC 0155 又交付原始 source、递归 bytecode、静态模块数和累计模块 source 的独立边界，并在任何模块脚本运行前预检完整静态图；RFC 0156 交付单轮累计 transient managed-allocation 预算。逐时刻 live managed-memory、单条 instruction/native callback 的宿主堆增长和跨 Context 生命周期预算仍由 #76 / #217 跟踪。这些不是遗漏的 JavaScript 兼容项；I/O、时钟、随机和网络保持为宿主显式注入的 capability，而非语言隐式全局。
+它尚不适合独立承担多文件服务、长期作业编排或需要丰富通用库的应用：嵌入 API 已有宿主控制的静态模块核心，CLI 也只能通过显式 `--module-root ROOT ENTRY` 启用受限 `.coffee` / `.litcoffee` 文件图，模块图指纹已经交付，但模块包与预编译 manifest 尚未交付；异步/并发、正则、日期时间和内建网络实现仍缺失。脚本已有无隐式 I/O、精确 Integer/Decimal 映射和 Context 可配置资源守卫的 JSON 编解码，RFC 0139–0140 提供固定 Unicode 查询与稳定标量排序，RFC 0144–0150 再增加资源有界的不可变 String/Array 连接与字面量字符串替换。RFC 0154 提供 Context-owned typed capability allowlist，但 clock、random、logging、file、network 的具体实现仍完全由宿主提供并授权。一般 String/Array/Map 单值边界、确定性 retained census、高水位采样及 Context retained-state 提交限制已经交付；RFC 0155 又交付原始 source、递归 bytecode、静态模块数和累计模块 source 的独立边界，并在任何模块脚本运行前预检完整静态图；RFC 0156 交付单轮累计 transient managed-allocation 预算。RFC 0157 已定义默认关闭的 checkpointed logical live managed-memory 观测契约；实现、单条 instruction/native callback 的宿主堆增长和跨 Context 生命周期预算仍由 #76 / #217 跟踪。该观测不是 RSS、GC 或任意 instruction 间 peak。这些不是遗漏的 JavaScript 兼容项；I/O、时钟、随机和网络保持为宿主显式注入的 capability，而非语言隐式全局。
 
 性能方面，2026-08-28 对最新 `main` `4cc4474` 的 31 样本 Apple arm64 同机复测（Rust 1.94.0、release `qbench`、官方 QuickJS 2026-06-04、`--compare-iterations 1 --repeat 31`）显示：预编译热执行相对 QuickJS 的标量、函数、数组、Map 自身成员读取、不可变 Map 更新和两条 Unicode 负载分别约为 `12.84×`、`14.19×`、`9.09×`、`13.16×`、`6.46×`、`3.12×`、`4.37×`。此前唯一越过集合/文本 `20×` 审阅线的 Map 读取已在该同机指标内回到线下。#214 最终由 PR #216 收敛：Linux paired run `33140511336` 覆盖 51 个 workload，原始产物为 0 aggregate alerts，common execute 配对中位数为 `-4.016%`。issue #107/#116 建立的 Linux 同 runner 配对门禁仍是合并前的跨平台护栏，warning 也仍是非阻塞证据；这些结果不能外推到异常、较大数据集或真实宿主调用，更不表示 VM 整体达到 QuickJS 性能。
 

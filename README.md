@@ -167,4 +167,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0156](RFCs/0156-per-run-transient-managed-allocation-budgets.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0157](RFCs/0157-opt-in-live-managed-memory-observation.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
