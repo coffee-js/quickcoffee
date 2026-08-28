@@ -59,7 +59,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--timeout-ms N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
+        "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
@@ -92,6 +92,50 @@ struct TestRun {
     outcome: Result<(), String>,
     instructions: Option<u64>,
     fuel_remaining: Option<u64>,
+}
+
+struct JunitCase {
+    name: String,
+    failure: Option<String>,
+}
+
+fn xml_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\'' => escaped.push_str("&apos;"),
+            '"' => escaped.push_str("&quot;"),
+            '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' => escaped.push('\u{fffd}'),
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn write_junit(path: &Path, cases: &[JunitCase]) -> Result<(), String> {
+    let failures = cases.iter().filter(|case| case.failure.is_some()).count();
+    let mut report = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"qtest\" tests=\"{}\" failures=\"{failures}\" errors=\"0\" skipped=\"0\">\n",
+        cases.len()
+    );
+    for case in cases {
+        report.push_str("  <testcase name=\"");
+        report.push_str(&xml_escape(&case.name));
+        report.push_str("\">");
+        if let Some(failure) = &case.failure {
+            report.push_str("\n    <failure message=\"");
+            report.push_str(&xml_escape(failure));
+            report.push_str("\">");
+            report.push_str(&xml_escape(failure));
+            report.push_str("</failure>\n  ");
+        }
+        report.push_str("</testcase>\n");
+    }
+    report.push_str("</testsuite>\n");
+    fs::write(path, report).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 fn run_file(path: PathBuf, fuel: u64, cancellation: Option<CancellationToken>) -> TestRun {
@@ -160,6 +204,7 @@ fn run_file_with_timeout(path: PathBuf, fuel: u64, timeout_ms: Option<u64>) -> T
 fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
     let mut timeout_ms = None;
+    let mut junit = None;
     let mut stats = false;
     let mut json = false;
     let mut tap = false;
@@ -188,6 +233,13 @@ fn main() -> ExitCode {
                 Some(value) if value > 0 => timeout_ms = Some(value),
                 _ => {
                     eprintln!("--timeout-ms requires a positive integer");
+                    return ExitCode::from(2);
+                }
+            },
+            "--junit" => match args.next() {
+                Some(path) if !path.is_empty() => junit = Some(PathBuf::from(path)),
+                _ => {
+                    eprintln!("--junit requires a non-empty output path");
                     return ExitCode::from(2);
                 }
             },
@@ -261,8 +313,10 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     if list {
-        if json || tap || stats || timeout_ms.is_some() {
-            eprintln!("--list cannot be combined with --json, --tap, --stats, or --timeout-ms");
+        if json || tap || stats || timeout_ms.is_some() || junit.is_some() {
+            eprintln!(
+                "--list cannot be combined with --json, --tap, --stats, --timeout-ms, or --junit"
+            );
             return ExitCode::from(2);
         }
         for path in files {
@@ -275,6 +329,7 @@ fn main() -> ExitCode {
     }
     let mut failed = 0;
     let total = files.len();
+    let mut junit_cases = junit.as_ref().map(|_| Vec::with_capacity(total));
     for (index, path) in files.into_iter().enumerate() {
         let label = path.display().to_string();
         let run = run_file_with_timeout(path, fuel, timeout_ms);
@@ -290,6 +345,12 @@ fn main() -> ExitCode {
         }
         match run.outcome {
             Ok(()) => {
+                if let Some(cases) = &mut junit_cases {
+                    cases.push(JunitCase {
+                        name: label.clone(),
+                        failure: None,
+                    });
+                }
                 if json {
                     println!("{{\"ok\":true,\"file\":\"{}\"}}", json_escape(&label));
                 } else if tap {
@@ -300,6 +361,12 @@ fn main() -> ExitCode {
             }
             Err(detail) => {
                 failed += 1;
+                if let Some(cases) = &mut junit_cases {
+                    cases.push(JunitCase {
+                        name: label.clone(),
+                        failure: Some(detail.clone()),
+                    });
+                }
                 if json {
                     println!(
                         "{{\"ok\":false,\"file\":\"{}\",\"error\":\"{}\"}}",
@@ -317,6 +384,12 @@ fn main() -> ExitCode {
     }
     if tap {
         println!("1..{total}");
+    }
+    if let (Some(path), Some(cases)) = (junit, junit_cases) {
+        if let Err(error) = write_junit(&path, &cases) {
+            eprintln!("qtest could not write JUnit report: {error}");
+            failed += 1;
+        }
     }
     if failed == 0 {
         ExitCode::SUCCESS
