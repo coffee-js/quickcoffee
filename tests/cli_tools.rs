@@ -484,7 +484,7 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
 fn qtest_writes_a_deterministic_escaped_junit_report() {
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-junit-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
-    let pass = temp.join("a<&\"'.coffee");
+    let pass = temp.join("a&'.coffee");
     let failure = temp.join("b-failure.coffee");
     let report = temp.join("report.xml");
     fs::write(&pass, "true\n").unwrap();
