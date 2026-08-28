@@ -44,6 +44,8 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qtest --fuel N` 为每份可执行文档设置独立指令预算。
 
+`qtest --timeout-ms N` 为每份文件创建隔离 Context worker，并在 N 个正整数毫秒后协作取消；它将超时作为该文件的普通失败报告后继续执行。它不替代 fuel；同步且不协作的宿主 callback 不能被强制停止。
+
 `qtest --stats` 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 
 `qtest --json` 为每份文档输出一行稳定 JSON，便于 CI；`--stats` 仍写标准错误。

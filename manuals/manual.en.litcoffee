@@ -36,6 +36,8 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qtest --fuel N` gives each executable documentation file its own instruction budget.
 
+`qtest --timeout-ms N` runs each file in an isolated Context worker and cooperatively cancels it after N positive milliseconds; it reports a normal per-file failure, then continues. It is not a replacement for fuel, and synchronous non-cooperative host callbacks cannot be forcibly stopped.
+
 `qtest --stats` writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 
 `qtest --json` writes one stable JSON result per file for CI consumers; `--stats` remains on stderr.

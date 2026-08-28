@@ -398,6 +398,66 @@ fn qtest_reports_success_and_failure() {
 }
 
 #[test]
+fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-timeout-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let timeout = temp.join("a-timeout.coffee");
+    let pass = temp.join("b-pass.coffee");
+    fs::write(&timeout, "while true then true\n").unwrap();
+    fs::write(&pass, "true\n").unwrap();
+
+    let plain = Command::new(bin("qtest"))
+        .args(["--timeout-ms", "1", "--stats", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(plain.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&plain.stdout).contains(&format!("ok {}", pass.display())));
+    let plain_stderr = String::from_utf8_lossy(&plain.stderr);
+    assert!(plain_stderr.contains("execution timed out after 1 ms"));
+    assert!(plain_stderr.contains(&format!("qtest stats: {}", timeout.display())));
+
+    let json = Command::new(bin("qtest"))
+        .args(["--timeout-ms", "1", "--json", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(1));
+    let json_stdout = String::from_utf8_lossy(&json.stdout);
+    assert_eq!(json_stdout.lines().count(), 2);
+    assert!(json_stdout.contains("\"ok\":false"));
+    assert!(json_stdout.contains("execution timed out after 1 ms"));
+    assert!(json_stdout.contains("\"ok\":true"));
+
+    let tap = Command::new(bin("qtest"))
+        .args(["--timeout-ms", "1", "--tap", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(tap.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&tap.stdout),
+        format!(
+            "TAP version 13\nnot ok 1 - {}\n# execution timed out after 1 ms\nok 2 - {}\n1..2\n",
+            timeout.display(),
+            pass.display()
+        )
+    );
+
+    for value in ["0", "invalid"] {
+        let invalid = Command::new(bin("qtest"))
+            .args(["--timeout-ms", value, timeout.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert_eq!(invalid.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&invalid.stderr).contains("positive integer"));
+    }
+    let list = Command::new(bin("qtest"))
+        .args(["--list", "--timeout-ms", "1", temp.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(list.status.code(), Some(2));
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
 fn qtest_discovers_only_canonical_source_extensions() {
     let temp =
         std::env::temp_dir().join(format!("qcoffee-qtest-extensions-{}", std::process::id()));
