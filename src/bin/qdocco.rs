@@ -21,7 +21,7 @@ enum WriteOutcome {
 
 fn usage() {
     eprintln!(
-        "Usage: qdocco [--check | --markdown] [--incremental] DOCUMENT.litcoffee [-o OUTPUT]\n       qdocco --version"
+        "Usage: qdocco [--check | --markdown] [--incremental] DOCUMENT.litcoffee [-o OUTPUT]\n       qdocco --help | --version"
     );
 }
 fn same_path(left: &PathBuf, right: &PathBuf) -> bool {
@@ -241,6 +241,10 @@ fn main() -> ExitCode {
         match arg.as_str() {
             "--version" => {
                 println!("qdocco {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
+            "--help" | "-h" => {
+                usage();
                 return ExitCode::SUCCESS;
             }
             "--check" => check = true,
