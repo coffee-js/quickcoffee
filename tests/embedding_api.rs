@@ -1816,6 +1816,24 @@ fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
     let error = nested_host_value.eval("nested_host_value").unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
     assert!(error.message().contains("string exceeds 3 bytes"));
+
+    let mut ordered_host_value = Context::new().with_global(
+        "ordered_host_value",
+        Value::map([
+            (
+                "a",
+                Value::array(vec![Value::from(1_i64), Value::from(2_i64)]),
+            ),
+            ("zzzz", Value::from(0_i64)),
+        ]),
+    );
+    ordered_host_value.set_resource_limits(
+        ResourceLimits::default()
+            .with_max_string_bytes(3)
+            .with_max_array_items(1),
+    );
+    let error = ordered_host_value.eval("ordered_host_value").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
 }
 
 #[test]

@@ -1527,7 +1527,7 @@ fn value_needs_resource_check(value: &Value) -> bool {
 #[inline(never)]
 fn check_member_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
     if value_needs_resource_check(value) {
-        check_value_resources(value, limits)?;
+        resguard(value, limits)?;
     }
     Ok(())
 }
@@ -1572,47 +1572,32 @@ fn check_map_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error>
 }
 
 fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
-    // Process the root directly so ordinary immutable maps/arrays whose children
-    // are scalar do not allocate a traversal stack on every guarded load. Keep a
-    // stack for nested resource-bearing values so hostile host input remains
-    // iterative rather than consuming the Rust call stack.
-    let mut pending = Vec::new();
-    let mut value = value;
-    loop {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
         match value {
             Value::Integer(value) => check_integer_resource(value.inner(), limits)?,
             Value::Decimal(value) => check_decimal_resource(value, limits)?,
             Value::String(value) => check_string_resource(value, limits)?,
             Value::Array(values) => {
                 check_array_resource(values.len(), limits)?;
-                pending.extend(
-                    values
-                        .iter()
-                        .filter(|value| value_needs_resource_check(value)),
-                );
+                pending.extend(values.iter());
             }
             Value::Map(values) => {
                 check_map_resource(values.len(), limits)?;
                 for (key, value) in values.iter() {
                     check_string_resource(key, limits)?;
-                    if value_needs_resource_check(value) {
-                        pending.push(value);
-                    }
+                    pending.push(value);
                 }
             }
             Value::Error(error) => {
                 check_string_resource(&error.code, limits)?;
                 check_string_resource(&error.message, limits)?;
-                if value_needs_resource_check(&error.data) {
-                    pending.push(&error.data);
-                }
+                pending.push(&error.data);
                 let mut cause = error.cause.as_deref();
                 while let Some(error) = cause {
                     check_string_resource(&error.code, limits)?;
                     check_string_resource(&error.message, limits)?;
-                    if value_needs_resource_check(&error.data) {
-                        pending.push(&error.data);
-                    }
+                    pending.push(&error.data);
                     cause = error.cause.as_deref();
                 }
             }
@@ -1623,10 +1608,33 @@ fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), 
             | Value::Instance(_)
             | Value::Function(_) => {}
         }
-        let Some(next) = pending.pop() else {
-            break;
-        };
-        value = next;
+    }
+    Ok(())
+}
+
+// Keep this helper separate from the dispatch and compilation paths. It handles
+// scalar-only containers without a traversal allocation; nested values fall back
+// to the established iterative traversal before any descendant can be checked.
+#[inline(never)]
+fn resguard(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
+    match value {
+        Value::Array(values) => {
+            check_array_resource(values.len(), limits)?;
+            if values.iter().any(value_needs_resource_check) {
+                check_value_resources(value, limits)?;
+            }
+        }
+        Value::Map(values) => {
+            check_map_resource(values.len(), limits)?;
+            for (key, child) in values.iter() {
+                check_string_resource(key, limits)?;
+                if value_needs_resource_check(child) {
+                    check_value_resources(value, limits)?;
+                    break;
+                }
+            }
+        }
+        _ => check_value_resources(value, limits)?,
     }
     Ok(())
 }
@@ -6309,7 +6317,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                     {
                         Constant::Value(v) => {
                             if self.value_limits_active && value_needs_resource_check(v) {
-                                check_value_resources(v, self.resource_limits)?;
+                                check_member_value_resources(v, self.resource_limits)?;
                             }
                             frame.stack.push(v.clone())
                         }
@@ -6321,14 +6329,14 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                         let value = lookup_frame(frame, instruction_pc, n)
                             .ok_or_else(|| Error::runtime(format!("unknown name '{n}'")))?;
                         if self.value_limits_active && value_needs_resource_check(&value) {
-                            check_value_resources(&value, self.resource_limits)?;
+                            check_member_value_resources(&value, self.resource_limits)?;
                         }
                         frame.stack.push(value);
                     }
                     Instruction::LoadOrNil(n) => {
                         let value = lookup_frame(frame, instruction_pc, n).unwrap_or(Value::Nil);
                         if self.value_limits_active && value_needs_resource_check(&value) {
-                            check_value_resources(&value, self.resource_limits)?;
+                            check_member_value_resources(&value, self.resource_limits)?;
                         }
                         frame.stack.push(value);
                     }
