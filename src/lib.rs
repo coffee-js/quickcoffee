@@ -17,7 +17,7 @@ mod vm;
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
 pub use module::{
     MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, Module, ModuleExports, ModuleLoader,
-    ModuleSource, RestrictedFileModuleLoader,
+    ModulePackage, ModuleSource, RestrictedFileModuleLoader,
 };
 pub use resource::{CompileLimits, ResourceLimit, ResourceLimits};
 pub use vm::{

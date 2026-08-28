@@ -62,7 +62,7 @@ print counter.increment()
 | 配置归并、表单/事件数据整形 | 适合 | 有不可变数组/Map、spread、解构、推导、Unicode 字符串和精确 JSON。 |
 | class 形式的业务模型 | 适合 | 支持构造、继承、覆盖、`super` 和安全逸出的 receiver-bound `=>`。 |
 | 受控嵌入式策略/插件 | 条件适合 | 宿主可注入全局值/原生函数，并设置 fuel、调用深度、数据资源限制和取消。 |
-| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.coffee` / `.litcoffee` 模块图，并可非执行地生成依赖敏感图指纹；尚无模块包。 |
+| 多文件 CLI 应用 | 受限适合 | 使用显式 `--module-root ROOT ENTRY` 运行静态 `.coffee` / `.litcoffee` 模块图，并可非执行地生成依赖敏感图指纹；嵌入宿主还可显式复用内存模块包。 |
 | HTTP、文件 I/O、异步任务、定时调度 | 尚不适合 | 语言没有隐式环境能力、事件循环或异步语法；这些应由宿主以明确 capability 提供。 |
 | 直接替换 JavaScript/CoffeeScript 项目 | 不适合 | 语义刻意不同，且缺少正则、日期时间、字节/流、生成器等能力。 |
 
@@ -131,7 +131,7 @@ QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode �
 
 但它仍处于实验性 0.1：
 
-- CLI 已支持显式根目录的受限模块加载和非执行模块图指纹，但仍没有模块包或预编译 manifest；普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
+- CLI 已支持显式根目录的受限模块加载和非执行模块图指纹；嵌入宿主可显式构建内存模块包，但没有持久化 manifest。普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
 - 原始 source、递归 bytecode、静态模块数、累计模块 source 与每轮累计 transient managed allocation 已有独立上限，但尚无逐时刻 live managed-memory、cycle 回收或跨 Context 生命周期隔离；剩余工作由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 跟踪。capability allowlist 已可显式配置，但具体系统能力仍必须由宿主实现并授权。
 - 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
 - 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
@@ -169,4 +169,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0157](RFCs/0157-opt-in-live-managed-memory-observation.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0158](RFCs/0158-deterministic-module-package-manifests.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。

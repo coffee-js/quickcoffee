@@ -374,6 +374,35 @@ impl ModuleExports {
     }
 }
 
+/// An immutable, fully preflighted static module graph.
+///
+/// A package owns only verified compilation artifacts and resolved dependency
+/// edges. It never retains a [`ModuleLoader`], evaluated exports, module
+/// globals, or execution state, so isolated [`Context`]s can reuse it safely.
+#[derive(Clone, Debug)]
+pub struct ModulePackage {
+    entry: String,
+    prepared: BTreeMap<String, PreparedModule>,
+    fingerprint: u64,
+}
+
+impl ModulePackage {
+    /// Returns the canonical entry-module name.
+    pub fn entry_name(&self) -> &str {
+        &self.entry
+    }
+
+    /// Returns the deterministic versioned fingerprint of the prepared graph.
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+
+    /// Returns the number of unique canonical modules in this package.
+    pub fn module_count(&self) -> usize {
+        self.prepared.len()
+    }
+}
+
 impl Engine {
     /// Compiles one module with static named import/export directives.
     pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
@@ -441,6 +470,17 @@ impl Engine {
         )?;
         Ok(encode_module_graph(entry.name(), &graph))
     }
+
+    /// Preflights and compiles one complete static graph into an immutable
+    /// in-memory package without executing any module.
+    pub fn prepare_module_package(
+        &self,
+        entry: &Module,
+        loader: &dyn ModuleLoader,
+    ) -> Result<ModulePackage, Error> {
+        let mut compile = |name: &str, source: &str| self.compile_module(name, source);
+        build_module_package(self.compile_limits(), entry, loader, &mut compile)
+    }
 }
 
 impl Runtime {
@@ -459,6 +499,17 @@ impl Runtime {
         let module = self.engine().compile_module(name, source)?;
         self.cache_module(module.clone(), source);
         Ok(module)
+    }
+
+    /// Preflights and compiles one complete static graph into an immutable
+    /// in-memory package, reusing this Runtime's exact module cache.
+    pub fn prepare_module_package(
+        &self,
+        entry: &Module,
+        loader: &dyn ModuleLoader,
+    ) -> Result<ModulePackage, Error> {
+        let mut compile = |name: &str, source: &str| self.compile_module(name, source);
+        build_module_package(self.compile_limits(), entry, loader, &mut compile)
     }
 }
 
@@ -697,19 +748,19 @@ impl Context {
         module: &Module,
         loader: &dyn ModuleLoader,
     ) -> Result<ModuleExports, Error> {
-        let mut identities = BTreeMap::new();
-        let mut prepared = BTreeMap::new();
-        let mut prepare_active = Vec::new();
-        let mut budget = ModuleGraphBudget::new(self.compile_limits());
-        prepare_module_graph(
-            self,
-            module,
-            loader,
-            &mut identities,
-            &mut prepared,
-            &mut prepare_active,
-            &mut budget,
-        )?;
+        let mut compile = |name: &str, source: &str| self.compile_module(name, source);
+        let package = build_module_package(self.compile_limits(), module, loader, &mut compile)?;
+        self.run_module_package(&package)
+    }
+
+    /// Runs a previously prepared package with fresh private module globals
+    /// and exports for this Context.
+    ///
+    /// This method never calls a [`ModuleLoader`]. It rechecks this Context's
+    /// compile policy before execution, so a package built under wider limits
+    /// cannot bypass a narrower execution boundary.
+    pub fn run_module_package(&mut self, package: &ModulePackage) -> Result<ModuleExports, Error> {
+        check_prepared_package_limits(self.compile_limits(), &package.prepared)?;
         let mut cache = BTreeMap::new();
         let mut active = Vec::new();
         let mut execution = ModuleExecutionState {
@@ -719,8 +770,8 @@ impl Context {
         };
         let result = execute_prepared_module(
             self,
-            module.name(),
-            &prepared,
+            &package.entry,
+            &package.prepared,
             &mut cache,
             &mut active,
             &mut execution,
@@ -736,7 +787,7 @@ impl Context {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PreparedModule {
     module: Module,
     dependencies: Vec<String>,
@@ -748,10 +799,37 @@ struct ModuleExecutionState {
     live_memory: Option<LiveMemoryReport>,
 }
 
+fn build_module_package(
+    limits: CompileLimits,
+    entry: &Module,
+    loader: &dyn ModuleLoader,
+    compile: &mut dyn FnMut(&str, &str) -> Result<Module, Error>,
+) -> Result<ModulePackage, Error> {
+    let mut identities = BTreeMap::new();
+    let mut prepared = BTreeMap::new();
+    let mut active = Vec::new();
+    let mut budget = ModuleGraphBudget::new(limits);
+    prepare_module_graph(
+        entry,
+        loader,
+        compile,
+        &mut identities,
+        &mut prepared,
+        &mut active,
+        &mut budget,
+    )?;
+    let fingerprint = encode_prepared_module_graph(entry.name(), &prepared);
+    Ok(ModulePackage {
+        entry: entry.name.clone(),
+        prepared,
+        fingerprint,
+    })
+}
+
 fn prepare_module_graph(
-    host: &Context,
     module: &Module,
     loader: &dyn ModuleLoader,
+    compile: &mut dyn FnMut(&str, &str) -> Result<Module, Error>,
     identities: &mut BTreeMap<String, ModuleIdentity>,
     prepared: &mut BTreeMap<String, PreparedModule>,
     active: &mut Vec<String>,
@@ -782,11 +860,11 @@ fn prepare_module_graph(
     for (bindings, specifier) in &module.imports {
         let source = loader.load(specifier, module.name())?;
         budget.reserve_source(&source)?;
-        let dependency = host.compile_module(source.name(), source.source())?;
+        let dependency = compile(source.name(), source.source())?;
         prepare_module_graph(
-            host,
             &dependency,
             loader,
+            compile,
             identities,
             prepared,
             active,
@@ -814,6 +892,64 @@ fn prepare_module_graph(
             dependencies,
         },
     );
+    Ok(())
+}
+
+fn encode_prepared_module_graph(
+    entry_name: &str,
+    prepared: &BTreeMap<String, PreparedModule>,
+) -> u64 {
+    let graph = prepared
+        .iter()
+        .map(|(name, prepared_module)| {
+            let module = &prepared_module.module;
+            let imports = module
+                .imports
+                .iter()
+                .zip(&prepared_module.dependencies)
+                .map(|((bindings, specifier), dependency)| GraphImport {
+                    bindings: bindings.clone(),
+                    specifier: specifier.clone(),
+                    dependency: dependency.clone(),
+                })
+                .collect();
+            let mut exports = module.exports.clone();
+            exports.sort();
+            (
+                name.clone(),
+                GraphModule {
+                    source_fingerprint: module.source_fingerprint,
+                    program_fingerprint: module.program.fingerprint(),
+                    imports,
+                    exports,
+                },
+            )
+        })
+        .collect();
+    encode_module_graph(entry_name, &graph)
+}
+
+fn check_prepared_package_limits(
+    limits: CompileLimits,
+    prepared: &BTreeMap<String, PreparedModule>,
+) -> Result<(), Error> {
+    let mut budget = ModuleGraphBudget::new(limits);
+    for prepared_module in prepared.values() {
+        let module = &prepared_module.module;
+        if module.source_bytes() > limits.max_source_bytes() {
+            return Err(source_limit_error(module.name(), limits.max_source_bytes()));
+        }
+        if module.instruction_count() > limits.max_bytecode_instructions() {
+            return Err(Error::resource(
+                ResourceLimit::BytecodeInstructions,
+                format!(
+                    "module bytecode exceeds configured instruction limit of {}",
+                    limits.max_bytecode_instructions()
+                ),
+            ));
+        }
+        budget.reserve_module(module)?;
+    }
     Ok(())
 }
 
