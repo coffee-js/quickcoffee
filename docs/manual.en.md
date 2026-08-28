@@ -1,3 +1,5 @@
+<!-- quickcoffee.qdocco.markdown.v1 -->
+
 # QuickCoffee document
 
 ## Notes

@@ -36,19 +36,19 @@ doc-check:
 	cargo run --locked --quiet --bin qdocco -- --check manuals/manual.devanagari-sa.litcoffee
 
 docs: doc-check
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.zh-CN.litcoffee -o docs/manual.zh-CN.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.classical-zh.litcoffee -o docs/manual.classical-zh.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.en.litcoffee -o docs/manual.en.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.latin.litcoffee -o docs/manual.latin.md
-	cargo run --locked --quiet --bin qdocco -- --markdown manuals/manual.devanagari-sa.litcoffee -o docs/manual.devanagari-sa.md
+	cargo run --locked --quiet --bin qdocco -- --markdown --incremental manuals/manual.zh-CN.litcoffee -o docs/manual.zh-CN.md
+	cargo run --locked --quiet --bin qdocco -- --markdown --incremental manuals/manual.classical-zh.litcoffee -o docs/manual.classical-zh.md
+	cargo run --locked --quiet --bin qdocco -- --markdown --incremental manuals/manual.en.litcoffee -o docs/manual.en.md
+	cargo run --locked --quiet --bin qdocco -- --markdown --incremental manuals/manual.latin.litcoffee -o docs/manual.latin.md
+	cargo run --locked --quiet --bin qdocco -- --markdown --incremental manuals/manual.devanagari-sa.litcoffee -o docs/manual.devanagari-sa.md
 
 docs-html: doc-check
 	mkdir -p target/manuals
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.zh-CN.litcoffee -o target/manuals/manual.zh-CN.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.classical-zh.litcoffee -o target/manuals/manual.classical-zh.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.en.litcoffee -o target/manuals/manual.en.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.latin.litcoffee -o target/manuals/manual.latin.html
-	cargo run --locked --quiet --bin qdocco -- manuals/manual.devanagari-sa.litcoffee -o target/manuals/manual.devanagari-sa.html
+	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.zh-CN.litcoffee -o target/manuals/manual.zh-CN.html
+	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.classical-zh.litcoffee -o target/manuals/manual.classical-zh.html
+	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.en.litcoffee -o target/manuals/manual.en.html
+	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.latin.litcoffee -o target/manuals/manual.latin.html
+	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.devanagari-sa.litcoffee -o target/manuals/manual.devanagari-sa.html
 
 check: fmt test release-test examples package-metadata package release-tool-check qbench-check clippy api-doc doc-check
 
