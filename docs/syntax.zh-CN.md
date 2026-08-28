@@ -93,4 +93,4 @@
 
 `qbench --json --repeat 11` 对编译、验证与执行输出上侧中位数及对应 `*_mad_ns`（median absolute deviation）离散度。`qbench --compare-qjs PATH` 对两端的启动、编译、预编译热执行及 CLI 总耗时分别输出中位数与 MAD。
 
-独立的 `fuzz/` cargo-fuzz 包固定 nightly，并提供 parser 与 verifier target。`make fuzz-smoke` 使用固定 seed 和有界 runs；确认的 crash 必须最小化并提升为普通回归测试。
+独立的 `fuzz/` cargo-fuzz 包固定 nightly，并提供 parser、verifier 与资源有界的 VM 执行 target。`make fuzz-smoke` 使用受审阅的固定 seed、有界输入和固定 runs；确认的 crash 必须最小化并提升为普通回归测试。scheduled/manual 质量门禁还会用隔离的 Miri 解释执行适用 library tests，`make dependency-audit` 则以 RustSec 审计根与 fuzz 两个 lockfile。

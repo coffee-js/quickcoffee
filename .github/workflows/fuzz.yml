@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-03-28
+          toolchain: nightly-2026-08-20
       - run: cargo install cargo-fuzz --version 0.13.2 --locked
       - run: make fuzz-smoke
       - name: Upload fuzz artifacts
@@ -27,3 +27,15 @@ jobs:
           path: fuzz/artifacts
           if-no-files-found: ignore
           retention-days: 30
+
+  miri:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-20
+          components: miri
+      - run: cargo +nightly-2026-08-20 miri setup
+      - run: make miri-smoke

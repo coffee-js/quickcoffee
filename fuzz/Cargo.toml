@@ -24,3 +24,10 @@ path = "fuzz_targets/verifier.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "vm"
+path = "fuzz_targets/vm.rs"
+test = false
+doc = false
+bench = false

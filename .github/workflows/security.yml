@@ -1,0 +1,40 @@
+name: Dependency audit
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - fuzz/Cargo.toml
+      - fuzz/Cargo.lock
+      - .github/workflows/security.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - fuzz/Cargo.toml
+      - fuzz/Cargo.lock
+      - .github/workflows/security.yml
+  schedule:
+    - cron: '43 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: make dependency-audit

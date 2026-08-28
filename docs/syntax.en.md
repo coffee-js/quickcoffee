@@ -95,4 +95,4 @@ Implicit calls are supported on one logical line: `print value`, `add 20, 22`, `
 
 `qbench --json --repeat 11` reports the upper median and a `*_mad_ns` (median absolute deviation) dispersion value for compilation, verification, and execution. `qbench --compare-qjs PATH` reports separate medians and MAD values for startup, compilation, precompiled hot execution, and CLI-total time for both runtimes.
 
-The separate `fuzz/` cargo-fuzz package pins its nightly toolchain and exposes parser and verifier targets. `make fuzz-smoke` runs each with a fixed seed and bounded run count; confirmed crashes are minimized and promoted to normal regression tests.
+The separate `fuzz/` cargo-fuzz package pins its nightly toolchain and exposes parser, verifier, and resource-bounded VM execution targets. `make fuzz-smoke` runs each with fixed reviewed seeds, bounded input, and a fixed run count; confirmed crashes are minimized and promoted to normal regression tests. Scheduled/manual quality checks interpret the applicable library tests with isolated Miri, while `make dependency-audit` checks both root and fuzz lockfiles against RustSec.
