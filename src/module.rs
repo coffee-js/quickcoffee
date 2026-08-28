@@ -1,6 +1,6 @@
 use crate::{
-    CompileLimits, Context, Engine, Error, ExecutionStats, Program, ResourceLimit, Runtime, Value,
-    bytecode::FingerprintEncoder, lowering, parser,
+    CompileLimits, Context, Engine, Error, ExecutionStats, LiveMemoryReport, Program,
+    ResourceLimit, Runtime, Value, bytecode::FingerprintEncoder, lowering, parser,
 };
 use cap_std::{ambient_authority, fs::Dir};
 use std::{
@@ -712,20 +712,25 @@ impl Context {
         )?;
         let mut cache = BTreeMap::new();
         let mut active = Vec::new();
-        let mut fuel = self.fuel();
-        let mut stats = ExecutionStats::default();
+        let mut execution = ModuleExecutionState {
+            fuel: self.fuel(),
+            stats: ExecutionStats::default(),
+            live_memory: None,
+        };
         let result = execute_prepared_module(
             self,
             module.name(),
             &prepared,
             &mut cache,
             &mut active,
-            &mut fuel,
-            &mut stats,
+            &mut execution,
         );
-        if stats.instructions > 0 {
-            stats.fuel_remaining = fuel;
-            self.set_execution_stats(stats);
+        if execution.stats.instructions > 0 {
+            execution.stats.fuel_remaining = execution.fuel;
+            self.set_execution_stats(execution.stats);
+        }
+        if let Some(report) = execution.live_memory {
+            self.merge_live_memory_report(report);
         }
         result
     }
@@ -735,6 +740,12 @@ impl Context {
 struct PreparedModule {
     module: Module,
     dependencies: Vec<String>,
+}
+
+struct ModuleExecutionState {
+    fuel: u64,
+    stats: ExecutionStats,
+    live_memory: Option<LiveMemoryReport>,
 }
 
 fn prepare_module_graph(
@@ -812,8 +823,7 @@ fn execute_prepared_module(
     prepared: &BTreeMap<String, PreparedModule>,
     cache: &mut BTreeMap<String, ModuleExports>,
     active: &mut Vec<String>,
-    fuel: &mut u64,
-    stats: &mut ExecutionStats,
+    execution: &mut ModuleExecutionState,
 ) -> Result<ModuleExports, Error> {
     if let Some(exports) = cache.get(module_name) {
         return Ok(exports.clone());
@@ -831,7 +841,7 @@ fn execute_prepared_module(
         )));
     }
     active.push(module.name.clone());
-    let mut context = host.module_child().with_fuel(*fuel);
+    let mut context = host.module_child().with_fuel(execution.fuel);
     for ((bindings, _), dependency_name) in module.imports.iter().zip(&prepared_module.dependencies)
     {
         let dependency = &prepared
@@ -839,7 +849,7 @@ fn execute_prepared_module(
             .expect("prepared dependency exists")
             .module;
         let exports =
-            execute_prepared_module(host, dependency_name, prepared, cache, active, fuel, stats)?;
+            execute_prepared_module(host, dependency_name, prepared, cache, active, execution)?;
         for (public, local) in bindings {
             let Some(value) = exports.get(public) else {
                 return Err(Error::runtime(format!(
@@ -856,14 +866,14 @@ fn execute_prepared_module(
     } else {
         limits
             .max_transient_managed_objects()
-            .saturating_sub(stats.managed_objects_allocated)
+            .saturating_sub(execution.stats.managed_objects_allocated)
     };
     let remaining_bytes = if limits.max_transient_managed_bytes() == u64::MAX {
         u64::MAX
     } else {
         limits
             .max_transient_managed_bytes()
-            .saturating_sub(stats.managed_bytes_allocated)
+            .saturating_sub(execution.stats.managed_bytes_allocated)
     };
     context.set_resource_limits(
         limits
@@ -871,24 +881,36 @@ fn execute_prepared_module(
             .with_max_transient_managed_bytes(remaining_bytes),
     );
     let result = context.run_program(&module.program);
-    let execution = context.last_execution();
-    *fuel = execution.fuel_remaining;
-    stats.instructions += execution.instructions;
-    stats.call_depth_peak = stats.call_depth_peak.max(execution.call_depth_peak);
-    stats.name_loads += execution.name_loads;
-    stats.name_stores += execution.name_stores;
-    stats.calls += execution.calls;
-    stats.container_ops += execution.container_ops;
-    stats.iterator_ops += execution.iterator_ops;
-    stats.exception_ops += execution.exception_ops;
-    stats.value_allocations += execution.value_allocations;
-    stats.environment_allocations += execution.environment_allocations;
-    stats.managed_objects_allocated = stats
+    if let Some(report) = context.last_live_memory_report() {
+        if let Some(current) = &mut execution.live_memory {
+            current.merge(report);
+        } else {
+            execution.live_memory = Some(report);
+        }
+    }
+    let execution_stats = context.last_execution();
+    execution.fuel = execution_stats.fuel_remaining;
+    execution.stats.instructions += execution_stats.instructions;
+    execution.stats.call_depth_peak = execution
+        .stats
+        .call_depth_peak
+        .max(execution_stats.call_depth_peak);
+    execution.stats.name_loads += execution_stats.name_loads;
+    execution.stats.name_stores += execution_stats.name_stores;
+    execution.stats.calls += execution_stats.calls;
+    execution.stats.container_ops += execution_stats.container_ops;
+    execution.stats.iterator_ops += execution_stats.iterator_ops;
+    execution.stats.exception_ops += execution_stats.exception_ops;
+    execution.stats.value_allocations += execution_stats.value_allocations;
+    execution.stats.environment_allocations += execution_stats.environment_allocations;
+    execution.stats.managed_objects_allocated = execution
+        .stats
         .managed_objects_allocated
-        .saturating_add(execution.managed_objects_allocated);
-    stats.managed_bytes_allocated = stats
+        .saturating_add(execution_stats.managed_objects_allocated);
+    execution.stats.managed_bytes_allocated = execution
+        .stats
         .managed_bytes_allocated
-        .saturating_add(execution.managed_bytes_allocated);
+        .saturating_add(execution_stats.managed_bytes_allocated);
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

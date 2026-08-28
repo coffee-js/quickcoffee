@@ -1,8 +1,9 @@
 use quickcoffee::{
     CancellationToken, CapabilityKey, CapabilityKind, Chunk, CompileLimits, Constant, Context,
     Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionStats, HostCapabilities,
-    Instruction, Integer, IntoValue, Program, ResourceLimit, ResourceLimits, RetainedMemory,
-    Runtime, TryFromValue, Value, ValueKind,
+    Instruction, Integer, IntoValue, LiveMemoryCheckpoint, LiveMemoryObservation,
+    LiveMemoryOutcome, Program, ResourceLimit, ResourceLimits, RetainedMemory, Runtime,
+    TryFromValue, Value, ValueKind,
 };
 use std::{cell::Cell, collections::BTreeMap};
 
@@ -599,6 +600,56 @@ fn retained_memory_high_water_tracks_only_explicit_samples() {
             bytes: 27,
         }
     );
+}
+
+#[test]
+fn checkpointed_live_memory_is_opt_in_and_sees_frame_local_temporaries() {
+    let mut off = Context::new();
+    off.eval("value = ['coffee']").unwrap();
+    assert_eq!(off.live_memory_observation(), LiveMemoryObservation::Off);
+    assert_eq!(off.last_live_memory_report(), None);
+
+    let mut context =
+        Context::new().with_live_memory_observation(LiveMemoryObservation::Checkpointed);
+    context
+        .eval("make = ->\n  local = ['coffee', 'beans']\n  len(local)\nmake()")
+        .unwrap();
+    let report = context.last_live_memory_report().unwrap();
+    assert_eq!(report.outcome, LiveMemoryOutcome::Success);
+    assert!(report.samples >= 4);
+    assert!(report.high_water.objects > report.final_snapshot.objects);
+    assert!(report.high_water.bytes > report.final_snapshot.bytes);
+    assert_eq!(
+        report.object_high_water_checkpoint,
+        LiveMemoryCheckpoint::Call
+    );
+    assert_eq!(
+        report.byte_high_water_checkpoint,
+        LiveMemoryCheckpoint::Call
+    );
+
+    context.set_live_memory_observation(LiveMemoryObservation::Off);
+    assert_eq!(context.last_live_memory_report(), None);
+}
+
+#[test]
+fn checkpointed_live_memory_reports_iterator_handler_and_failure_outcomes() {
+    let mut context =
+        Context::new().with_live_memory_observation(LiveMemoryObservation::Checkpointed);
+    assert!(
+        context
+            .eval("try\n  for item in ['coffee']\n    throw item\ncatch error\n  error")
+            .is_ok()
+    );
+    let report = context.last_live_memory_report().unwrap();
+    assert_eq!(report.outcome, LiveMemoryOutcome::Success);
+    assert!(report.samples >= 5);
+
+    let error = context.eval("unknown()").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    let report = context.last_live_memory_report().unwrap();
+    assert_eq!(report.outcome, LiveMemoryOutcome::Error);
+    assert_eq!(report.final_snapshot, context.retained_memory().into());
 }
 
 #[test]

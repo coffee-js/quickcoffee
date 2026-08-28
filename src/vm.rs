@@ -3510,6 +3510,128 @@ pub struct RetainedMemory {
     pub bytes: u64,
 }
 
+/// Selects whether a Context records managed memory reachable at VM lifecycle
+/// checkpoints while executing a program.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LiveMemoryObservation {
+    /// Do not inspect VM roots. This is the default and does not add census work.
+    #[default]
+    Off,
+    /// Sample logical managed memory at deterministic VM lifecycle checkpoints.
+    Checkpointed,
+}
+
+/// A logical managed-memory snapshot collected from a running VM's roots.
+///
+/// Like [`RetainedMemory`], this excludes allocator capacity, RSS, host-owned
+/// state, and the shared standard-library environment.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LiveManagedMemory {
+    /// Distinct reachable QuickCoffee-managed objects.
+    pub objects: u64,
+    /// Stable logical payload bytes for [`Self::objects`].
+    pub bytes: u64,
+}
+impl From<RetainedMemory> for LiveManagedMemory {
+    fn from(memory: RetainedMemory) -> Self {
+        Self {
+            objects: memory.objects,
+            bytes: memory.bytes,
+        }
+    }
+}
+
+/// The VM event that caused a live managed-memory sample.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LiveMemoryCheckpoint {
+    /// A program received its initial top-level frame.
+    #[default]
+    RunStart,
+    /// A bytecode call frame was pushed or popped.
+    Call,
+    /// An iterator was created, advanced to completion, or discarded.
+    Iterator,
+    /// A handler was installed, removed, or caught an error.
+    Handler,
+    /// A contextual native callback was entered or returned.
+    ContextualNative,
+    /// A program completed with either a value or an error.
+    RunEnd,
+}
+
+/// The terminal result of an observed execution.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LiveMemoryOutcome {
+    /// The program returned normally.
+    #[default]
+    Success,
+    /// The program ended with a script or host error.
+    Error,
+    /// The program ended because a deterministic resource boundary was reached.
+    ResourceError,
+    /// The program observed host cancellation.
+    Cancelled,
+}
+
+/// Summary of one checkpointed live managed-memory observation run.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LiveMemoryReport {
+    /// The snapshot from the terminal [`LiveMemoryCheckpoint::RunEnd`] sample.
+    pub final_snapshot: LiveManagedMemory,
+    /// Component-wise high-water mark across all samples.
+    pub high_water: LiveManagedMemory,
+    /// Checkpoint that first reached [`Self::high_water`] for objects.
+    pub object_high_water_checkpoint: LiveMemoryCheckpoint,
+    /// Checkpoint that first reached [`Self::high_water`] for bytes.
+    pub byte_high_water_checkpoint: LiveMemoryCheckpoint,
+    /// Number of deterministic checkpoints sampled during the run.
+    pub samples: u64,
+    /// Whether the run returned, failed, reached a resource boundary, or was cancelled.
+    pub outcome: LiveMemoryOutcome,
+}
+impl LiveMemoryReport {
+    fn sample(&mut self, checkpoint: LiveMemoryCheckpoint, snapshot: LiveManagedMemory) {
+        if self.samples == 0 || snapshot.objects > self.high_water.objects {
+            self.high_water.objects = snapshot.objects;
+            self.object_high_water_checkpoint = checkpoint;
+        }
+        if self.samples == 0 || snapshot.bytes > self.high_water.bytes {
+            self.high_water.bytes = snapshot.bytes;
+            self.byte_high_water_checkpoint = checkpoint;
+        }
+        self.final_snapshot = snapshot;
+        self.samples = self.samples.saturating_add(1);
+    }
+
+    fn finish(&mut self, result: &Result<Value, Error>) {
+        self.outcome = match result {
+            Ok(_) => LiveMemoryOutcome::Success,
+            Err(error) if error.resource_limit() == Some(ResourceLimit::Cancellation) => {
+                LiveMemoryOutcome::Cancelled
+            }
+            Err(error) if error.kind() == ErrorKind::Resource => LiveMemoryOutcome::ResourceError,
+            Err(_) => LiveMemoryOutcome::Error,
+        };
+    }
+
+    pub(crate) fn merge(&mut self, child: Self) {
+        if child.samples == 0 {
+            return;
+        }
+        if self.samples == 0 || child.high_water.objects > self.high_water.objects {
+            self.high_water.objects = child.high_water.objects;
+            self.object_high_water_checkpoint = child.object_high_water_checkpoint;
+        }
+        if self.samples == 0 || child.high_water.bytes > self.high_water.bytes {
+            self.high_water.bytes = child.high_water.bytes;
+            self.byte_high_water_checkpoint = child.byte_high_water_checkpoint;
+        }
+        self.final_snapshot = child.final_snapshot;
+        self.samples = self.samples.saturating_add(child.samples);
+        self.outcome = child.outcome;
+    }
+}
+
 /// Declaratively configures one isolated [`Context`].
 ///
 /// Building more than once is intentionally unsupported because native
@@ -3523,6 +3645,7 @@ pub struct ContextBuilder {
     cancellation: Option<CancellationToken>,
     host_bindings: HostBindings,
     bindings: Vec<(String, Value)>,
+    live_memory_observation: LiveMemoryObservation,
 }
 impl ContextBuilder {
     fn new(runtime: Runtime) -> Self {
@@ -3534,6 +3657,7 @@ impl ContextBuilder {
             cancellation: None,
             host_bindings: HostBindings::default(),
             bindings: Vec::new(),
+            live_memory_observation: LiveMemoryObservation::Off,
         }
     }
 
@@ -3552,6 +3676,12 @@ impl ContextBuilder {
     /// Sets deterministic data-size and retained-memory policies.
     pub fn resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
         self.resource_limits = resource_limits;
+        self
+    }
+
+    /// Enables or disables checkpointed live managed-memory observation.
+    pub fn live_memory_observation(mut self, observation: LiveMemoryObservation) -> Self {
+        self.live_memory_observation = observation;
         self
     }
 
@@ -3622,6 +3752,8 @@ impl ContextBuilder {
                 objects: 1,
                 bytes: 0,
             },
+            live_memory_observation: self.live_memory_observation,
+            last_live_memory_report: None,
         };
         for (name, value) in self.bindings {
             context.set_global(name, value);
@@ -3642,6 +3774,8 @@ pub struct Context {
     host_bindings: Option<Rc<HostBindings>>,
     last_execution: ExecutionStats,
     retained_memory_high_water: RetainedMemory,
+    live_memory_observation: LiveMemoryObservation,
+    last_live_memory_report: Option<LiveMemoryReport>,
 }
 
 thread_local! {
@@ -3661,6 +3795,8 @@ thread_local! {
             host_bindings: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
+            live_memory_observation: LiveMemoryObservation::Off,
+            last_live_memory_report: None,
         };
         context.install_builtins();
         global
@@ -3995,6 +4131,43 @@ impl RetainedMemoryCensus {
         }
         if let Some(parent) = parent {
             self.environment(&parent);
+        }
+    }
+
+    fn frame(&mut self, frame: &Frame) {
+        self.environment(&frame.env);
+        for value in &frame.stack {
+            self.value(value);
+        }
+        if let FrameBindings::Fast { locals, .. } = &frame.bindings {
+            for value in locals.iter().flatten() {
+                self.value(value);
+            }
+        }
+        if let Some(receiver) = &frame.receiver {
+            self.value(receiver);
+        }
+        if let Some(value) = &frame.return_override {
+            self.value(value);
+        }
+        for iterator in &frame.iterators {
+            self.iteration(iterator);
+        }
+    }
+
+    fn iteration(&mut self, iterator: &Iteration) {
+        match &iterator.kind {
+            IterationKind::Array { values, .. } | IterationKind::String { values, .. } => {
+                for value in values.iter() {
+                    self.value(value);
+                }
+            }
+            IterationKind::Map { entries, .. } => {
+                for (key, value) in entries {
+                    self.value(&Value::String(Rc::from(key.as_str())));
+                    self.value(value);
+                }
+            }
         }
     }
 }
@@ -4692,6 +4865,8 @@ impl Context {
                 objects: 1,
                 bytes: 0,
             },
+            live_memory_observation: LiveMemoryObservation::Off,
+            last_live_memory_report: None,
         }
     }
     /// Starts configuration of a Context owned by a fresh default Runtime.
@@ -4748,6 +4923,32 @@ impl Context {
     /// Returns the deterministic data-size policy used by future operations.
     pub fn resource_limits(&self) -> ResourceLimits {
         self.resource_limits
+    }
+    /// Returns this Context configured to collect checkpointed live memory.
+    pub fn with_live_memory_observation(mut self, observation: LiveMemoryObservation) -> Self {
+        self.set_live_memory_observation(observation);
+        self
+    }
+    /// Sets whether future executions collect checkpointed live managed-memory data.
+    ///
+    /// Disabling observation clears the last report. It does not modify resource
+    /// limits, execution results, or retained-memory sampling.
+    pub fn set_live_memory_observation(&mut self, observation: LiveMemoryObservation) {
+        self.live_memory_observation = observation;
+        if observation == LiveMemoryObservation::Off {
+            self.last_live_memory_report = None;
+        }
+    }
+    /// Returns the live managed-memory observation mode for future executions.
+    pub fn live_memory_observation(&self) -> LiveMemoryObservation {
+        self.live_memory_observation
+    }
+    /// Returns the report from the most recently observed execution.
+    ///
+    /// This is `None` until checkpointed observation is enabled and a program
+    /// reaches execution; compilation and verification failures leave it unchanged.
+    pub fn last_live_memory_report(&self) -> Option<LiveMemoryReport> {
+        self.last_live_memory_report
     }
     /// Returns the Runtime-owned compilation policy used by this Context.
     ///
@@ -5018,11 +5219,15 @@ impl Context {
     pub fn run(&mut self, chunk: Chunk) -> Result<Value, Error> {
         self.run_program(&chunk.into())
     }
-    fn execute_program<const TRANSIENT_LIMITS: bool>(
+    fn execute_program<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
         &self,
         program: &Program,
-    ) -> (Result<Value, Error>, ExecutionStats) {
-        let mut vm = Vm::<TRANSIENT_LIMITS> {
+    ) -> (
+        Result<Value, Error>,
+        ExecutionStats,
+        Option<LiveMemoryReport>,
+    ) {
+        let mut vm = Vm::<TRANSIENT_LIMITS, LIVE_MEMORY> {
             fuel: self.fuel,
             instructions: 0,
             max_call_depth: self.max_call_depth,
@@ -5049,10 +5254,12 @@ impl Context {
             execution_plan: program.0.execution_plan.clone(),
             max_transient_managed_objects: self.resource_limits.max_transient_managed_objects(),
             max_transient_managed_bytes: self.resource_limits.max_transient_managed_bytes(),
+            live_memory_report: LiveMemoryReport::default(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
         let stats = vm.stats();
-        (result, stats)
+        let report = LIVE_MEMORY.then_some(vm.live_memory_report);
+        (result, stats, report)
     }
     /// Runs shared compiled bytecode without cloning its instruction stream.
     pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
@@ -5070,12 +5277,22 @@ impl Context {
         } else {
             None
         };
-        let (result, stats) = if transient_limits_active {
-            self.execute_program::<true>(program)
-        } else {
-            self.execute_program::<false>(program)
+        let (result, stats, report) = match (transient_limits_active, self.live_memory_observation)
+        {
+            (true, LiveMemoryObservation::Checkpointed) => {
+                self.execute_program::<true, true>(program)
+            }
+            (true, LiveMemoryObservation::Off) => self.execute_program::<true, false>(program),
+            (false, LiveMemoryObservation::Checkpointed) => {
+                self.execute_program::<false, true>(program)
+            }
+            (false, LiveMemoryObservation::Off) => self.execute_program::<false, false>(program),
         };
         self.last_execution = stats;
+        if let Some(mut report) = report {
+            report.finish(&result);
+            self.last_live_memory_report = Some(report);
+        }
         if let Some(transaction) = state_transaction {
             let transient_limit_failed = result.as_ref().is_err_and(|error| {
                 matches!(
@@ -5113,6 +5330,8 @@ impl Context {
             host_bindings: self.host_bindings.clone(),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
+            live_memory_observation: self.live_memory_observation,
+            last_live_memory_report: None,
         }
     }
     pub(crate) fn compile_module(&self, name: &str, source: &str) -> Result<Module, Error> {
@@ -5126,6 +5345,12 @@ impl Context {
     }
     pub(crate) fn set_execution_stats(&mut self, stats: ExecutionStats) {
         self.last_execution = stats;
+    }
+    pub(crate) fn merge_live_memory_report(&mut self, report: LiveMemoryReport) {
+        match &mut self.last_live_memory_report {
+            Some(current) => current.merge(report),
+            None => self.last_live_memory_report = Some(report),
+        }
     }
     fn install_builtins(&mut self) {
         self.add_native("print", |xs| {
@@ -5728,7 +5953,7 @@ enum IterationKind {
         position: usize,
     },
 }
-struct Vm<const TRANSIENT_LIMITS: bool> {
+struct Vm<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool> {
     fuel: u64,
     instructions: u64,
     max_call_depth: usize,
@@ -5752,6 +5977,7 @@ struct Vm<const TRANSIENT_LIMITS: bool> {
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
     max_transient_managed_objects: u64,
     max_transient_managed_bytes: u64,
+    live_memory_report: LiveMemoryReport,
 }
 enum Step {
     Continue,
@@ -5771,7 +5997,41 @@ enum CallTarget {
         context: MethodContext,
     },
 }
-impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
+impl<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool> Vm<TRANSIENT_LIMITS, LIVE_MEMORY> {
+    fn observe(&mut self, frames: &[Frame], checkpoint: LiveMemoryCheckpoint) {
+        if !LIVE_MEMORY {
+            return;
+        }
+        let mut census = RetainedMemoryCensus::default();
+        for frame in frames {
+            census.frame(frame);
+        }
+        self.live_memory_report
+            .sample(checkpoint, census.snapshot.into());
+    }
+
+    fn observe_instruction_checkpoint(&mut self, frames: &[Frame]) {
+        if !LIVE_MEMORY {
+            return;
+        }
+        let Some(frame) = frames.last() else {
+            return;
+        };
+        let checkpoint = match frame.chunk.code.get(frame.pc.saturating_sub(1)) {
+            Some(
+                Instruction::IterStartEnumerable
+                | Instruction::IterStartMap
+                | Instruction::IterNext { .. }
+                | Instruction::IterEnd,
+            ) => LiveMemoryCheckpoint::Iterator,
+            Some(Instruction::Try { .. } | Instruction::EndTry | Instruction::Throw) => {
+                LiveMemoryCheckpoint::Handler
+            }
+            _ => return,
+        };
+        self.observe(frames, checkpoint);
+    }
+
     fn source_span(frame: &Frame, pc: usize) -> Option<SourceSpan> {
         frame
             .debug_info
@@ -6212,7 +6472,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
     ) -> Result<Value, Error> {
-        let mut nested = Vm::<TRANSIENT_LIMITS> {
+        let mut nested = Vm::<TRANSIENT_LIMITS, LIVE_MEMORY> {
             fuel: self.fuel,
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
@@ -6236,6 +6496,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
             execution_plan,
             max_transient_managed_objects: self.max_transient_managed_objects,
             max_transient_managed_bytes: self.max_transient_managed_bytes,
+            live_memory_report: LiveMemoryReport::default(),
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -6252,6 +6513,9 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
         self.environment_allocations = nested.environment_allocations;
         self.managed_objects_allocated = nested.managed_objects_allocated;
         self.managed_bytes_allocated = nested.managed_bytes_allocated;
+        if LIVE_MEMORY {
+            self.live_memory_report.merge(nested.live_memory_report);
+        }
         result
     }
     fn stats(&self) -> ExecutionStats {
@@ -6293,6 +6557,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
             initialize_caller_receiver_on_return: false,
             return_override: None,
         }];
+        self.observe(&frames, LiveMemoryCheckpoint::RunStart);
         loop {
             if self
                 .cancellation
@@ -6305,6 +6570,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                 let error =
                     Error::resource(ResourceLimit::Cancellation, "execution cancelled by host")
                         .with_span_if_missing(span);
+                self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
                 return Err(Self::with_call_stack(error, &frames, false));
             }
             if self.fuel == 0 {
@@ -6313,6 +6579,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                     .and_then(|frame| Self::source_span(frame, frame.pc));
                 let error = Error::resource(ResourceLimit::Fuel, "execution fuel exhausted")
                     .with_span_if_missing(span);
+                self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
                 return Err(Self::with_call_stack(error, &frames, false));
             }
             self.fuel -= 1;
@@ -7246,12 +7513,13 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                 Ok(Step::Continue)
             })();
             match step {
-                Ok(Step::Continue) => {}
+                Ok(Step::Continue) => self.observe_instruction_checkpoint(&frames),
                 Ok(Step::Return(value)) => {
                     let returning = frames.last_mut().expect("VM has a returning frame");
                     let value = returning.return_override.take().unwrap_or(value);
                     let initialize_caller_receiver = returning.initialize_caller_receiver_on_return;
                     if frames.len() == 1 {
+                        self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
                         return Ok(value);
                     }
                     self.call_depth = self.call_depth.saturating_sub(1);
@@ -7262,6 +7530,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                         parent.receiver_initialized = true;
                     }
                     parent.stack.push(value);
+                    self.observe(&frames, LiveMemoryCheckpoint::Call);
                 }
                 Ok(Step::Call {
                     target,
@@ -7314,6 +7583,7 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                                         .receiver_initialized = true;
                                 }
                             }
+                            self.observe(&frames, LiveMemoryCheckpoint::Call);
                         }
                         Err(error) => {
                             let include_current_call = !error.labels().is_empty();
@@ -7323,9 +7593,13 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                             let error = error.with_span_if_missing(span.clone());
                             let error = Self::with_call_stack(error, &frames, include_current_call);
                             match handle_error(self, &mut frames, &error) {
-                                Ok(true) => {}
-                                Ok(false) => return Err(error),
+                                Ok(true) => self.observe(&frames, LiveMemoryCheckpoint::Handler),
+                                Ok(false) => {
+                                    self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
+                                    return Err(error);
+                                }
                                 Err(limit_error) => {
+                                    self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
                                     return Err(Self::with_call_stack(
                                         limit_error.with_span_if_missing(span),
                                         &frames,
@@ -7343,9 +7617,13 @@ impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
                     let error = error.with_span_if_missing(span.clone());
                     let error = Self::with_call_stack(error, &frames, false);
                     match handle_error(self, &mut frames, &error) {
-                        Ok(true) => {}
-                        Ok(false) => return Err(error),
+                        Ok(true) => self.observe(&frames, LiveMemoryCheckpoint::Handler),
+                        Ok(false) => {
+                            self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
+                            return Err(error);
+                        }
                         Err(limit_error) => {
+                            self.observe(&frames, LiveMemoryCheckpoint::RunEnd);
                             return Err(Self::with_call_stack(
                                 limit_error.with_span_if_missing(span),
                                 &frames,
@@ -7609,8 +7887,8 @@ fn set_receiver_member(
     }
 }
 
-fn call<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn call<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     frames: &mut Vec<Frame>,
     callee: Value,
     args: &[Value],
@@ -7621,8 +7899,8 @@ fn call<const TRANSIENT_LIMITS: bool>(
 // Most class calls have at most two explicit arguments. Keep receiver
 // prepending off the allocator path for those calls while leaving uncommon
 // larger arities on a straightforward fallback.
-fn call_with_receiver<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn call_with_receiver<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     frames: &mut Vec<Frame>,
     function: Rc<Function>,
     receiver: &Value,
@@ -7666,8 +7944,8 @@ fn call_with_receiver<const TRANSIENT_LIMITS: bool>(
     }
 }
 
-fn call_with_context<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn call_with_context<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     frames: &mut Vec<Frame>,
     callee: Value,
     args: &[Value],
@@ -7833,7 +8111,7 @@ fn call_with_context<const TRANSIENT_LIMITS: bool>(
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
-                    stack: Vm::<TRANSIENT_LIMITS>::take_frame_stack(),
+                    stack: Vm::<TRANSIENT_LIMITS, LIVE_MEMORY>::take_frame_stack(),
                     iterators: vec![],
                     handlers: vec![],
                     debug_info: debug_info.clone(),
@@ -7874,6 +8152,7 @@ fn call_with_context<const TRANSIENT_LIMITS: bool>(
                 }
             }
             FunctionKind::ContextualNative { function } => {
+                vm.observe(frames, LiveMemoryCheckpoint::ContextualNative);
                 let mut context = NativeCallContext {
                     cancellation: vm.cancellation.clone(),
                     resource_limits: vm.resource_limits.public_with_transient(
@@ -7901,14 +8180,15 @@ fn call_with_context<const TRANSIENT_LIMITS: bool>(
                     .expect("call has a caller frame")
                     .stack
                     .push(value);
+                vm.observe(frames, LiveMemoryCheckpoint::ContextualNative);
             }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
     }
     Ok(())
 }
-fn handle_error<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn handle_error<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     frames: &mut Vec<Frame>,
     error: &Error,
 ) -> Result<bool, Error> {
@@ -7929,12 +8209,20 @@ fn handle_error<const TRANSIENT_LIMITS: bool>(
             return Ok(true);
         }
         let has_caller = frames.len() > 1;
+        if !has_caller {
+            // Keep the top-level frame rooted until `run` records its terminal
+            // live-memory checkpoint. The frame is immediately dropped by the
+            // caller afterwards, so this has no execution-state effect.
+            return Ok(false);
+        }
         if has_caller {
             vm.call_depth = vm.call_depth.saturating_sub(1);
         }
         let mut discarded = frames.pop().expect("VM has a failing frame");
         if has_caller {
-            Vm::<TRANSIENT_LIMITS>::recycle_frame_stack(std::mem::take(&mut discarded.stack));
+            Vm::<TRANSIENT_LIMITS, LIVE_MEMORY>::recycle_frame_stack(std::mem::take(
+                &mut discarded.stack,
+            ));
         }
     }
 }
@@ -8675,8 +8963,8 @@ fn collect_static_pattern_bindings_into(
     }
 }
 
-fn bind_pattern<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn bind_pattern<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     pattern: &Pattern,
     value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
@@ -8839,8 +9127,8 @@ fn bind_pattern<const TRANSIENT_LIMITS: bool>(
         }
     }
 }
-fn index<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn index<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     target: Value,
     key: Value,
 ) -> Result<Value, Error> {
@@ -8898,8 +9186,8 @@ fn sequence_index(index: i128, len: usize, kind: &str) -> Result<usize, Error> {
     }
     Ok(resolved as usize)
 }
-fn slice<const TRANSIENT_LIMITS: bool>(
-    vm: &mut Vm<TRANSIENT_LIMITS>,
+fn slice<const TRANSIENT_LIMITS: bool, const LIVE_MEMORY: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS, LIVE_MEMORY>,
     target: Value,
     start: Value,
     end: Value,
@@ -9240,7 +9528,7 @@ mod tests {
         assert_eq!(second.last_execution(), successful_stats);
 
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
-        Vm::<false>::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
+        Vm::<false, false>::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
         assert!(reusable_is_empty());
         assert_eq!(reusable_capacity(), MAX_REUSABLE_FRAME_STACK);
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
