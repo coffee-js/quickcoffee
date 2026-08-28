@@ -10,12 +10,13 @@ the tracked seed corpus second, so a smoke run cannot modify reviewed seeds:
 ```sh
 cargo +nightly-2026-08-20 fuzz run parser fuzz/corpus/parser fuzz/seed_corpus/parser -- -max_total_time=30 -seed=1 -max_len=16384
 cargo +nightly-2026-08-20 fuzz run verifier fuzz/corpus/verifier fuzz/seed_corpus/verifier -- -max_total_time=30 -seed=1 -max_len=16384
-cargo +nightly-2026-08-20 fuzz run vm fuzz/corpus/vm fuzz/seed_corpus/vm -- -max_total_time=30 -seed=1 -max_len=16384 -detect_leaks=0
+ASAN_OPTIONS=detect_leaks=0 cargo +nightly-2026-08-20 fuzz run vm fuzz/corpus/vm fuzz/seed_corpus/vm -- -max_total_time=30 -seed=1 -max_len=16384 -detect_leaks=0
 ```
 
 `make fuzz-smoke` uses the same deterministic seed and bounded input for all
 three targets. The VM harness also bounds fuel, call depth, general values,
-JSON, exact numbers, and retained state. Its libFuzzer leak detector is disabled
+JSON, exact numbers, and retained state. Its libFuzzer and process-exit
+LeakSanitizer leak checks are disabled
 because supported closure/environment cycles are deliberately reference counted;
 live/cycle memory governance remains tracked by issue #76, while the finite smoke
 and VM resource limits bound this gate. AddressSanitizer's other checks remain
