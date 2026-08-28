@@ -399,6 +399,8 @@ fn qtest_reports_success_and_failure() {
 
 #[test]
 fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
+    const TIMEOUT_MS: &str = "100";
+    const TIMEOUT_FUEL: &str = "1000000000";
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-timeout-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
     let timeout = temp.join("a-timeout.coffee");
@@ -407,35 +409,56 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
     fs::write(&pass, "true\n").unwrap();
 
     let plain = Command::new(bin("qtest"))
-        .args(["--timeout-ms", "1", "--stats", temp.to_str().unwrap()])
+        .args([
+            "--timeout-ms",
+            TIMEOUT_MS,
+            "--fuel",
+            TIMEOUT_FUEL,
+            "--stats",
+            temp.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert_eq!(plain.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&plain.stdout).contains(&format!("ok {}", pass.display())));
     let plain_stderr = String::from_utf8_lossy(&plain.stderr);
-    assert!(plain_stderr.contains("execution timed out after 1 ms"));
+    assert!(plain_stderr.contains("execution timed out after 100 ms"));
     assert!(plain_stderr.contains(&format!("qtest stats: {}", timeout.display())));
 
     let json = Command::new(bin("qtest"))
-        .args(["--timeout-ms", "1", "--json", temp.to_str().unwrap()])
+        .args([
+            "--timeout-ms",
+            TIMEOUT_MS,
+            "--fuel",
+            TIMEOUT_FUEL,
+            "--json",
+            temp.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert_eq!(json.status.code(), Some(1));
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     assert_eq!(json_stdout.lines().count(), 2);
     assert!(json_stdout.contains("\"ok\":false"));
-    assert!(json_stdout.contains("execution timed out after 1 ms"));
+    assert!(json_stdout.contains("execution timed out after 100 ms"));
     assert!(json_stdout.contains("\"ok\":true"));
 
     let tap = Command::new(bin("qtest"))
-        .args(["--timeout-ms", "1", "--tap", temp.to_str().unwrap()])
+        .args([
+            "--timeout-ms",
+            TIMEOUT_MS,
+            "--fuel",
+            TIMEOUT_FUEL,
+            "--tap",
+            temp.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert_eq!(tap.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&tap.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}\n# execution timed out after 1 ms\nok 2 - {}\n1..2\n",
+            "TAP version 13\nnot ok 1 - {}\n# execution timed out after 100 ms\nok 2 - {}\n1..2\n",
             timeout.display(),
             pass.display()
         )
@@ -450,7 +473,7 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
         assert!(String::from_utf8_lossy(&invalid.stderr).contains("positive integer"));
     }
     let list = Command::new(bin("qtest"))
-        .args(["--list", "--timeout-ms", "1", temp.to_str().unwrap()])
+        .args(["--list", "--timeout-ms", TIMEOUT_MS, temp.to_str().unwrap()])
         .output()
         .unwrap();
     assert_eq!(list.status.code(), Some(2));
@@ -498,7 +521,9 @@ fn qtest_writes_a_deterministic_escaped_junit_report() {
     let timed_out = Command::new(bin("qtest"))
         .args([
             "--timeout-ms",
-            "1",
+            "100",
+            "--fuel",
+            "1000000000",
             "--junit",
             timeout_report.to_str().unwrap(),
             timeout.to_str().unwrap(),
@@ -509,7 +534,7 @@ fn qtest_writes_a_deterministic_escaped_junit_report() {
     assert!(
         fs::read_to_string(&timeout_report)
             .unwrap()
-            .contains("execution timed out after 1 ms")
+            .contains("execution timed out after 100 ms")
     );
 
     let missing_parent = temp.join("missing/report.xml");
