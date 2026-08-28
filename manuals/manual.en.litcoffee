@@ -38,6 +38,8 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qtest --timeout-ms N` runs each file in an isolated Context worker and cooperatively cancels it after N positive milliseconds; it reports a normal per-file failure, then continues. It is not a replacement for fuel, and synchronous non-cooperative host callbacks cannot be forcibly stopped.
 
+`qtest --junit FILE` writes one deterministic UTF-8 JUnit XML report after every selected file runs. It can accompany plain, JSON, or TAP output; paths and failure detail are XML-escaped, while measured timing is deliberately omitted.
+
 `qtest --stats` writes each file's instruction count and remaining fuel to stderr without changing its ok output.
 
 `qtest --json` writes one stable JSON result per file for CI consumers; `--stats` remains on stderr.

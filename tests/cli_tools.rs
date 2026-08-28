@@ -458,6 +458,87 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
 }
 
 #[test]
+fn qtest_writes_a_deterministic_escaped_junit_report() {
+    let temp = std::env::temp_dir().join(format!("qcoffee-qtest-junit-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let pass = temp.join("a<&\"'.coffee");
+    let failure = temp.join("b-failure.coffee");
+    let report = temp.join("report.xml");
+    fs::write(&pass, "true\n").unwrap();
+    fs::write(&failure, "throw '<&\"'\n").unwrap();
+
+    let output = Command::new(bin("qtest"))
+        .args([
+            "--junit",
+            report.to_str().unwrap(),
+            "--json",
+            temp.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).lines().count(), 2);
+    assert_eq!(
+        fs::read_to_string(&report).unwrap(),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"qtest\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n  <testcase name=\"{}\"></testcase>\n  <testcase name=\"{}\">\n    <failure message=\"runtime error: thrown: &lt;&amp;&quot;\">runtime error: thrown: &lt;&amp;&quot;</failure>\n  </testcase>\n</testsuite>\n",
+            pass.display()
+                .to_string()
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('"', "&quot;")
+                .replace('\'', "&apos;"),
+            failure.display(),
+        )
+    );
+
+    let timeout_report = temp.join("timeout.xml");
+    let timeout = temp.join("timeout.coffee");
+    fs::write(&timeout, "while true then true\n").unwrap();
+    let timed_out = Command::new(bin("qtest"))
+        .args([
+            "--timeout-ms",
+            "1",
+            "--junit",
+            timeout_report.to_str().unwrap(),
+            timeout.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(timed_out.status.code(), Some(1));
+    assert!(
+        fs::read_to_string(&timeout_report)
+            .unwrap()
+            .contains("execution timed out after 1 ms")
+    );
+
+    let missing_parent = temp.join("missing/report.xml");
+    let write_failure = Command::new(bin("qtest"))
+        .args([
+            "--junit",
+            missing_parent.to_str().unwrap(),
+            pass.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(write_failure.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&write_failure.stderr).contains("could not write JUnit"));
+    for args in [
+        vec!["--junit", "", pass.to_str().unwrap()],
+        vec![
+            "--list",
+            "--junit",
+            report.to_str().unwrap(),
+            temp.to_str().unwrap(),
+        ],
+    ] {
+        let invalid = Command::new(bin("qtest")).args(args).output().unwrap();
+        assert_eq!(invalid.status.code(), Some(2));
+    }
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
 fn qtest_discovers_only_canonical_source_extensions() {
     let temp =
         std::env::temp_dir().join(format!("qcoffee-qtest-extensions-{}", std::process::id()));

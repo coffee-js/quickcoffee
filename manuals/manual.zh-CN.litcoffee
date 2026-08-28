@@ -40,6 +40,8 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qtest --timeout-ms N` 为每份文件创建隔离 Context worker，并在 N 个正整数毫秒后协作取消；它将超时作为该文件的普通失败报告后继续执行。它不替代 fuel；同步且不协作的宿主 callback 不能被强制停止。
 
+`qtest --junit FILE` 在所有选中文件执行完后写入一份确定性的 UTF-8 JUnit XML 报告；它可与普通、JSON 或 TAP 输出并用。路径与失败详情会 XML 转义，刻意不写入测量时间。
+
 `qtest --stats` 将每份文档的指令数与剩余燃料写入标准错误，不改变 ok 输出。
 
 `qtest --json` 为每份文档输出一行稳定 JSON，便于 CI；`--stats` 仍写标准错误。
