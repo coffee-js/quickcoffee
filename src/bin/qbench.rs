@@ -327,7 +327,7 @@ const WORKLOADS: &[Workload] = &[
 
 fn usage() {
     eprintln!(
-        "Usage: qbench [--iterations N] [--repeat N] [--only NAME] [--json]\n       qbench --compare-qjs PATH [--compare-iterations N] [--repeat N] [--json]\n       qbench --list\n       qbench --help | --version"
+        "Usage: qbench [--iterations N] [--repeat N] [--only NAME] [--json]\n       qbench --compare-qjs PATH [--compare-iterations N] [--repeat N] [--json]\n       qbench --list\n       qbench --version"
     );
 }
 

@@ -56,7 +56,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --help | --version"
+        "Usage: qtest [--fuel N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
