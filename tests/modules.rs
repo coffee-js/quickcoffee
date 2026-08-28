@@ -259,6 +259,7 @@ fn restricted_file_loader_bounds_source_before_full_read() {
         error.labels()[0].span.source_name.as_deref(),
         Some("main.coffee")
     );
+    drop(loader);
     fs::remove_dir_all(root).unwrap();
 }
 
