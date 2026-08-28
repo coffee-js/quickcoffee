@@ -1,11 +1,14 @@
 //! Test runner for executable QuickCoffee scripts and literate manuals.
 
-use quickcoffee::{Context, Value};
+use quickcoffee::{CancellationToken, Context, Value};
 use std::{
     collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::mpsc::{self, RecvTimeoutError},
+    thread,
+    time::Duration,
 };
 
 fn collect(
@@ -56,7 +59,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
+        "Usage: qtest [--fuel N] [--timeout-ms N] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
@@ -84,8 +87,79 @@ fn tap_comments(detail: &str) {
         println!("#");
     }
 }
+
+struct TestRun {
+    outcome: Result<(), String>,
+    instructions: Option<u64>,
+    fuel_remaining: Option<u64>,
+}
+
+fn run_file(path: PathBuf, fuel: u64, cancellation: Option<CancellationToken>) -> TestRun {
+    let source_name = path.display().to_string();
+    let source = match fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) => {
+            return TestRun {
+                outcome: Err(error.to_string()),
+                instructions: None,
+                fuel_remaining: None,
+            };
+        }
+    };
+    let mut context = Context::new().with_fuel(fuel);
+    if let Some(cancellation) = cancellation {
+        context.set_cancellation_token(cancellation);
+    }
+    let outcome = match context.eval_named(&source_name, &source) {
+        Ok(Value::Bool(true)) => Ok(()),
+        Ok(value) => Err(format!("final value was {value}, expected true")),
+        Err(error) => Err(error.to_string()),
+    };
+    let execution = context.last_execution();
+    TestRun {
+        outcome,
+        instructions: Some(execution.instructions),
+        fuel_remaining: Some(execution.fuel_remaining),
+    }
+}
+
+fn run_file_with_timeout(path: PathBuf, fuel: u64, timeout_ms: Option<u64>) -> TestRun {
+    let Some(timeout_ms) = timeout_ms else {
+        return run_file(path, fuel, None);
+    };
+    let cancellation = CancellationToken::new();
+    let worker_cancellation = cancellation.clone();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = sender.send(run_file(path, fuel, Some(worker_cancellation)));
+    });
+    match receiver.recv_timeout(Duration::from_millis(timeout_ms)) {
+        Ok(run) => run,
+        Err(RecvTimeoutError::Timeout) => {
+            cancellation.cancel();
+            match receiver.recv() {
+                Ok(mut run) => {
+                    run.outcome = Err(format!("execution timed out after {timeout_ms} ms"));
+                    run
+                }
+                Err(_) => TestRun {
+                    outcome: Err(format!("execution timed out after {timeout_ms} ms")),
+                    instructions: None,
+                    fuel_remaining: None,
+                },
+            }
+        }
+        Err(RecvTimeoutError::Disconnected) => TestRun {
+            outcome: Err("qtest worker terminated without a result".to_string()),
+            instructions: None,
+            fuel_remaining: None,
+        },
+    }
+}
+
 fn main() -> ExitCode {
     let mut fuel = 1_000_000u64;
+    let mut timeout_ms = None;
     let mut stats = false;
     let mut json = false;
     let mut tap = false;
@@ -107,6 +181,13 @@ fn main() -> ExitCode {
                 Some(value) => fuel = value,
                 None => {
                     eprintln!("--fuel requires a non-negative integer");
+                    return ExitCode::from(2);
+                }
+            },
+            "--timeout-ms" => match args.next().and_then(|value| value.parse::<u64>().ok()) {
+                Some(value) if value > 0 => timeout_ms = Some(value),
+                _ => {
+                    eprintln!("--timeout-ms requires a positive integer");
                     return ExitCode::from(2);
                 }
             },
@@ -180,8 +261,8 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     if list {
-        if json || tap || stats {
-            eprintln!("--list cannot be combined with --json, --tap, or --stats");
+        if json || tap || stats || timeout_ms.is_some() {
+            eprintln!("--list cannot be combined with --json, --tap, --stats, or --timeout-ms");
             return ExitCode::from(2);
         }
         for path in files {
@@ -195,56 +276,30 @@ fn main() -> ExitCode {
     let mut failed = 0;
     let total = files.len();
     for (index, path) in files.into_iter().enumerate() {
-        let label = path.display();
-        let outcome = fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|src| {
-                let mut context = Context::new().with_fuel(fuel);
-                let source_name = label.to_string();
-                let result = context
-                    .eval_named(&source_name, &src)
-                    .map_err(|e| e.to_string());
-                if stats {
-                    let execution = context.last_execution();
-                    eprintln!(
-                        "qtest stats: {} instructions={} fuel_remaining={}",
-                        label, execution.instructions, execution.fuel_remaining
-                    );
-                }
-                result
-            });
-        match outcome {
-            Ok(Value::Bool(true)) => {
+        let label = path.display().to_string();
+        let run = run_file_with_timeout(path, fuel, timeout_ms);
+        if stats {
+            if let (Some(instructions), Some(fuel_remaining)) =
+                (run.instructions, run.fuel_remaining)
+            {
+                eprintln!(
+                    "qtest stats: {} instructions={} fuel_remaining={}",
+                    label, instructions, fuel_remaining
+                );
+            }
+        }
+        match run.outcome {
+            Ok(()) => {
                 if json {
-                    println!(
-                        "{{\"ok\":true,\"file\":\"{}\"}}",
-                        json_escape(&label.to_string())
-                    );
+                    println!("{{\"ok\":true,\"file\":\"{}\"}}", json_escape(&label));
                 } else if tap {
                     println!("ok {} - {label}", index + 1);
                 } else {
                     println!("ok {label}");
                 }
             }
-            Ok(value) => {
+            Err(detail) => {
                 failed += 1;
-                let detail = format!("final value was {value}, expected true");
-                if json {
-                    println!(
-                        "{{\"ok\":false,\"file\":\"{}\",\"error\":\"{}\"}}",
-                        json_escape(&label.to_string()),
-                        json_escape(&detail)
-                    );
-                } else if tap {
-                    println!("not ok {} - {label}", index + 1);
-                    tap_comments(&detail);
-                } else {
-                    eprintln!("not ok {label}: {detail}");
-                }
-            }
-            Err(e) => {
-                failed += 1;
-                let detail = e.to_string();
                 if json {
                     println!(
                         "{{\"ok\":false,\"file\":\"{}\",\"error\":\"{}\"}}",
