@@ -58,7 +58,7 @@ Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource pl
 
 `qbench --json` emits one timing record per guarded workload; `--iterations` controls sample count.
 
-`make fuzz-smoke` uses a separate pinned-nightly cargo-fuzz package to run bounded parser and verifier fuzz targets with a fixed seed; confirmed crashes become minimized ordinary regression tests.
+`make fuzz-smoke` uses a separate pinned-nightly cargo-fuzz package to run bounded parser, verifier, and VM execution targets with reviewed seeds; scheduled/manual Miri interprets applicable library tests, and `make dependency-audit` checks both lockfiles with RustSec. Confirmed findings become minimized ordinary regression tests.
 
 Each qbench record's profile_* fields come from one untimed execution and report hot paths and allocation events without scaling by `--iterations` or `--repeat`.
 

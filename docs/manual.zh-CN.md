@@ -66,7 +66,7 @@ Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.r
 
 `qbench --json` 为每个带语义护栏的负载输出一条计时记录；`--iterations` 设置样本次数。
 
-`make fuzz-smoke` 使用独立固定-nightly 的 cargo-fuzz 包，以固定 seed 有界运行 parser 与 verifier target；确认的 crash 要最小化并转为普通回归测试。
+`make fuzz-smoke` 使用独立固定-nightly 的 cargo-fuzz 包，以受审阅 seed 有界运行 parser、verifier 与 VM 执行 target；scheduled/manual Miri 解释执行适用 library tests，`make dependency-audit` 以 RustSec 审计两个 lockfile。确认的问题要最小化并转为普通回归测试。
 
 每条 qbench 记录的 profile_* 字段来自一次不计时执行，给出热点与分配事件，不乘以 `--iterations` 或 `--repeat`。
 

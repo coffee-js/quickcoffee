@@ -1,4 +1,4 @@
-.PHONY: fmt test release-test examples package-metadata package release-tool-check qbench-check fuzz-smoke clippy api-doc docs docs-html doc-check check bench qbench
+.PHONY: fmt test release-test examples package-metadata package release-tool-check qbench-check fuzz-smoke miri-smoke dependency-audit clippy api-doc docs docs-html doc-check check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -62,5 +62,14 @@ qbench-check:
 	cargo run --locked --quiet --release --bin qbench -- --json --iterations 1 --repeat 3 >/dev/null
 
 fuzz-smoke:
-	cargo +nightly-2025-03-28 fuzz run parser -- -runs=1024 -seed=1
-	cargo +nightly-2025-03-28 fuzz run verifier -- -runs=1024 -seed=1
+	mkdir -p fuzz/corpus/parser fuzz/corpus/verifier fuzz/corpus/vm
+	cargo +nightly-2026-08-20 fuzz run parser fuzz/corpus/parser fuzz/seed_corpus/parser -- -runs=1024 -seed=1 -max_len=16384
+	cargo +nightly-2026-08-20 fuzz run verifier fuzz/corpus/verifier fuzz/seed_corpus/verifier -- -runs=1024 -seed=1 -max_len=16384
+	ASAN_OPTIONS=detect_leaks=0 cargo +nightly-2026-08-20 fuzz run vm fuzz/corpus/vm fuzz/seed_corpus/vm -- -runs=1024 -seed=1 -max_len=16384 -detect_leaks=0
+
+miri-smoke:
+	MIRIFLAGS="-Zmiri-ignore-leaks" cargo +nightly-2026-08-20 miri test --lib -- --skip json::tests::malformed_numbers_nesting_and_size_limits_fail_atomically
+
+dependency-audit:
+	cargo audit --file Cargo.lock
+	cargo audit --file fuzz/Cargo.lock
