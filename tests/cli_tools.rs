@@ -490,6 +490,43 @@ fn every_cli_reports_the_same_package_version() {
     }
 }
 #[test]
+fn every_cli_has_a_stable_help_and_unknown_option_contract() {
+    for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
+        for flag in ["--help", "-h"] {
+            let output = Command::new(bin(name)).arg(flag).output().unwrap();
+            assert!(output.status.success(), "{name} {flag} failed");
+            assert!(output.stdout.is_empty(), "{name} {flag} wrote stdout");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains(&format!("Usage: {name}")),
+                "{name} {flag}: {stderr}"
+            );
+            assert!(
+                stderr.contains("--help | --version"),
+                "{name} {flag}: {stderr}"
+            );
+        }
+
+        let output = Command::new(bin(name))
+            .arg("--quickcoffee-contract-unknown-option")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{name} unknown option had unexpected exit status"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "{name} unknown option wrote stdout"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(&format!("Usage: {name}")),
+            "{name} unknown option omitted usage"
+        );
+    }
+}
+#[test]
 fn qtest_json_output_is_one_stable_record_per_file() {
     let ok = Command::new(bin("qtest"))
         .args(["--json", "tests/scripts/arithmetic.coffee"])

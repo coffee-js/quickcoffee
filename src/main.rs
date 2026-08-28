@@ -11,7 +11,7 @@ use std::{
 
 fn usage() {
     eprintln!(
-        "Usage: qcoffee [--fuel N] [--max-source-bytes N] [--max-bytecode-instructions N] [--max-module-graph-modules N] [--max-module-graph-source-bytes N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY [--fingerprint] | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --version"
+        "Usage: qcoffee [--fuel N] [--max-source-bytes N] [--max-bytecode-instructions N] [--max-module-graph-modules N] [--max-module-graph-source-bytes N] [--stats] [--json] [-i | -e SOURCE | --check FILE | --dump-bytecode FILE | --fingerprint FILE | --module-root ROOT ENTRY [--fingerprint] | FILE | -] [-- ARG...]\n       qcoffee --interactive\n       qcoffee --quit\n       qcoffee --help | --version"
     );
 }
 
