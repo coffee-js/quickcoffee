@@ -1,7 +1,8 @@
 use quickcoffee::{
-    CancellationToken, Context, Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, Integer,
-    IntoValue, ResourceLimit, ResourceLimits, RetainedMemory, Runtime, TryFromValue, Value,
-    ValueKind,
+    CancellationToken, CapabilityKey, CapabilityKind, Chunk, CompileLimits, Constant, Context,
+    Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionStats, HostCapabilities,
+    Instruction, Integer, IntoValue, Program, ResourceLimit, ResourceLimits, RetainedMemory,
+    Runtime, TryFromValue, Value, ValueKind,
 };
 use std::{cell::Cell, collections::BTreeMap};
 
@@ -310,6 +311,160 @@ fn runtime_contexts_do_not_share_host_state_implicitly() {
     assert_eq!(second.eval("state()").unwrap().as_number(), Some(21.));
     assert_eq!(first.host_state::<Cell<u64>>().unwrap().get(), 11);
     assert_eq!(second.host_state::<Cell<u64>>().unwrap().get(), 21);
+}
+
+#[test]
+fn compile_limits_bound_raw_source_recursive_bytecode_and_foreign_programs() {
+    let defaults = CompileLimits::default();
+    assert_eq!(defaults.max_source_bytes(), 1_000_000);
+    assert_eq!(defaults.max_bytecode_instructions(), 1_000_000);
+    assert_eq!(defaults.max_module_graph_modules(), 1_024);
+    assert_eq!(defaults.max_module_graph_source_bytes(), 16_000_000);
+
+    let source = "f = (fallback = -> 1) -> fallback()\nf()";
+    let ordinary = Engine::new().compile_program(source).unwrap();
+    assert!(ordinary.instruction_count() > 2);
+    let source_limited = CompileLimits::default().with_max_source_bytes(source.len() - 1);
+    let error = Engine::new()
+        .with_compile_limits(source_limited)
+        .compile_program_named("policy.coffee", source)
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+    assert_eq!(error.position().unwrap().line, 1);
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("policy.coffee")
+    );
+
+    let bytecode_limited =
+        CompileLimits::default().with_max_bytecode_instructions(ordinary.instruction_count() - 1);
+    let error = Engine::new()
+        .with_compile_limits(bytecode_limited)
+        .compile_program_named("policy.coffee", source)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+    assert_eq!(error.position().unwrap().line, 1);
+
+    let literate = "A prose line with `inline_code`.\n\n    true";
+    let error = Engine::new()
+        .with_compile_limits(CompileLimits::default().with_max_source_bytes(literate.len() - 1))
+        .compile_program_named("policy.litcoffee", literate)
+        .unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_source_bytes(4))
+        .build();
+    assert_eq!(runtime.compile_limits().max_source_bytes(), 4);
+    assert_eq!(
+        runtime
+            .compile_program("1 + 1")
+            .unwrap_err()
+            .resource_limit(),
+        Some(ResourceLimit::SourceBytes)
+    );
+    assert_eq!(runtime.cache_stats().program_misses, 0);
+    runtime.compile_program("true").unwrap();
+    assert_eq!(runtime.cache_stats().program_misses, 1);
+
+    let raw = Program::from(Chunk {
+        constants: vec![Constant::Value(Value::from(1_f64))],
+        code: vec![Instruction::Constant(0), Instruction::Return],
+    });
+    assert_eq!(raw.instruction_count(), 2);
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_bytecode_instructions(1))
+        .build();
+    let mut context = runtime.new_context();
+    let error = context.run_program(&raw).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+    assert_eq!(context.last_execution(), ExecutionStats::default());
+}
+
+#[test]
+fn typed_capability_allowlists_are_explicit_isolated_and_unretained() {
+    let audit = CapabilityKey::<Cell<u64>>::new(CapabilityKind::Logging, "audit");
+    let wrong_audit = CapabilityKey::<String>::new(CapabilityKind::Logging, "audit");
+    let clock = CapabilityKey::<u64>::new(CapabilityKind::Clock, "request-time");
+    assert_eq!(audit.kind(), CapabilityKind::Logging);
+    assert_eq!(audit.name(), "audit");
+
+    let mut capabilities = HostCapabilities::new();
+    assert!(capabilities.is_empty());
+    capabilities.insert(audit, Cell::new(1));
+    assert_eq!(capabilities.len(), 1);
+    assert_eq!(
+        capabilities.descriptors().collect::<Vec<_>>(),
+        vec![(CapabilityKind::Logging, "audit")]
+    );
+    assert!(capabilities.contains(audit));
+    assert!(!capabilities.contains(wrong_audit));
+    assert!(!capabilities.remove(wrong_audit));
+    let original_audit = capabilities.get(audit).unwrap();
+
+    let runtime = Runtime::new();
+    let mut context = runtime
+        .context_builder()
+        .fuel(100)
+        .capabilities(capabilities.clone())
+        .capability(clock, 7_u64)
+        .contextual_native("host_audit", move |call, args| {
+            assert!(args.is_empty());
+            call.check_cancelled()?;
+            call.consume_fuel(2)?;
+            assert!(call.capability(wrong_audit).is_none());
+            let sink = call
+                .capability(audit)
+                .ok_or_else(|| Error::runtime("logging capability denied"))?;
+            let time = call
+                .capability(clock)
+                .ok_or_else(|| Error::runtime("clock capability denied"))?;
+            sink.set(sink.get() + 1);
+            call.record_managed_allocation(1, 2);
+            Ok(Value::from((sink.get() + *time) as f64))
+        })
+        .build();
+
+    let retained = context.retained_memory();
+    assert_eq!(context.eval("host_audit()").unwrap().as_number(), Some(9.));
+    assert_eq!(original_audit.get(), 2);
+    assert_eq!(context.capability(clock).as_deref(), Some(&7));
+    assert!(context.capability(wrong_audit).is_none());
+    assert!(context.get_global("audit").is_none());
+    assert_eq!(context.last_execution().managed_objects_allocated, 1);
+    assert_eq!(context.last_execution().managed_bytes_allocated, 2);
+    assert_eq!(context.retained_memory(), retained);
+
+    context.set_capability(audit, Cell::new(40));
+    assert_eq!(original_audit.get(), 2);
+    assert_eq!(context.capability(audit).unwrap().get(), 40);
+    assert!(context.remove_capability(clock));
+    assert!(!context.remove_capability(clock));
+    assert_eq!(context.capabilities().len(), 1);
+    assert_eq!(context.retained_memory(), retained);
+    context.clear_capabilities();
+    assert!(context.capabilities().is_empty());
+
+    let independent = runtime.context_builder().build();
+    assert!(independent.capabilities().is_empty());
+    assert!(independent.capability(audit).is_none());
+
+    let mut denied = Context::new().with_contextual_native("host_audit", move |call, _| {
+        call.capability(audit)
+            .map(|_| Value::Nil)
+            .ok_or_else(|| Error::runtime("logging capability denied"))
+    });
+    let error = denied.eval("host_audit()").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    assert_eq!(error.message(), "logging capability denied");
 }
 
 #[test]
@@ -1288,6 +1443,100 @@ fn managed_allocation_telemetry_survives_errors_and_pattern_rollback() {
 }
 
 #[test]
+fn transient_managed_allocation_limits_are_per_run_atomic_and_uncatchable() {
+    let source = "make = -> ['temporary']\nmake()\nmake()\n42";
+    let mut baseline = Context::new();
+    assert_eq!(baseline.eval(source).unwrap().as_number(), Some(42.));
+    let expected = baseline.last_execution();
+    assert!(expected.managed_objects_allocated > 1);
+    assert!(expected.managed_bytes_allocated > 1);
+
+    let exact_limits = ResourceLimits::default()
+        .with_max_transient_managed_objects(expected.managed_objects_allocated)
+        .with_max_transient_managed_bytes(expected.managed_bytes_allocated);
+    let mut exact = Context::new().with_resource_limits(exact_limits);
+    assert_eq!(exact.eval(source).unwrap().as_number(), Some(42.));
+    assert_eq!(exact.last_execution(), expected);
+    assert_eq!(exact.eval(source).unwrap().as_number(), Some(42.));
+    assert_eq!(exact.last_execution(), expected);
+
+    let mut object_limited = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_transient_managed_objects(expected.managed_objects_allocated - 1),
+    );
+    let error = object_limited
+        .eval_named(
+            "transient-objects.coffee",
+            "try\n  make = -> ['temporary']\n  make()\n  make()\n  42\ncatch ignored\n  99",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("transient-objects.coffee")
+    );
+    assert!(
+        object_limited.last_execution().managed_objects_allocated
+            > expected.managed_objects_allocated - 1
+    );
+    assert!(object_limited.get_global("make").is_none());
+
+    let mut byte_limited = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_transient_managed_bytes(expected.managed_bytes_allocated - 1),
+    );
+    let error = byte_limited.eval(source).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedBytes)
+    );
+    assert!(
+        byte_limited.last_execution().managed_bytes_allocated
+            > expected.managed_bytes_allocated - 1
+    );
+    assert!(byte_limited.get_global("make").is_none());
+
+    let defaults = ResourceLimits::default();
+    assert_eq!(defaults.max_transient_managed_objects(), u64::MAX);
+    assert_eq!(defaults.max_transient_managed_bytes(), u64::MAX);
+}
+
+#[test]
+fn contextual_native_allocation_limits_override_callback_errors_and_keep_stats() {
+    let mut objects = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_objects(1))
+        .with_contextual_native("host_work", |call, _| {
+            call.record_managed_allocation(2, 0);
+            Err(Error::runtime("host failure after allocation"))
+        });
+    let error = objects
+        .eval("try host_work() catch ignored then 42")
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(objects.last_execution().managed_objects_allocated, 2);
+
+    let mut bytes = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_bytes(8))
+        .with_contextual_native("host_work", |call, _| {
+            call.record_managed_allocation(0, 9);
+            Ok(Value::Nil)
+        });
+    let error = bytes.eval("host_work()").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedBytes)
+    );
+    assert_eq!(bytes.last_execution().managed_bytes_allocated, 9);
+}
+
+#[test]
 fn resource_limits_bound_call_depth_and_cannot_be_caught_by_scripts() {
     let mut context = Context::new().with_fuel(1_000).with_max_call_depth(3);
     assert_eq!(context.max_call_depth(), 3);
@@ -1552,6 +1801,21 @@ fn general_value_resource_policy_is_replaceable_atomic_and_uncatchable() {
         );
     let error = host_value.eval("host_items").unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::ArrayItems));
+
+    let mut nested_host_value = Context::new().with_global(
+        "nested_host_value",
+        Value::map([
+            ("scalar", Value::from(1_i64)),
+            (
+                "nested",
+                Value::array(vec![Value::map([("payload", Value::from("oversized"))])]),
+            ),
+        ]),
+    );
+    nested_host_value.set_resource_limits(ResourceLimits::default().with_max_string_bytes(3));
+    let error = nested_host_value.eval("nested_host_value").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
+    assert!(error.message().contains("string exceeds 3 bytes"));
 }
 
 #[test]

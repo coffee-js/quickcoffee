@@ -1,6 +1,6 @@
 use crate::{
-    Context, Engine, Error, ExecutionStats, Program, Runtime, Value, bytecode::FingerprintEncoder,
-    lowering, parser,
+    CompileLimits, Context, Engine, Error, ExecutionStats, Program, ResourceLimit, Runtime, Value,
+    bytecode::FingerprintEncoder, lowering, parser,
 };
 use cap_std::{ambient_authority, fs::Dir};
 use std::{
@@ -88,6 +88,7 @@ impl ModuleLoader for MemoryModuleLoader {
 #[derive(Clone, Debug)]
 pub struct RestrictedFileModuleLoader {
     root: Arc<Dir>,
+    max_source_bytes: usize,
 }
 impl RestrictedFileModuleLoader {
     /// Creates a loader rooted at an existing directory.
@@ -101,7 +102,17 @@ impl RestrictedFileModuleLoader {
         })?;
         Ok(Self {
             root: Arc::new(root),
+            max_source_bytes: CompileLimits::default().max_source_bytes(),
         })
+    }
+
+    /// Returns this loader with a replacement per-file source byte boundary.
+    ///
+    /// Match this value to the [`CompileLimits`] used by the consuming Engine
+    /// or Runtime when raising the default boundary.
+    pub fn with_max_source_bytes(mut self, limit: usize) -> Self {
+        self.max_source_bytes = limit;
+        self
     }
 
     /// Loads one root-relative entry module, inferring `.coffee` when omitted.
@@ -150,29 +161,44 @@ impl RestrictedFileModuleLoader {
         let mut file = self.root.open(&canonical).map_err(|_| {
             Error::runtime(format!("module source is not readable: {canonical_name}"))
         })?;
-        if !file
-            .metadata()
-            .map_err(|_| {
-                Error::runtime(format!("module source is not readable: {canonical_name}"))
-            })?
-            .is_file()
-        {
+        let metadata = file.metadata().map_err(|_| {
+            Error::runtime(format!("module source is not readable: {canonical_name}"))
+        })?;
+        if !metadata.is_file() {
             return Err(Error::runtime(format!(
                 "invalid module target: {requested}"
             )));
         }
+        if metadata.len() > self.max_source_bytes as u64 {
+            return Err(source_limit_error(&canonical_name, self.max_source_bytes));
+        }
         let mut source = String::new();
-        file.read_to_string(&mut source).map_err(|error| {
-            if error.kind() == io::ErrorKind::InvalidData {
-                Error::runtime(format!(
-                    "module source is not readable UTF-8: {canonical_name}"
-                ))
-            } else {
-                Error::runtime(format!("module source is not readable: {canonical_name}"))
-            }
-        })?;
+        file.by_ref()
+            .take((self.max_source_bytes as u64).saturating_add(1))
+            .read_to_string(&mut source)
+            .map_err(|error| {
+                if error.kind() == io::ErrorKind::InvalidData {
+                    Error::runtime(format!(
+                        "module source is not readable UTF-8: {canonical_name}"
+                    ))
+                } else {
+                    Error::runtime(format!("module source is not readable: {canonical_name}"))
+                }
+            })?;
+        if source.len() > self.max_source_bytes {
+            return Err(source_limit_error(&canonical_name, self.max_source_bytes));
+        }
         Ok(ModuleSource::new(canonical_name, source))
     }
+}
+
+fn source_limit_error(source_name: &str, limit: usize) -> Error {
+    Error::resource(
+        ResourceLimit::SourceBytes,
+        format!("source exceeds configured UTF-8 byte limit of {limit}"),
+    )
+    .at_line(1)
+    .with_source_name(source_name)
 }
 impl ModuleLoader for RestrictedFileModuleLoader {
     fn load(&self, specifier: &str, referrer: &str) -> Result<ModuleSource, Error> {
@@ -291,6 +317,7 @@ pub struct Module {
     name: String,
     program: Program,
     source_fingerprint: u64,
+    source_bytes: usize,
     imports: Vec<(Vec<(String, String)>, String)>,
     exports: Vec<(String, String)>,
 }
@@ -302,6 +329,14 @@ impl Module {
     /// Returns a stable fingerprint of the executable module body.
     pub fn fingerprint(&self) -> u64 {
         self.program.fingerprint()
+    }
+    /// Returns the raw UTF-8 source bytes charged to static graph limits.
+    pub fn source_bytes(&self) -> usize {
+        self.source_bytes
+    }
+    /// Returns recursively reachable bytecode instructions in this module.
+    pub fn instruction_count(&self) -> usize {
+        self.program.instruction_count()
     }
 }
 
@@ -331,6 +366,7 @@ impl Engine {
     /// Compiles one module with static named import/export directives.
     pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
         let name = name.into();
+        self.check_source_limit(Some(name.as_str()), source)?;
         let prepared = crate::source::prepare(Some(name.as_str()), source)
             .map_err(|error| error.with_source_name(name.as_str()))?;
         let syntax =
@@ -346,13 +382,17 @@ impl Engine {
         }
         let (chunk, source_map) = lowering::compile_mapped(&syntax.body)
             .map_err(|error| error.with_source_name(name.as_str()))?;
+        let instruction_count = source_map.instruction_count;
+        self.check_bytecode_limit(Some(name.as_str()), instruction_count)?;
         lowering::verify_mapped(&chunk, &source_map)
             .map_err(|error| error.with_source_name(name.as_str()))?;
-        let program = Program::from_compiled(chunk, source_map, Some(name.as_str()));
+        let program =
+            Program::from_compiled(chunk, source_map, Some(name.as_str()), instruction_count);
         Ok(Module {
             name,
             program,
             source_fingerprint: fingerprint_module_source(source),
+            source_bytes: source.len(),
             imports: syntax.imports,
             exports: syntax
                 .exports
@@ -377,6 +417,7 @@ impl Engine {
         let mut identities = BTreeMap::new();
         let mut graph = BTreeMap::new();
         let mut active = Vec::new();
+        let mut budget = ModuleGraphBudget::new(self.compile_limits());
         collect_module_graph(
             self,
             entry,
@@ -384,6 +425,7 @@ impl Engine {
             &mut identities,
             &mut graph,
             &mut active,
+            &mut budget,
         )?;
         Ok(encode_module_graph(entry.name(), &graph))
     }
@@ -397,6 +439,8 @@ impl Runtime {
     /// evaluation state always belong to an individual Context run.
     pub fn compile_module(&self, name: impl Into<String>, source: &str) -> Result<Module, Error> {
         let name = name.into();
+        self.engine()
+            .check_source_limit(Some(name.as_str()), source)?;
         if let Some(module) = self.cached_module(&name, source) {
             return Ok(module);
         }
@@ -412,6 +456,81 @@ struct ModuleIdentity {
     program_fingerprint: u64,
     imports: Vec<(Vec<(String, String)>, String)>,
     exports: Vec<(String, String)>,
+}
+
+struct ModuleGraphBudget {
+    limits: CompileLimits,
+    sources: BTreeMap<String, u64>,
+    source_bytes: usize,
+}
+impl ModuleGraphBudget {
+    fn new(limits: CompileLimits) -> Self {
+        Self {
+            limits,
+            sources: BTreeMap::new(),
+            source_bytes: 0,
+        }
+    }
+
+    fn reserve_module(&mut self, module: &Module) -> Result<(), Error> {
+        self.reserve(
+            module.name(),
+            module.source_fingerprint,
+            module.source_bytes,
+        )
+    }
+
+    fn reserve_source(&mut self, source: &ModuleSource) -> Result<(), Error> {
+        if source.source().len() > self.limits.max_source_bytes() {
+            return Err(source_limit_error(
+                source.name(),
+                self.limits.max_source_bytes(),
+            ));
+        }
+        self.reserve(
+            source.name(),
+            fingerprint_module_source(source.source()),
+            source.source().len(),
+        )
+    }
+
+    fn reserve(&mut self, name: &str, fingerprint: u64, bytes: usize) -> Result<(), Error> {
+        if let Some(existing) = self.sources.get(name) {
+            if *existing != fingerprint {
+                return Err(Error::runtime(format!(
+                    "module canonical name resolved to inconsistent source: {name}"
+                )));
+            }
+            return Ok(());
+        }
+        if self.sources.len() >= self.limits.max_module_graph_modules() {
+            return Err(Error::resource(
+                ResourceLimit::ModuleGraphModules,
+                format!(
+                    "module graph exceeds configured unique module limit of {}",
+                    self.limits.max_module_graph_modules()
+                ),
+            ));
+        }
+        let source_bytes = self.source_bytes.checked_add(bytes).ok_or_else(|| {
+            Error::resource(
+                ResourceLimit::ModuleGraphSourceBytes,
+                "module graph source byte count overflowed",
+            )
+        })?;
+        if source_bytes > self.limits.max_module_graph_source_bytes() {
+            return Err(Error::resource(
+                ResourceLimit::ModuleGraphSourceBytes,
+                format!(
+                    "module graph exceeds configured cumulative source byte limit of {}",
+                    self.limits.max_module_graph_source_bytes()
+                ),
+            ));
+        }
+        self.sources.insert(name.to_owned(), fingerprint);
+        self.source_bytes = source_bytes;
+        Ok(())
+    }
 }
 
 impl From<&Module> for ModuleIdentity {
@@ -455,7 +574,9 @@ fn collect_module_graph(
     identities: &mut BTreeMap<String, ModuleIdentity>,
     graph: &mut BTreeMap<String, GraphModule>,
     active: &mut Vec<String>,
+    budget: &mut ModuleGraphBudget,
 ) -> Result<(), Error> {
+    budget.reserve_module(module)?;
     if active.iter().any(|name| name == module.name()) {
         let mut cycle = active.clone();
         cycle.push(module.name.clone());
@@ -481,9 +602,18 @@ fn collect_module_graph(
     let mut imports = Vec::with_capacity(module.imports.len());
     for (bindings, specifier) in &module.imports {
         let source = loader.load(specifier, module.name())?;
+        budget.reserve_source(&source)?;
         let dependency = engine.compile_module(source.name(), source.source())?;
         let dependency_name = dependency.name.clone();
-        collect_module_graph(engine, &dependency, loader, identities, graph, active)?;
+        collect_module_graph(
+            engine,
+            &dependency,
+            loader,
+            identities,
+            graph,
+            active,
+            budget,
+        )?;
         for (public, _) in bindings {
             if !dependency
                 .exports
@@ -555,14 +685,27 @@ impl Context {
         module: &Module,
         loader: &dyn ModuleLoader,
     ) -> Result<ModuleExports, Error> {
+        let mut identities = BTreeMap::new();
+        let mut prepared = BTreeMap::new();
+        let mut prepare_active = Vec::new();
+        let mut budget = ModuleGraphBudget::new(self.compile_limits());
+        prepare_module_graph(
+            self,
+            module,
+            loader,
+            &mut identities,
+            &mut prepared,
+            &mut prepare_active,
+            &mut budget,
+        )?;
         let mut cache = BTreeMap::new();
         let mut active = Vec::new();
         let mut fuel = self.fuel();
         let mut stats = ExecutionStats::default();
-        let result = execute_module(
+        let result = execute_prepared_module(
             self,
-            module,
-            loader,
+            module.name(),
+            &prepared,
             &mut cache,
             &mut active,
             &mut fuel,
@@ -576,19 +719,98 @@ impl Context {
     }
 }
 
-fn execute_module(
+#[derive(Clone)]
+struct PreparedModule {
+    module: Module,
+    dependencies: Vec<String>,
+}
+
+fn prepare_module_graph(
     host: &Context,
     module: &Module,
     loader: &dyn ModuleLoader,
+    identities: &mut BTreeMap<String, ModuleIdentity>,
+    prepared: &mut BTreeMap<String, PreparedModule>,
+    active: &mut Vec<String>,
+    budget: &mut ModuleGraphBudget,
+) -> Result<(), Error> {
+    budget.reserve_module(module)?;
+    if active.iter().any(|name| name == module.name()) {
+        let mut cycle = active.clone();
+        cycle.push(module.name.clone());
+        return Err(Error::runtime(format!(
+            "circular module dependency: {}",
+            cycle.join(" -> ")
+        )));
+    }
+    let identity = ModuleIdentity::from(module);
+    if let Some(existing) = identities.get(module.name()) {
+        if existing != &identity {
+            return Err(Error::runtime(format!(
+                "module canonical name resolved to inconsistent source: {}",
+                module.name()
+            )));
+        }
+        return Ok(());
+    }
+    identities.insert(module.name.clone(), identity);
+    active.push(module.name.clone());
+    let mut dependencies = Vec::with_capacity(module.imports.len());
+    for (bindings, specifier) in &module.imports {
+        let source = loader.load(specifier, module.name())?;
+        budget.reserve_source(&source)?;
+        let dependency = host.compile_module(source.name(), source.source())?;
+        prepare_module_graph(
+            host,
+            &dependency,
+            loader,
+            identities,
+            prepared,
+            active,
+            budget,
+        )?;
+        for (public, _) in bindings {
+            if !dependency
+                .exports
+                .iter()
+                .any(|(exported, _)| exported == public)
+            {
+                return Err(Error::runtime(format!(
+                    "module {} does not export {public}",
+                    dependency.name
+                )));
+            }
+        }
+        dependencies.push(dependency.name.clone());
+    }
+    active.pop();
+    prepared.insert(
+        module.name.clone(),
+        PreparedModule {
+            module: module.clone(),
+            dependencies,
+        },
+    );
+    Ok(())
+}
+
+fn execute_prepared_module(
+    host: &Context,
+    module_name: &str,
+    prepared: &BTreeMap<String, PreparedModule>,
     cache: &mut BTreeMap<String, ModuleExports>,
     active: &mut Vec<String>,
     fuel: &mut u64,
     stats: &mut ExecutionStats,
 ) -> Result<ModuleExports, Error> {
-    if let Some(exports) = cache.get(&module.name) {
+    if let Some(exports) = cache.get(module_name) {
         return Ok(exports.clone());
     }
-    if active.iter().any(|name| name == &module.name) {
+    let prepared_module = prepared
+        .get(module_name)
+        .expect("prepared module graph contains every resolved edge");
+    let module = &prepared_module.module;
+    if active.iter().any(|name| name == module_name) {
         let mut cycle = active.clone();
         cycle.push(module.name.clone());
         return Err(Error::runtime(format!(
@@ -598,10 +820,14 @@ fn execute_module(
     }
     active.push(module.name.clone());
     let mut context = host.module_child().with_fuel(*fuel);
-    for (bindings, specifier) in &module.imports {
-        let source = loader.load(specifier, &module.name)?;
-        let dependency = host.compile_module(source.name(), source.source())?;
-        let exports = execute_module(host, &dependency, loader, cache, active, fuel, stats)?;
+    for ((bindings, _), dependency_name) in module.imports.iter().zip(&prepared_module.dependencies)
+    {
+        let dependency = &prepared
+            .get(dependency_name)
+            .expect("prepared dependency exists")
+            .module;
+        let exports =
+            execute_prepared_module(host, dependency_name, prepared, cache, active, fuel, stats)?;
         for (public, local) in bindings {
             let Some(value) = exports.get(public) else {
                 return Err(Error::runtime(format!(
@@ -612,6 +838,26 @@ fn execute_module(
             context.set_global(local, value.clone());
         }
     }
+    let limits = host.resource_limits();
+    let remaining_objects = if limits.max_transient_managed_objects() == u64::MAX {
+        u64::MAX
+    } else {
+        limits
+            .max_transient_managed_objects()
+            .saturating_sub(stats.managed_objects_allocated)
+    };
+    let remaining_bytes = if limits.max_transient_managed_bytes() == u64::MAX {
+        u64::MAX
+    } else {
+        limits
+            .max_transient_managed_bytes()
+            .saturating_sub(stats.managed_bytes_allocated)
+    };
+    context.set_resource_limits(
+        limits
+            .with_max_transient_managed_objects(remaining_objects)
+            .with_max_transient_managed_bytes(remaining_bytes),
+    );
     let result = context.run_program(&module.program);
     let execution = context.last_execution();
     *fuel = execution.fuel_remaining;
@@ -625,8 +871,12 @@ fn execute_module(
     stats.exception_ops += execution.exception_ops;
     stats.value_allocations += execution.value_allocations;
     stats.environment_allocations += execution.environment_allocations;
-    stats.managed_objects_allocated += execution.managed_objects_allocated;
-    stats.managed_bytes_allocated += execution.managed_bytes_allocated;
+    stats.managed_objects_allocated = stats
+        .managed_objects_allocated
+        .saturating_add(execution.managed_objects_allocated);
+    stats.managed_bytes_allocated = stats
+        .managed_bytes_allocated
+        .saturating_add(execution.managed_bytes_allocated);
     result?;
     let mut exports = BTreeMap::new();
     for (public, local) in &module.exports {

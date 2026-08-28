@@ -8,6 +8,8 @@
 
 数列与 Unicode 字符负索引，-一取其末。
 
+`CompileLimits` 别限原 source 之 bytes、递归 bytecode 之 instructions、模块之数与图中 source 总量；模块未尽预验，则一文不行，`qcoffee` 亦有相应 `--max-*` 之选。
+
 此机先析其文，编为字节码，验而后行。非 JavaScript 也，故无公开原型之链、全局或游离之 this、eval 与内嵌之文；今已有缩进 class、构造、受限接收者、new、私有 extends 之链、静析之 super，及可逸出而不泄接收者之 =>。
 
     class BoundCounter
@@ -91,6 +93,8 @@
 `Runtime::context_builder` 所成诸 Context 各守其全局、导出、燃料、止令、计数与留存之忆，惟共用有界且已验之 Program/Module 编译藏。
 
 特置 contextual native 得以 `NativeCallContext` 察止令、扣燃料、记托管分配，并取有型而脚本不见之 `HostState`，无暗授之权。
+
+`HostCapabilities` 與 `CapabilityKey<T>` 明列 clock、random、logging、file、network 之柄；模組承其柄，異 Context 默不相通，宿主仍須明察止令、扣燃料、記分配。
 
 `cargo run --example embed` 可验最小 Rust 宿主，设全局、立原生回调而行 QuickCoffee。
 

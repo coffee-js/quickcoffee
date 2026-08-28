@@ -1,7 +1,7 @@
 use crate::{
-    ResourceLimit, ResourceLimits,
+    CompileLimits, ResourceLimit, ResourceLimits,
     bytecode::{Chunk, Constant, Instruction, Pattern},
-    compile, json,
+    json,
     lowering::{self, ChunkSourceMap, CompiledSourceMap},
     module::Module,
     parser,
@@ -14,6 +14,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
+    marker::PhantomData,
     rc::Rc,
     sync::{
         Arc,
@@ -27,6 +28,104 @@ const MAX_DECIMAL_BITS: u64 = 1_000_000;
 const MAX_DECIMAL_SCALE: u32 = 100_000;
 const MAX_REUSABLE_CALL_ARGUMENTS: usize = 16;
 const MAX_REUSABLE_FRAME_STACK: usize = 64;
+
+// Keep the execution-facing policy at its pre-transient-budget width. ResourceLimits is a
+// public Copy value, but growing it changed the offset of every later Vm hot field and the ABI of
+// helper calls. Transient limits live in dedicated tail fields on Vm instead.
+#[derive(Clone, Copy)]
+struct VmResourceLimits {
+    max_json_input_bytes: usize,
+    max_json_output_bytes: usize,
+    max_json_string_bytes: usize,
+    max_json_container_items: usize,
+    max_json_values: usize,
+    max_json_nesting_depth: usize,
+    max_integer_bits: u64,
+    max_decimal_coefficient_bits: u64,
+    max_decimal_scale: u32,
+    max_collection_operation_items: usize,
+    max_text_operation_bytes: usize,
+    max_string_bytes: usize,
+    max_array_items: usize,
+    max_map_entries: usize,
+    max_retained_managed_objects: u64,
+    max_retained_managed_bytes: u64,
+}
+
+impl From<ResourceLimits> for VmResourceLimits {
+    fn from(limits: ResourceLimits) -> Self {
+        Self {
+            max_json_input_bytes: limits.max_json_input_bytes(),
+            max_json_output_bytes: limits.max_json_output_bytes(),
+            max_json_string_bytes: limits.max_json_string_bytes(),
+            max_json_container_items: limits.max_json_container_items(),
+            max_json_values: limits.max_json_values(),
+            max_json_nesting_depth: limits.max_json_nesting_depth(),
+            max_integer_bits: limits.max_integer_bits(),
+            max_decimal_coefficient_bits: limits.max_decimal_coefficient_bits(),
+            max_decimal_scale: limits.max_decimal_scale(),
+            max_collection_operation_items: limits.max_collection_operation_items(),
+            max_text_operation_bytes: limits.max_text_operation_bytes(),
+            max_string_bytes: limits.max_string_bytes(),
+            max_array_items: limits.max_array_items(),
+            max_map_entries: limits.max_map_entries(),
+            max_retained_managed_objects: limits.max_retained_managed_objects(),
+            max_retained_managed_bytes: limits.max_retained_managed_bytes(),
+        }
+    }
+}
+
+impl VmResourceLimits {
+    fn max_integer_bits(&self) -> u64 {
+        self.max_integer_bits
+    }
+    fn max_decimal_coefficient_bits(&self) -> u64 {
+        self.max_decimal_coefficient_bits
+    }
+    fn max_decimal_scale(&self) -> u32 {
+        self.max_decimal_scale
+    }
+    fn max_collection_operation_items(&self) -> usize {
+        self.max_collection_operation_items
+    }
+    fn max_text_operation_bytes(&self) -> usize {
+        self.max_text_operation_bytes
+    }
+    fn max_string_bytes(&self) -> usize {
+        self.max_string_bytes
+    }
+    fn max_array_items(&self) -> usize {
+        self.max_array_items
+    }
+    fn max_map_entries(&self) -> usize {
+        self.max_map_entries
+    }
+    fn public(self) -> ResourceLimits {
+        ResourceLimits::default()
+            .with_max_json_input_bytes(self.max_json_input_bytes)
+            .with_max_json_output_bytes(self.max_json_output_bytes)
+            .with_max_json_string_bytes(self.max_json_string_bytes)
+            .with_max_json_container_items(self.max_json_container_items)
+            .with_max_json_values(self.max_json_values)
+            .with_max_json_nesting_depth(self.max_json_nesting_depth)
+            .with_max_integer_bits(self.max_integer_bits)
+            .with_max_decimal_coefficient_bits(self.max_decimal_coefficient_bits)
+            .with_max_decimal_scale(self.max_decimal_scale)
+            .with_max_collection_operation_items(self.max_collection_operation_items)
+            .with_max_text_operation_bytes(self.max_text_operation_bytes)
+            .with_max_string_bytes(self.max_string_bytes)
+            .with_max_array_items(self.max_array_items)
+            .with_max_map_entries(self.max_map_entries)
+            .with_max_retained_managed_objects(self.max_retained_managed_objects)
+            .with_max_retained_managed_bytes(self.max_retained_managed_bytes)
+    }
+
+    fn public_with_transient(self, max_objects: u64, max_bytes: u64) -> ResourceLimits {
+        self.public()
+            .with_max_transient_managed_objects(max_objects)
+            .with_max_transient_managed_bytes(max_bytes)
+    }
+}
 
 /// Stable type tag for values crossing the embedding boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,7 +306,7 @@ impl Decimal {
             }
             None => return Err(Error::runtime("string is not a valid bounded decimal")),
         };
-        check_decimal_resource(&value, limits)?;
+        check_decimal_resource(&value, limits.into())?;
         Ok(value)
     }
     pub(crate) fn from_bigint(mut coefficient: BigInt, mut scale: u32) -> Result<Self, Error> {
@@ -307,6 +406,7 @@ pub(crate) fn decimal_text_resource_preflight(
     source: &str,
     limits: ResourceLimits,
 ) -> Result<(), Error> {
+    let limits = VmResourceLimits::from(limits);
     if !decimal_source_is_syntactically_valid(source) {
         return Ok(());
     }
@@ -413,6 +513,7 @@ pub(crate) fn integer_digits_resource_preflight(
     digits: &str,
     limits: ResourceLimits,
 ) -> Result<(), Error> {
+    let limits = VmResourceLimits::from(limits);
     let significant_digits = digits.trim_start_matches('0').len();
     let minimum_bits = if significant_digits == 0 {
         0
@@ -433,19 +534,19 @@ pub(crate) fn integer_digits_resource_preflight(
     }
 }
 
-fn integer_bit_limit(limits: ResourceLimits) -> u64 {
+fn integer_bit_limit(limits: VmResourceLimits) -> u64 {
     limits.max_integer_bits().min(MAX_INTEGER_BITS)
 }
 
-fn decimal_coefficient_bit_limit(limits: ResourceLimits) -> u64 {
+fn decimal_coefficient_bit_limit(limits: VmResourceLimits) -> u64 {
     limits.max_decimal_coefficient_bits().min(MAX_DECIMAL_BITS)
 }
 
-fn decimal_scale_limit(limits: ResourceLimits) -> u32 {
+fn decimal_scale_limit(limits: VmResourceLimits) -> u32 {
     limits.max_decimal_scale().min(MAX_DECIMAL_SCALE)
 }
 
-fn check_integer_resource(value: &BigInt, limits: ResourceLimits) -> Result<(), Error> {
+fn check_integer_resource(value: &BigInt, limits: VmResourceLimits) -> Result<(), Error> {
     let limit = integer_bit_limit(limits);
     if limit == MAX_INTEGER_BITS {
         return Ok(());
@@ -460,7 +561,7 @@ fn check_integer_resource(value: &BigInt, limits: ResourceLimits) -> Result<(), 
     }
 }
 
-fn check_decimal_resource(value: &Decimal, limits: ResourceLimits) -> Result<(), Error> {
+fn check_decimal_resource(value: &Decimal, limits: VmResourceLimits) -> Result<(), Error> {
     let scale_limit = decimal_scale_limit(limits);
     if scale_limit < MAX_DECIMAL_SCALE && value.scale > scale_limit {
         return Err(Error::resource(
@@ -480,7 +581,7 @@ fn check_decimal_resource(value: &Decimal, limits: ResourceLimits) -> Result<(),
 }
 
 #[inline]
-fn resource_integer(value: BigInt, limits: ResourceLimits) -> Result<Integer, Error> {
+fn resource_integer(value: BigInt, limits: VmResourceLimits) -> Result<Integer, Error> {
     let limit = integer_bit_limit(limits);
     if value.bits() > limit {
         Err(Error::resource(
@@ -496,7 +597,7 @@ fn resource_integer(value: BigInt, limits: ResourceLimits) -> Result<Integer, Er
 fn resource_decimal(
     coefficient: BigInt,
     scale: u32,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     let value = Decimal::from_bigint(coefficient, scale).map_err(|_| {
         if scale > MAX_DECIMAL_SCALE {
@@ -540,7 +641,7 @@ fn decimal_power_of_ten(exponent: u32) -> BigInt {
 fn check_decimal_power_growth(
     coefficient: &BigInt,
     exponent: u32,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<(), Error> {
     let limit = decimal_coefficient_bit_limit(limits);
     if limit == MAX_DECIMAL_BITS || coefficient.is_zero() {
@@ -561,7 +662,11 @@ fn check_decimal_power_growth(
 }
 
 #[inline]
-fn decimal_add(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_add(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
     if decimal_limits_active(limits) {
         check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -576,7 +681,11 @@ fn decimal_add(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
 }
 
 #[inline]
-fn decimal_sub(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_sub(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left.scale.max(right.scale);
     if decimal_limits_active(limits) {
         check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -590,7 +699,11 @@ fn decimal_sub(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
     )
 }
 
-fn decimal_mul(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_mul(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     let scale = left
         .scale
         .checked_add(right.scale)
@@ -639,7 +752,7 @@ fn bounded_factor_exponent(value: &BigInt, factor: u8, limit: u32) -> u32 {
 fn decimal_exact_div(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal division by zero"));
@@ -682,7 +795,7 @@ fn decimal_exact_div(
 fn aligned_decimal_coefficients(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<(BigInt, BigInt, u32), Error> {
     let scale = left.scale.max(right.scale);
     check_decimal_power_growth(left.inner(), scale - left.scale, limits)?;
@@ -702,7 +815,7 @@ fn aligned_decimal_coefficients(
 fn decimal_cmp_resource(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<std::cmp::Ordering, Error> {
     let (left, right, _) = aligned_decimal_coefficients(left, right, limits)?;
     Ok(left.cmp(&right))
@@ -711,7 +824,7 @@ fn decimal_cmp_resource(
 fn decimal_floor_div(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal floor division by zero"));
@@ -720,7 +833,11 @@ fn decimal_floor_div(
     resource_decimal(integer_floor_div(&left, &right)?, 0, limits)
 }
 
-fn decimal_rem(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_rem(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal remainder by zero"));
     }
@@ -731,7 +848,7 @@ fn decimal_rem(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Resul
 fn decimal_modulo(
     left: &Decimal,
     right: &Decimal,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     if right.inner().is_zero() {
         return Err(Error::runtime("decimal modulo by zero"));
@@ -740,7 +857,11 @@ fn decimal_modulo(
     resource_decimal(integer_modulo(&left, &right)?, scale, limits)
 }
 
-fn decimal_pow(left: &Decimal, right: &Decimal, limits: ResourceLimits) -> Result<Decimal, Error> {
+fn decimal_pow(
+    left: &Decimal,
+    right: &Decimal,
+    limits: VmResourceLimits,
+) -> Result<Decimal, Error> {
     if right.scale != 0 {
         return Err(Error::runtime(
             "decimal exponent must be a non-negative whole Decimal",
@@ -803,7 +924,7 @@ impl DecimalRounding {
     }
 }
 
-fn decimal_scale_argument(value: &Value, limits: ResourceLimits) -> Result<u32, Error> {
+fn decimal_scale_argument(value: &Value, limits: VmResourceLimits) -> Result<u32, Error> {
     let scale = match value {
         Value::Number(value)
             if value.is_finite()
@@ -880,7 +1001,7 @@ fn decimal_div_rounded(
     right: &Decimal,
     scale: u32,
     rounding: DecimalRounding,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     let numerator_scale = right
         .scale
@@ -907,7 +1028,7 @@ fn decimal_round(
     value: &Decimal,
     scale: u32,
     rounding: DecimalRounding,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Decimal, Error> {
     decimal_div_rounded(value, &Decimal::from(1_i64), scale, rounding, limits)
 }
@@ -1404,23 +1525,23 @@ fn value_needs_resource_check(value: &Value) -> bool {
 }
 
 #[inline(never)]
-fn check_member_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
+fn check_member_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
     if value_needs_resource_check(value) {
         check_value_resources(value, limits)?;
     }
     Ok(())
 }
 
-fn decimal_limits_active(limits: ResourceLimits) -> bool {
+fn decimal_limits_active(limits: VmResourceLimits) -> bool {
     decimal_coefficient_bit_limit(limits) < MAX_DECIMAL_BITS
         || decimal_scale_limit(limits) < MAX_DECIMAL_SCALE
 }
 
-fn check_string_resource(value: &str, limits: ResourceLimits) -> Result<(), Error> {
+fn check_string_resource(value: &str, limits: VmResourceLimits) -> Result<(), Error> {
     check_string_len_resource(value.len(), limits)
 }
 
-fn check_string_len_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_string_len_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_string_bytes() {
         return Err(Error::resource(
             ResourceLimit::StringBytes,
@@ -1430,7 +1551,7 @@ fn check_string_len_resource(len: usize, limits: ResourceLimits) -> Result<(), E
     Ok(())
 }
 
-fn check_array_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_array_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_array_items() {
         return Err(Error::resource(
             ResourceLimit::ArrayItems,
@@ -1440,7 +1561,7 @@ fn check_array_resource(len: usize, limits: ResourceLimits) -> Result<(), Error>
     Ok(())
 }
 
-fn check_map_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
+fn check_map_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error> {
     if len > limits.max_map_entries() {
         return Err(Error::resource(
             ResourceLimit::MapEntries,
@@ -1450,33 +1571,48 @@ fn check_map_resource(len: usize, limits: ResourceLimits) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Error> {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
+fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
+    // Process the root directly so ordinary immutable maps/arrays whose children
+    // are scalar do not allocate a traversal stack on every guarded load. Keep a
+    // stack for nested resource-bearing values so hostile host input remains
+    // iterative rather than consuming the Rust call stack.
+    let mut pending = Vec::new();
+    let mut value = value;
+    loop {
         match value {
             Value::Integer(value) => check_integer_resource(value.inner(), limits)?,
             Value::Decimal(value) => check_decimal_resource(value, limits)?,
             Value::String(value) => check_string_resource(value, limits)?,
             Value::Array(values) => {
                 check_array_resource(values.len(), limits)?;
-                pending.extend(values.iter());
+                pending.extend(
+                    values
+                        .iter()
+                        .filter(|value| value_needs_resource_check(value)),
+                );
             }
             Value::Map(values) => {
                 check_map_resource(values.len(), limits)?;
                 for (key, value) in values.iter() {
                     check_string_resource(key, limits)?;
-                    pending.push(value);
+                    if value_needs_resource_check(value) {
+                        pending.push(value);
+                    }
                 }
             }
             Value::Error(error) => {
                 check_string_resource(&error.code, limits)?;
                 check_string_resource(&error.message, limits)?;
-                pending.push(&error.data);
+                if value_needs_resource_check(&error.data) {
+                    pending.push(&error.data);
+                }
                 let mut cause = error.cause.as_deref();
                 while let Some(error) = cause {
                     check_string_resource(&error.code, limits)?;
                     check_string_resource(&error.message, limits)?;
-                    pending.push(&error.data);
+                    if value_needs_resource_check(&error.data) {
+                        pending.push(&error.data);
+                    }
                     cause = error.cause.as_deref();
                 }
             }
@@ -1487,6 +1623,10 @@ fn check_value_resources(value: &Value, limits: ResourceLimits) -> Result<(), Er
             | Value::Instance(_)
             | Value::Function(_) => {}
         }
+        let Some(next) = pending.pop() else {
+            break;
+        };
+        value = next;
     }
     Ok(())
 }
@@ -1555,9 +1695,52 @@ pub struct Error {
     kind: ErrorKind,
     message: String,
     labels: Vec<DiagnosticLabel>,
-    resource_limit: Option<ResourceLimit>,
+    resource_limit: ResourceLimitSlot,
     script_error: Option<Rc<ScriptError>>,
     verification_site: Option<VerificationSite>,
+}
+#[derive(Clone, Copy)]
+struct ResourceLimitSlot(u8);
+impl ResourceLimitSlot {
+    // This was the niche value used by `Option<ResourceLimit>` before compile
+    // limits were added. Keep it stable because Error construction occurs in
+    // the VM dispatch loop's cold paths and affects their surrounding layout.
+    const NONE: Self = Self(19);
+
+    fn some(limit: ResourceLimit) -> Self {
+        Self(limit as u8)
+    }
+
+    fn get(self) -> Option<ResourceLimit> {
+        match self.0 {
+            0 => Some(ResourceLimit::Fuel),
+            1 => Some(ResourceLimit::CallDepth),
+            2 => Some(ResourceLimit::Cancellation),
+            3 => Some(ResourceLimit::JsonInputBytes),
+            4 => Some(ResourceLimit::JsonOutputBytes),
+            5 => Some(ResourceLimit::JsonStringBytes),
+            6 => Some(ResourceLimit::JsonContainerItems),
+            7 => Some(ResourceLimit::JsonValueCount),
+            8 => Some(ResourceLimit::JsonNestingDepth),
+            9 => Some(ResourceLimit::IntegerBits),
+            10 => Some(ResourceLimit::DecimalCoefficientBits),
+            11 => Some(ResourceLimit::DecimalScale),
+            12 => Some(ResourceLimit::CollectionOperationItems),
+            13 => Some(ResourceLimit::TextOperationBytes),
+            14 => Some(ResourceLimit::StringBytes),
+            15 => Some(ResourceLimit::ArrayItems),
+            16 => Some(ResourceLimit::MapEntries),
+            17 => Some(ResourceLimit::RetainedManagedObjects),
+            18 => Some(ResourceLimit::RetainedManagedBytes),
+            20 => Some(ResourceLimit::SourceBytes),
+            21 => Some(ResourceLimit::BytecodeInstructions),
+            22 => Some(ResourceLimit::ModuleGraphModules),
+            23 => Some(ResourceLimit::ModuleGraphSourceBytes),
+            24 => Some(ResourceLimit::TransientManagedObjects),
+            25 => Some(ResourceLimit::TransientManagedBytes),
+            _ => None,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy)]
 struct VerificationSite {
@@ -1570,7 +1753,7 @@ impl fmt::Debug for Error {
             .field("kind", &self.kind)
             .field("message", &self.message)
             .field("labels", &self.labels)
-            .field("resource_limit", &self.resource_limit)
+            .field("resource_limit", &self.resource_limit.get())
             .field("script_error", &self.script_error)
             .finish()
     }
@@ -1581,7 +1764,7 @@ impl Error {
             kind: ErrorKind::Parse,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1591,7 +1774,7 @@ impl Error {
             kind: ErrorKind::Verify,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1602,7 +1785,7 @@ impl Error {
             kind: ErrorKind::Runtime,
             message: m.into(),
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: None,
             verification_site: None,
         }
@@ -1628,17 +1811,17 @@ impl Error {
             kind: ErrorKind::Runtime,
             message,
             labels: Vec::new(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: Some(script_error),
             verification_site: None,
         }
     }
-    fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
+    pub(crate) fn resource(limit: ResourceLimit, message: impl Into<String>) -> Self {
         Self {
             kind: ErrorKind::Resource,
             message: message.into(),
             labels: Vec::new(),
-            resource_limit: Some(limit),
+            resource_limit: ResourceLimitSlot::some(limit),
             script_error: None,
             verification_site: None,
         }
@@ -1667,7 +1850,7 @@ impl Error {
     }
     /// Returns the crossed resource boundary for a resource error.
     pub fn resource_limit(&self) -> Option<ResourceLimit> {
-        self.resource_limit
+        self.resource_limit.get()
     }
     /// Returns the structured script/domain error when this Runtime error carries one.
     pub fn script_error(&self) -> Option<&ScriptError> {
@@ -1678,7 +1861,7 @@ impl Error {
             kind: ErrorKind::Runtime,
             message: script_error.message.to_string(),
             labels: script_error.trusted_labels.clone(),
-            resource_limit: None,
+            resource_limit: ResourceLimitSlot::NONE,
             script_error: Some(script_error),
             verification_site: None,
         }
@@ -1841,11 +2024,186 @@ impl HostState {
     }
 }
 
+/// Auditable categories for explicitly installed host capabilities.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum CapabilityKind {
+    /// A host-selected clock or deterministic time source.
+    Clock,
+    /// A host-selected random or deterministic entropy source.
+    Random,
+    /// A host-selected logging or audit sink.
+    Logging,
+    /// A host-selected filesystem authority.
+    File,
+    /// A host-selected network authority.
+    Network,
+}
+
+/// A typed, script-invisible key for one host capability allowlist slot.
+///
+/// The category and static name identify the slot. `T` is checked when a host
+/// callback retrieves the opaque handle; constructing the same slot with a
+/// different `T` therefore returns `None` rather than exposing the value.
+pub struct CapabilityKey<T: 'static> {
+    kind: CapabilityKind,
+    name: &'static str,
+    marker: PhantomData<fn() -> T>,
+}
+impl<T: 'static> CapabilityKey<T> {
+    /// Defines a typed capability slot without installing any authority.
+    pub const fn new(kind: CapabilityKind, name: &'static str) -> Self {
+        Self {
+            kind,
+            name,
+            marker: PhantomData,
+        }
+    }
+
+    /// Returns the auditable capability category.
+    pub const fn kind(self) -> CapabilityKind {
+        self.kind
+    }
+
+    /// Returns the host-defined static slot name.
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    fn id(self) -> CapabilityId {
+        CapabilityId {
+            kind: self.kind,
+            name: self.name,
+        }
+    }
+}
+impl<T: 'static> Clone for CapabilityKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: 'static> Copy for CapabilityKey<T> {}
+impl<T: 'static> fmt::Debug for CapabilityKey<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityKey")
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CapabilityId {
+    kind: CapabilityKind,
+    name: &'static str,
+}
+
+/// A Context-owned allowlist of typed, script-invisible host capabilities.
+///
+/// The table owns no ambient authority by default. Values stay outside script
+/// globals, serialization, Runtime compilation caches, and managed-memory
+/// census. Contextual callbacks explicitly account capability work through
+/// [`NativeCallContext`] fuel, cancellation, and allocation APIs.
+#[derive(Clone, Default)]
+pub struct HostCapabilities {
+    entries: BTreeMap<CapabilityId, HostState>,
+}
+impl HostCapabilities {
+    /// Creates an empty capability allowlist.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Installs or replaces one typed capability slot.
+    pub fn insert<T: 'static>(&mut self, key: CapabilityKey<T>, capability: T) {
+        self.entries.insert(key.id(), HostState::new(capability));
+    }
+
+    /// Clones the opaque capability handle when the slot and type match.
+    pub fn get<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.entries.get(&key.id())?.downcast()
+    }
+
+    /// Reports whether a slot exists with the requested concrete type.
+    pub fn contains<T: 'static>(&self, key: CapabilityKey<T>) -> bool {
+        self.entries
+            .get(&key.id())
+            .is_some_and(|capability| capability.is::<T>())
+    }
+
+    /// Removes a slot only when its stored concrete type matches `T`.
+    pub fn remove<T: 'static>(&mut self, key: CapabilityKey<T>) -> bool {
+        let id = key.id();
+        if !self
+            .entries
+            .get(&id)
+            .is_some_and(|capability| capability.is::<T>())
+        {
+            return false;
+        }
+        self.entries.remove(&id);
+        true
+    }
+
+    /// Removes every installed capability.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Returns the number of allowlisted slots.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Reports whether the allowlist contains no slots.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterates installed category/name descriptors in deterministic order.
+    ///
+    /// Concrete host types and values remain opaque.
+    pub fn descriptors(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (CapabilityKind, &'static str)> + '_ {
+        self.entries.keys().map(|id| (id.kind, id.name))
+    }
+}
+
+#[derive(Clone, Default)]
+struct HostBindings {
+    state: Option<HostState>,
+    capabilities: HostCapabilities,
+}
+impl HostBindings {
+    fn is_empty(&self) -> bool {
+        self.state.is_none() && self.capabilities.is_empty()
+    }
+}
+
+trait HostBindingsView {
+    fn state(&self) -> Option<&HostState>;
+    fn capabilities(&self) -> &HostCapabilities;
+}
+impl HostBindingsView for HostBindings {
+    fn state(&self) -> Option<&HostState> {
+        self.state.as_ref()
+    }
+    fn capabilities(&self) -> &HostCapabilities {
+        &self.capabilities
+    }
+}
+// Keep the execution-facing handle pointer-wide like the legacy `HostState`
+// trait object. A thin handle measurably perturbs the adjacent VM hot layout;
+// Context storage remains a thin optional `Rc<HostBindings>` when configured.
+type HostBindingsViewHandle = Rc<dyn HostBindingsView>;
+
 /// Per-invocation controls available to an opt-in contextual native callback.
 pub struct NativeCallContext {
     cancellation: Option<CancellationToken>,
     resource_limits: ResourceLimits,
-    host_state: Option<HostState>,
+    host_bindings: Option<HostBindingsViewHandle>,
     fuel_remaining: u64,
     managed_objects_allocated: u64,
     managed_bytes_allocated: u64,
@@ -1855,7 +2213,6 @@ impl NativeCallContext {
     pub fn resource_limits(&self) -> ResourceLimits {
         self.resource_limits
     }
-
     /// Returns fuel left after charges already made by this callback.
     pub fn fuel_remaining(&self) -> u64 {
         self.fuel_remaining
@@ -1899,15 +2256,21 @@ impl NativeCallContext {
 
     /// Clones the Context-owned state handle when its concrete type matches `T`.
     pub fn host_state<T: 'static>(&self) -> Option<Rc<T>> {
-        self.host_state.as_ref()?.downcast()
+        self.host_bindings.as_ref()?.state()?.downcast()
+    }
+
+    /// Clones an allowlisted opaque capability when its slot and type match.
+    pub fn capability<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.host_bindings.as_ref()?.capabilities().get(key)
     }
 
     /// Records logical managed allocation performed by host work.
     ///
     /// These counters saturating-add to the current [`ExecutionStats`] even if
     /// the callback returns an error. They do not change legacy
-    /// [`ExecutionStats::value_allocations`] and are telemetry rather than a
-    /// transient-memory hard limit.
+    /// [`ExecutionStats::value_allocations`]. After the callback returns, the VM
+    /// applies the current per-run transient managed object/byte limits to the
+    /// reported totals; unreported host allocation remains outside that policy.
     pub fn record_managed_allocation(&mut self, objects: u64, bytes: u64) {
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(objects);
         self.managed_bytes_allocated = self.managed_bytes_allocated.saturating_add(bytes);
@@ -1948,7 +2311,7 @@ pub struct Instance {
     class: Rc<Class>,
     fields: RefCell<BTreeMap<String, Value>>,
 }
-/// Opaque callable values are constructed by QuickCoffee or `Context::add_native`.
+/// Opaque callable values are constructed by QuickCoffee or Context native registration APIs.
 pub struct Function {
     inner: FunctionKind,
 }
@@ -1968,11 +2331,8 @@ enum FunctionKind {
         function: NativeFunction,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
-    ContextualNative {
-        function: ContextualNativeFunction,
-    },
     ResourceBuiltin {
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
         allocation_profile: Option<fn(&[Value], &Value) -> ManagedAllocation>,
     },
     BoundMethod {
@@ -1989,6 +2349,11 @@ enum FunctionKind {
     ReceiverBound {
         function: Rc<Function>,
         captured_receiver: Option<Value>,
+    },
+    // Append opt-in embedding variants so existing callable discriminants and
+    // their ordinary dispatch paths remain stable.
+    ContextualNative {
+        function: ContextualNativeFunction,
     },
 }
 #[derive(Clone)]
@@ -2176,7 +2541,9 @@ fn lookup(e: &Env, n: &str) -> Option<Value> {
 
 /// A reusable compiler that does not hold execution state.
 #[derive(Clone, Default)]
-pub struct Engine;
+pub struct Engine {
+    compile_limits: CompileLimits,
+}
 
 const DEFAULT_PROGRAM_CACHE_ENTRIES: usize = 64;
 const DEFAULT_MODULE_CACHE_ENTRIES: usize = 64;
@@ -2266,10 +2633,11 @@ struct RuntimeInner {
 #[derive(Clone)]
 pub struct Runtime(Rc<RuntimeInner>);
 
-/// Configures a [`Runtime`] and its bounded compilation caches.
+/// Configures a [`Runtime`], its compile limits, and bounded compilation caches.
 pub struct RuntimeBuilder {
     program_cache_entries: usize,
     module_cache_entries: usize,
+    compile_limits: CompileLimits,
 }
 
 /// A read-only cumulative snapshot of one Runtime's compilation caches.
@@ -2305,6 +2673,106 @@ struct ProgramInner {
     debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
 }
+
+#[inline(never)]
+fn collect_pattern_chunks<'a>(pattern: &'a Pattern, chunks: &mut Vec<&'a Chunk>) {
+    let mut patterns = vec![pattern];
+    while let Some(pattern) = patterns.pop() {
+        match pattern {
+            Pattern::Default { pattern, default } => {
+                patterns.push(pattern);
+                chunks.push(default.as_ref());
+            }
+            Pattern::Array(items) => patterns.extend(items),
+            Pattern::Map(fields) | Pattern::MapRest { fields, .. } => {
+                patterns.extend(fields.iter().map(|(_, pattern)| pattern));
+            }
+            Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => {}
+        }
+    }
+}
+
+// Keep this raw-bytecode validation traversal after the short VM arithmetic
+// helpers under the single-codegen-unit release profile. Their hot loops are
+// measurably sensitive to unrelated code placement.
+#[inline(never)]
+pub(crate) fn count_bcs(chunk: &Chunk) -> usize {
+    let mut count = 0_usize;
+    let mut chunks = vec![chunk];
+    let mut visited = BTreeSet::new();
+    while let Some(chunk) = chunks.pop() {
+        if !visited.insert(chunk as *const Chunk as usize) {
+            continue;
+        }
+        count = count.saturating_add(chunk.code.len());
+        for constant in &chunk.constants {
+            if let Constant::Function { params, chunk, .. } = constant {
+                chunks.push(chunk.as_ref());
+                for pattern in params {
+                    collect_pattern_chunks(pattern, &mut chunks);
+                }
+            }
+        }
+        for instruction in &chunk.code {
+            match instruction {
+                Instruction::Destructure(pattern) => collect_pattern_chunks(pattern, &mut chunks),
+                Instruction::IterNext { patterns, .. } => {
+                    for pattern in patterns {
+                        collect_pattern_chunks(pattern, &mut chunks);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    count
+}
+
+// Compiler-produced chunks form a tree, so they do not need the identity set
+// required for arbitrary public `Chunk` graphs.
+#[inline(never)]
+pub(crate) fn count_new(chunk: &Chunk) -> usize {
+    fn count_pattern(pattern: &Pattern) -> usize {
+        match pattern {
+            Pattern::Default { pattern, default } => {
+                count_pattern(pattern).saturating_add(count_new(default))
+            }
+            Pattern::Array(items) => items.iter().fold(0_usize, |count, pattern| {
+                count.saturating_add(count_pattern(pattern))
+            }),
+            Pattern::Map(fields) | Pattern::MapRest { fields, .. } => {
+                fields.iter().fold(0_usize, |count, (_, pattern)| {
+                    count.saturating_add(count_pattern(pattern))
+                })
+            }
+            Pattern::Ignore | Pattern::Bind(_) | Pattern::Rest(_) => 0,
+        }
+    }
+
+    let constants = chunk.constants.iter().fold(0_usize, |count, constant| {
+        let Constant::Function { params, chunk, .. } = constant else {
+            return count;
+        };
+        params
+            .iter()
+            .fold(count.saturating_add(count_new(chunk)), |count, pattern| {
+                count.saturating_add(count_pattern(pattern))
+            })
+    });
+    chunk.code.iter().fold(
+        chunk.code.len().saturating_add(constants),
+        |count, instruction| match instruction {
+            Instruction::Destructure(pattern) => count.saturating_add(count_pattern(pattern)),
+            Instruction::IterNext { patterns, .. } => {
+                patterns.iter().fold(count, |count, pattern| {
+                    count.saturating_add(count_pattern(pattern))
+                })
+            }
+            _ => count,
+        },
+    )
+}
+
 #[derive(Debug)]
 struct ProgramExecutionPlan {
     chunks: BTreeMap<usize, Rc<ChunkBindingSlots>>,
@@ -2520,19 +2988,26 @@ impl ProgramExecutionPlan {
 }
 #[derive(Debug)]
 struct ProgramDebugInfo {
-    source_name: Option<Rc<str>>,
+    source_name: Option<Rc<String>>,
     instruction_spans: BTreeMap<usize, ChunkSourceMap>,
+    instruction_count: usize,
 }
 impl ProgramDebugInfo {
-    fn new(chunk: &Rc<Chunk>, source_map: CompiledSourceMap, source_name: Option<&str>) -> Self {
+    fn new(
+        chunk: &Rc<Chunk>,
+        source_map: CompiledSourceMap,
+        source_name: Option<&str>,
+        instruction_count: usize,
+    ) -> Self {
         let mut instruction_spans = BTreeMap::new();
         instruction_spans.insert(Rc::as_ptr(chunk) as usize, source_map.top);
         for (nested, source_map) in source_map.nested {
             instruction_spans.insert(Rc::as_ptr(&nested) as usize, source_map);
         }
         Self {
-            source_name: source_name.map(Rc::from),
+            source_name: source_name.map(|source_name| Rc::new(source_name.to_owned())),
             instruction_spans,
+            instruction_count,
         }
     }
     fn span(&self, chunk: &Rc<Chunk>, pc: usize) -> Option<SourceSpan> {
@@ -2543,7 +3018,10 @@ impl ProgramDebugInfo {
         }
         let span = *source_map.spans.get(span_id as usize - 1)?;
         let mut span = span.into_source_span();
-        span.source_name = self.source_name.as_deref().map(str::to_owned);
+        span.source_name = self
+            .source_name
+            .as_deref()
+            .map(|source_name| source_name.to_owned());
         Some(span)
     }
 }
@@ -2565,9 +3043,15 @@ impl Program {
         chunk: Chunk,
         source_map: CompiledSourceMap,
         source_name: Option<&str>,
+        instruction_count: usize,
     ) -> Self {
         let chunk = Rc::new(chunk);
-        let debug_info = Rc::new(ProgramDebugInfo::new(&chunk, source_map, source_name));
+        let debug_info = Rc::new(ProgramDebugInfo::new(
+            &chunk,
+            source_map,
+            source_name,
+            instruction_count,
+        ));
         let execution_plan = Rc::new(ProgramExecutionPlan::new(&chunk));
         Self(Rc::new(ProgramInner {
             chunk,
@@ -2601,27 +3085,116 @@ impl Program {
     pub fn fingerprint(&self) -> u64 {
         self.0.chunk.fingerprint()
     }
-    fn ensure_verified(&self) -> Result<(), Error> {
-        if self.0.verified.get() {
-            Ok(())
-        } else {
-            self.verify()
+    /// Returns recursively reachable bytecode instructions in this artifact.
+    ///
+    /// Shared nested chunks are counted once.
+    pub fn instruction_count(&self) -> usize {
+        self.0.debug_info.as_ref().map_or_else(
+            || count_bcs(&self.0.chunk),
+            |debug_info| debug_info.instruction_count,
+        )
+    }
+    #[cold]
+    fn verify_for_bytecode_limit(&self, limit: usize) -> Result<(), Error> {
+        let instruction_count = self.instruction_count();
+        if instruction_count > limit {
+            return Err(Error::resource(
+                ResourceLimit::BytecodeInstructions,
+                format!("bytecode exceeds configured recursive instruction limit of {limit}"),
+            ));
         }
+        if !self.0.verified.get() {
+            self.0.chunk.verify()?;
+            self.0.verified.set(true);
+        }
+        Ok(())
+    }
+    fn ensure_verified_for_bytecode_limit(&self, limit: usize) -> Result<(), Error> {
+        self.verify_for_bytecode_limit(limit)
     }
 }
 impl Engine {
-    /// Creates a stateless compiler.
+    /// Creates a compiler with the default deterministic compilation limits.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+    /// Returns this compiler with a replacement source/bytecode/graph policy.
+    pub fn with_compile_limits(mut self, limits: CompileLimits) -> Self {
+        self.compile_limits = limits;
+        self
+    }
+    /// Returns this compiler's source, bytecode, and module-graph policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.compile_limits
+    }
+    pub(crate) fn check_source_limit(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<(), Error> {
+        if source.len() <= self.compile_limits.max_source_bytes() {
+            return Ok(());
+        }
+        let error = Error::resource(
+            ResourceLimit::SourceBytes,
+            format!(
+                "source exceeds configured UTF-8 byte limit of {}",
+                self.compile_limits.max_source_bytes()
+            ),
+        )
+        .at_line(1);
+        Err(match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        })
+    }
+    pub(crate) fn check_bytecode_limit(
+        &self,
+        source_name: Option<&str>,
+        instruction_count: usize,
+    ) -> Result<(), Error> {
+        if instruction_count <= self.compile_limits.max_bytecode_instructions() {
+            return Ok(());
+        }
+        let error = Error::resource(
+            ResourceLimit::BytecodeInstructions,
+            format!(
+                "bytecode exceeds configured recursive instruction limit of {}",
+                self.compile_limits.max_bytecode_instructions()
+            ),
+        )
+        .at_line(1);
+        Err(match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        })
+    }
+    fn compile_chunk_source(
+        &self,
+        source_name: Option<&str>,
+        source: &str,
+    ) -> Result<Chunk, Error> {
+        self.check_source_limit(source_name, source)?;
+        let attach_name = |error: Error| match source_name {
+            Some(source_name) => error.with_source_name(source_name),
+            None => error,
+        };
+        let prepared = crate::source::prepare(source_name, source).map_err(attach_name)?;
+        let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
+            .map_err(attach_name)?;
+        let (chunk, instruction_count) = lowering::compile(&ast).map_err(attach_name)?;
+        self.check_bytecode_limit(source_name, instruction_count)?;
+        chunk.verify().map_err(attach_name)?;
+        Ok(chunk)
     }
     /// Compiles and verifies source into an owned bytecode chunk.
     pub fn compile(&self, source: &str) -> Result<Chunk, Error> {
-        compile(source)
+        self.compile_chunk_source(None, source)
     }
     /// Compiles and verifies source while attaching an opaque host-provided
     /// name to any source labels produced on failure.
     pub fn compile_named(&self, source_name: &str, source: &str) -> Result<Chunk, Error> {
-        crate::compile_named(source_name, source)
+        self.compile_chunk_source(Some(source_name), source)
     }
     /// Compiles source into cheaply cloneable shared bytecode.
     pub fn compile_program(&self, source: &str) -> Result<Program, Error> {
@@ -2651,6 +3224,7 @@ impl Engine {
         source_name: Option<&str>,
         source: &str,
     ) -> Result<Program, Error> {
+        self.check_source_limit(source_name, source)?;
         let attach_name = |error: Error| match source_name {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
@@ -2659,14 +3233,23 @@ impl Engine {
         let ast = parser::parse_with_columns(&prepared.text, prepared.columns_are_precise)
             .map_err(attach_name)?;
         let (chunk, source_map) = lowering::compile_mapped(&ast).map_err(attach_name)?;
+        let instruction_count = source_map.instruction_count;
+        self.check_bytecode_limit(source_name, instruction_count)?;
         lowering::verify_mapped(&chunk, &source_map).map_err(attach_name)?;
-        Ok(Program::from_compiled(chunk, source_map, source_name))
+        Ok(Program::from_compiled(
+            chunk,
+            source_map,
+            source_name,
+            instruction_count,
+        ))
     }
     fn check_program_source(
         &self,
         source_name: Option<&str>,
         source: &str,
     ) -> Result<(), Vec<Error>> {
+        self.check_source_limit(source_name, source)
+            .map_err(|error| vec![error])?;
         let attach_name = |error: Error| match source_name {
             Some(source_name) => error.with_source_name(source_name),
             None => error,
@@ -2677,6 +3260,8 @@ impl Engine {
             .map_err(|errors| errors.into_iter().map(attach_name).collect::<Vec<Error>>())?;
         let (chunk, source_map) =
             lowering::compile_mapped(&ast).map_err(|error| vec![attach_name(error)])?;
+        self.check_bytecode_limit(source_name, source_map.instruction_count)
+            .map_err(|error| vec![error])?;
         lowering::verify_mapped(&chunk, &source_map).map_err(|error| vec![attach_name(error)])?;
         Ok(())
     }
@@ -2687,11 +3272,12 @@ impl Default for RuntimeBuilder {
         Self {
             program_cache_entries: DEFAULT_PROGRAM_CACHE_ENTRIES,
             module_cache_entries: DEFAULT_MODULE_CACHE_ENTRIES,
+            compile_limits: CompileLimits::default(),
         }
     }
 }
 impl RuntimeBuilder {
-    /// Creates a builder with 64 Program and 64 Module cache entries.
+    /// Creates a builder with default compile limits and 64 entries per cache.
     pub fn new() -> Self {
         Self::default()
     }
@@ -2713,10 +3299,16 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Sets the source, bytecode, and static module-graph policy.
+    pub fn compile_limits(mut self, limits: CompileLimits) -> Self {
+        self.compile_limits = limits;
+        self
+    }
+
     /// Builds a Runtime with independent bounded Program and Module caches.
     pub fn build(self) -> Runtime {
         Runtime(Rc::new(RuntimeInner {
-            engine: Engine::new(),
+            engine: Engine::new().with_compile_limits(self.compile_limits),
             programs: RefCell::new(CompileCache::new(self.program_cache_entries)),
             modules: RefCell::new(CompileCache::new(self.module_cache_entries)),
         }))
@@ -2767,6 +3359,7 @@ impl Runtime {
         source_name: Option<&str>,
         source: &str,
     ) -> Result<Program, Error> {
+        self.0.engine.check_source_limit(source_name, source)?;
         let key = SourceCacheKey {
             name: source_name.map(str::to_owned),
             source: source.to_owned(),
@@ -2805,6 +3398,11 @@ impl Runtime {
     pub fn clear_compile_caches(&self) {
         self.0.programs.borrow_mut().clear();
         self.0.modules.borrow_mut().clear();
+    }
+
+    /// Returns the Runtime-wide source, bytecode, and static module-graph policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.0.engine.compile_limits()
     }
 
     /// Returns the Runtime's stateless compiler for uncached Chunk, check, and
@@ -2896,7 +3494,7 @@ pub struct ContextBuilder {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: HostBindings,
     bindings: Vec<(String, Value)>,
 }
 impl ContextBuilder {
@@ -2907,7 +3505,7 @@ impl ContextBuilder {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: HostBindings::default(),
             bindings: Vec::new(),
         }
     }
@@ -2938,7 +3536,19 @@ impl ContextBuilder {
 
     /// Installs type-safe host state owned by the new Context.
     pub fn host_state<T: 'static>(mut self, state: T) -> Self {
-        self.host_state = Some(HostState::new(state));
+        self.host_bindings.state = Some(HostState::new(state));
+        self
+    }
+
+    /// Copies a typed capability allowlist into the new Context.
+    pub fn capabilities(mut self, capabilities: HostCapabilities) -> Self {
+        self.host_bindings.capabilities = capabilities;
+        self
+    }
+
+    /// Installs one typed, script-invisible host capability.
+    pub fn capability<T: 'static>(mut self, key: CapabilityKey<T>, capability: T) -> Self {
+        self.host_bindings.capabilities.insert(key, capability);
         self
     }
 
@@ -2979,7 +3589,7 @@ impl ContextBuilder {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation,
-            host_state: self.host_state,
+            host_bindings: (!self.host_bindings.is_empty()).then(|| Rc::new(self.host_bindings)),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -3002,7 +3612,7 @@ pub struct Context {
     max_call_depth: usize,
     resource_limits: ResourceLimits,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: Option<Rc<HostBindings>>,
     last_execution: ExecutionStats,
     retained_memory_high_water: RetainedMemory,
 }
@@ -3021,7 +3631,7 @@ thread_local! {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         };
@@ -3556,6 +4166,44 @@ fn retained_memory_limits_active(limits: ResourceLimits) -> bool {
         || limits.max_retained_managed_bytes() < u64::MAX
 }
 
+fn transient_managed_allocation_limits_active(limits: &ResourceLimits) -> bool {
+    limits.max_transient_managed_objects() < u64::MAX
+        || limits.max_transient_managed_bytes() < u64::MAX
+}
+
+#[cold]
+fn transient_managed_objects_limit_error(actual: u64, limit: u64) -> Error {
+    Error::resource(
+        ResourceLimit::TransientManagedObjects,
+        format!("execution allocated {actual} managed objects, exceeding {limit}"),
+    )
+}
+
+#[cold]
+fn transient_managed_bytes_limit_error(actual: u64, limit: u64) -> Error {
+    Error::resource(
+        ResourceLimit::TransientManagedBytes,
+        format!("execution allocated {actual} managed bytes, exceeding {limit}"),
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn check_transient_managed_allocation_limits(
+    objects: u64,
+    bytes: u64,
+    max_objects: u64,
+    max_bytes: u64,
+) -> Result<(), Error> {
+    if objects > max_objects {
+        return Err(transient_managed_objects_limit_error(objects, max_objects));
+    }
+    if bytes > max_bytes {
+        return Err(transient_managed_bytes_limit_error(bytes, max_bytes));
+    }
+    Ok(())
+}
+
 fn check_retained_memory_limits(
     memory: RetainedMemory,
     limits: ResourceLimits,
@@ -3716,26 +4364,26 @@ fn json_error(code: &'static str, failure: json::JsonFailure) -> Error {
     }
 }
 
-fn parse_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn parse_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("parse_json expects one string argument"));
     }
     let Value::String(source) = &xs[0] else {
         return Err(Error::runtime("parse_json expects a string"));
     };
-    json::parse_json(source, limits).map_err(|error| json_error("json.parse", error))
+    json::parse_json(source, limits.public()).map_err(|error| json_error("json.parse", error))
 }
 
-fn encode_json_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn encode_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("encode_json expects one argument"));
     }
-    json::encode_json(&xs[0], limits)
+    json::encode_json(&xs[0], limits.public())
         .map(Value::from)
         .map_err(|error| json_error("json.encode", error))
 }
 
-fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn sort_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("sort expects one array argument"));
     }
@@ -3848,7 +4496,7 @@ fn sort_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
     Ok(Value::Array(Rc::new(sorted)))
 }
 
-fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn concat_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 2 {
         return Err(Error::runtime("concat expects two arguments"));
     }
@@ -3892,7 +4540,7 @@ fn concat_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> 
     }
 }
 
-fn replace_all_builtin(xs: &[Value], limits: ResourceLimits) -> Result<Value, Error> {
+fn replace_all_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 3 {
         return Err(Error::runtime("replace_all expects three string arguments"));
     }
@@ -3939,7 +4587,7 @@ fn checked_replacement_output_len(
     needle_len: usize,
     replacement_len: usize,
     matches: usize,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<usize, Error> {
     let output_len = if replacement_len >= needle_len {
         replacement_len
@@ -4011,7 +4659,7 @@ impl Context {
             max_call_depth: 1_024,
             resource_limits: ResourceLimits::default(),
             cancellation: None,
-            host_state: None,
+            host_bindings: None,
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory {
                 objects: 1,
@@ -4074,6 +4722,12 @@ impl Context {
     pub fn resource_limits(&self) -> ResourceLimits {
         self.resource_limits
     }
+    /// Returns the Runtime-owned compilation policy used by this Context.
+    ///
+    /// Standalone contexts created with [`Context::new`] use the default policy.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.engine.compile_limits()
+    }
     /// Returns this context configured to observe an embedding-host cancellation token.
     pub fn with_cancellation_token(mut self, token: CancellationToken) -> Self {
         self.set_cancellation_token(token);
@@ -4087,6 +4741,21 @@ impl Context {
     pub fn clear_cancellation_token(&mut self) {
         self.cancellation = None;
     }
+    fn host_bindings_mut(&mut self) -> &mut HostBindings {
+        Rc::make_mut(
+            self.host_bindings
+                .get_or_insert_with(|| Rc::new(HostBindings::default())),
+        )
+    }
+    fn compact_host_bindings(&mut self) {
+        if self
+            .host_bindings
+            .as_deref()
+            .is_some_and(HostBindings::is_empty)
+        {
+            self.host_bindings = None;
+        }
+    }
     /// Returns this Context with type-safe, script-invisible host state.
     pub fn with_host_state<T: 'static>(mut self, state: T) -> Self {
         self.set_host_state(state);
@@ -4094,15 +4763,70 @@ impl Context {
     }
     /// Installs or replaces type-safe, script-invisible host state.
     pub fn set_host_state<T: 'static>(&mut self, state: T) {
-        self.host_state = Some(HostState::new(state));
+        self.host_bindings_mut().state = Some(HostState::new(state));
     }
     /// Removes the current host state from future contextual native calls.
     pub fn clear_host_state(&mut self) {
-        self.host_state = None;
+        if let Some(bindings) = self.host_bindings.as_mut() {
+            Rc::make_mut(bindings).state = None;
+            self.compact_host_bindings();
+        }
     }
     /// Returns the Context-owned host state when its concrete type matches `T`.
     pub fn host_state<T: 'static>(&self) -> Option<&T> {
-        self.host_state.as_ref()?.downcast_ref()
+        self.host_bindings.as_ref()?.state.as_ref()?.downcast_ref()
+    }
+    /// Replaces the typed capability allowlist used by future native calls.
+    pub fn set_capabilities(&mut self, capabilities: HostCapabilities) {
+        if capabilities.is_empty()
+            && self
+                .host_bindings
+                .as_deref()
+                .is_none_or(|bindings| bindings.state.is_none())
+        {
+            self.host_bindings = None;
+        } else {
+            self.host_bindings_mut().capabilities = capabilities;
+        }
+    }
+    /// Returns a snapshot of this Context's capability allowlist.
+    pub fn capabilities(&self) -> HostCapabilities {
+        self.host_bindings
+            .as_ref()
+            .map_or_else(HostCapabilities::new, |bindings| {
+                bindings.capabilities.clone()
+            })
+    }
+    /// Installs or replaces one typed, script-invisible host capability.
+    pub fn set_capability<T: 'static>(&mut self, key: CapabilityKey<T>, capability: T) {
+        self.host_bindings_mut()
+            .capabilities
+            .insert(key, capability);
+    }
+    /// Returns this Context after installing one typed host capability.
+    pub fn with_capability<T: 'static>(mut self, key: CapabilityKey<T>, capability: T) -> Self {
+        self.set_capability(key, capability);
+        self
+    }
+    /// Clones an allowlisted opaque capability when its slot and type match.
+    pub fn capability<T: 'static>(&self, key: CapabilityKey<T>) -> Option<Rc<T>> {
+        self.host_bindings.as_ref()?.capabilities.get(key)
+    }
+    /// Removes one capability only when its slot and concrete type match.
+    pub fn remove_capability<T: 'static>(&mut self, key: CapabilityKey<T>) -> bool {
+        let Some(bindings) = self.host_bindings.as_mut() else {
+            return false;
+        };
+        let removed = Rc::make_mut(bindings).capabilities.remove(key);
+        self.compact_host_bindings();
+        removed
+    }
+    /// Removes every capability from future contextual native calls.
+    pub fn clear_capabilities(&mut self) {
+        if let Some(bindings) = self.host_bindings.as_mut() {
+            Rc::make_mut(bindings).capabilities.clear();
+            self.compact_host_bindings();
+        }
     }
     /// Returns counters from the most recent successful or failed execution.
     /// Compilation and verification errors do not replace the previous record.
@@ -4199,7 +4923,7 @@ impl Context {
     fn add_resource_builtin(
         &mut self,
         name: impl Into<String>,
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
         allocation_profile: fn(&[Value], &Value) -> ManagedAllocation,
     ) {
         self.set_global(
@@ -4215,7 +4939,7 @@ impl Context {
     fn add_unprofiled_resource_builtin(
         &mut self,
         name: impl Into<String>,
-        function: fn(&[Value], ResourceLimits) -> Result<Value, Error>,
+        function: fn(&[Value], VmResourceLimits) -> Result<Value, Error>,
     ) {
         self.set_global(
             name,
@@ -4267,25 +4991,23 @@ impl Context {
     pub fn run(&mut self, chunk: Chunk) -> Result<Value, Error> {
         self.run_program(&chunk.into())
     }
-    /// Runs shared compiled bytecode without cloning its instruction stream.
-    pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
-        program.ensure_verified()?;
-        let retained_transaction = if retained_memory_limits_active(self.resource_limits) {
-            check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
-            Some(RetainedMemoryTransaction::capture(&self.global))
-        } else {
-            None
-        };
-        let mut vm = Vm {
+    fn execute_program<const TRANSIENT_LIMITS: bool>(
+        &self,
+        program: &Program,
+    ) -> (Result<Value, Error>, ExecutionStats) {
+        let mut vm = Vm::<TRANSIENT_LIMITS> {
             fuel: self.fuel,
             instructions: 0,
             max_call_depth: self.max_call_depth,
-            resource_limits: self.resource_limits,
+            resource_limits: self.resource_limits.into(),
             value_limits_active: value_limits_active(self.resource_limits),
             call_depth: 0,
             call_depth_peak: 0,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self
+                .host_bindings
+                .as_ref()
+                .map(|bindings| bindings.clone() as HostBindingsViewHandle),
             name_loads: 0,
             name_stores: 0,
             calls: 0,
@@ -4298,15 +5020,56 @@ impl Context {
             managed_bytes_allocated: 0,
             initial_debug_info: program.0.debug_info.clone(),
             execution_plan: program.0.execution_plan.clone(),
+            max_transient_managed_objects: self.resource_limits.max_transient_managed_objects(),
+            max_transient_managed_bytes: self.resource_limits.max_transient_managed_bytes(),
         };
         let result = vm.run(Rc::clone(&program.0.chunk), self.global.clone());
-        self.last_execution = vm.stats();
-        if let Some(transaction) = retained_transaction {
-            if let Err(error) =
-                check_retained_memory_limits(self.retained_memory(), self.resource_limits)
-            {
+        let stats = vm.stats();
+        (result, stats)
+    }
+    /// Runs shared compiled bytecode without cloning its instruction stream.
+    pub fn run_program(&mut self, program: &Program) -> Result<Value, Error> {
+        program.ensure_verified_for_bytecode_limit(
+            self.engine.compile_limits().max_bytecode_instructions(),
+        )?;
+        let retained_limits_active = retained_memory_limits_active(self.resource_limits);
+        let transient_limits_active =
+            transient_managed_allocation_limits_active(&self.resource_limits);
+        let state_transaction = if retained_limits_active || transient_limits_active {
+            if retained_limits_active {
+                check_retained_memory_limits(self.retained_memory(), self.resource_limits)?;
+            }
+            Some(RetainedMemoryTransaction::capture(&self.global))
+        } else {
+            None
+        };
+        let (result, stats) = if transient_limits_active {
+            self.execute_program::<true>(program)
+        } else {
+            self.execute_program::<false>(program)
+        };
+        self.last_execution = stats;
+        if let Some(transaction) = state_transaction {
+            let transient_limit_failed = result.as_ref().is_err_and(|error| {
+                matches!(
+                    error.resource_limit(),
+                    Some(
+                        ResourceLimit::TransientManagedObjects
+                            | ResourceLimit::TransientManagedBytes
+                    )
+                )
+            });
+            if transient_limit_failed {
                 transaction.restore();
-                return Err(error);
+                return result;
+            }
+            if retained_limits_active {
+                if let Err(error) =
+                    check_retained_memory_limits(self.retained_memory(), self.resource_limits)
+                {
+                    transaction.restore();
+                    return Err(error);
+                }
             }
         }
         result
@@ -4320,7 +5083,7 @@ impl Context {
             max_call_depth: self.max_call_depth,
             resource_limits: self.resource_limits,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self.host_bindings.clone(),
             last_execution: ExecutionStats::default(),
             retained_memory_high_water: RetainedMemory::default(),
         }
@@ -4507,7 +5270,9 @@ impl Context {
                     Value::Integer(value) => {
                         resource_decimal(value.inner().clone(), 0, limits)?
                     }
-                    Value::String(value) => Decimal::parse_with_resource_limits(value, limits)?,
+                    Value::String(value) => {
+                        Decimal::parse_with_resource_limits(value, limits.public())?
+                    }
                     Value::Number(_) => {
                         return Err(Error::runtime(
                             "decimal does not accept Number; use a suffixed literal or decimal string",
@@ -4936,16 +5701,16 @@ enum IterationKind {
         position: usize,
     },
 }
-struct Vm {
+struct Vm<const TRANSIENT_LIMITS: bool> {
     fuel: u64,
     instructions: u64,
     max_call_depth: usize,
-    resource_limits: ResourceLimits,
+    resource_limits: VmResourceLimits,
     value_limits_active: bool,
     call_depth: usize,
     call_depth_peak: usize,
     cancellation: Option<CancellationToken>,
-    host_state: Option<HostState>,
+    host_bindings: Option<HostBindingsViewHandle>,
     name_loads: u64,
     name_stores: u64,
     calls: u64,
@@ -4958,6 +5723,8 @@ struct Vm {
     managed_bytes_allocated: u64,
     initial_debug_info: Option<Rc<ProgramDebugInfo>>,
     execution_plan: Option<Rc<ProgramExecutionPlan>>,
+    max_transient_managed_objects: u64,
+    max_transient_managed_bytes: u64,
 }
 enum Step {
     Continue,
@@ -4977,7 +5744,7 @@ enum CallTarget {
         context: MethodContext,
     },
 }
-impl Vm {
+impl<const TRANSIENT_LIMITS: bool> Vm<TRANSIENT_LIMITS> {
     fn source_span(frame: &Frame, pc: usize) -> Option<SourceSpan> {
         frame
             .debug_info
@@ -4997,7 +5764,8 @@ impl Vm {
         self.value_allocations = self.value_allocations.saturating_add(count);
     }
 
-    fn record_managed_allocation(&mut self, allocation: ManagedAllocation) {
+    #[inline(always)]
+    fn record_managed_allocation(&mut self, allocation: ManagedAllocation) -> Result<(), Error> {
         self.value_allocations = self
             .value_allocations
             .saturating_add(allocation.legacy_value_allocations);
@@ -5007,25 +5775,47 @@ impl Vm {
         self.managed_bytes_allocated = self
             .managed_bytes_allocated
             .saturating_add(allocation.bytes);
+        if !TRANSIENT_LIMITS {
+            return Ok(());
+        }
+        check_transient_managed_allocation_limits(
+            self.managed_objects_allocated,
+            self.managed_bytes_allocated,
+            self.max_transient_managed_objects,
+            self.max_transient_managed_bytes,
+        )
     }
 
-    fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) {
-        self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value));
+    #[inline(always)]
+    fn record_shallow_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
+        self.record_managed_allocation(ManagedAllocation::legacy_shallow(legacy, value))
     }
 
-    fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) {
-        self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value));
+    #[inline(always)]
+    fn record_deep_value_allocation(&mut self, legacy: u64, value: &Value) -> Result<(), Error> {
+        self.record_managed_allocation(ManagedAllocation::legacy_deep(legacy, value))
     }
 
-    fn record_stack_managed_allocation(&mut self, frame: &Frame) {
+    #[inline(always)]
+    fn record_stack_managed_allocation(&mut self, frame: &Frame) -> Result<(), Error> {
         self.record_managed_allocation(shallow_managed_allocation(
             frame.stack.last().expect("managed numeric result"),
-        ));
+        ))
     }
 
-    fn record_environment_allocation(&mut self) {
+    #[inline(always)]
+    fn record_environment_allocation(&mut self) -> Result<(), Error> {
         self.environment_allocations = self.environment_allocations.saturating_add(1);
         self.managed_objects_allocated = self.managed_objects_allocated.saturating_add(1);
+        if !TRANSIENT_LIMITS {
+            return Ok(());
+        }
+        check_transient_managed_allocation_limits(
+            self.managed_objects_allocated,
+            self.managed_bytes_allocated,
+            self.max_transient_managed_objects,
+            self.max_transient_managed_bytes,
+        )
     }
 
     // This boundary keeps argument-buffer plumbing out of the monolithic
@@ -5108,7 +5898,7 @@ impl Vm {
             class: class.clone(),
             fields: RefCell::new(BTreeMap::new()),
         }));
-        self.record_shallow_value_allocation(1, &instance);
+        self.record_shallow_value_allocation(1, &instance)?;
         if let Some((owner, constructor)) = find_constructor(&class) {
             return Ok(Step::Call {
                 target: CallTarget::Receiver {
@@ -5316,7 +6106,7 @@ impl Vm {
             static_methods: static_table,
             static_fields: RefCell::new(BTreeMap::new()),
         }));
-        self.record_shallow_value_allocation(1, &class);
+        self.record_shallow_value_allocation(1, &class)?;
         frame.stack.push(class);
         Ok(())
     }
@@ -5395,7 +6185,7 @@ impl Vm {
         debug_info: Option<Rc<ProgramDebugInfo>>,
         execution_plan: Option<Rc<ProgramExecutionPlan>>,
     ) -> Result<Value, Error> {
-        let mut nested = Vm {
+        let mut nested = Vm::<TRANSIENT_LIMITS> {
             fuel: self.fuel,
             instructions: self.instructions,
             max_call_depth: self.max_call_depth,
@@ -5404,7 +6194,7 @@ impl Vm {
             call_depth: self.call_depth,
             call_depth_peak: self.call_depth_peak,
             cancellation: self.cancellation.clone(),
-            host_state: self.host_state.clone(),
+            host_bindings: self.host_bindings.clone(),
             name_loads: self.name_loads,
             name_stores: self.name_stores,
             calls: self.calls,
@@ -5417,6 +6207,8 @@ impl Vm {
             managed_bytes_allocated: self.managed_bytes_allocated,
             initial_debug_info: debug_info,
             execution_plan,
+            max_transient_managed_objects: self.max_transient_managed_objects,
+            max_transient_managed_bytes: self.max_transient_managed_bytes,
         };
         let result = nested.run(chunk, env);
         self.fuel = nested.fuel;
@@ -5579,7 +6371,7 @@ impl Vm {
                             }
                             (bindings, ManagedAllocation::default())
                         };
-                        self.record_managed_allocation(allocations);
+                        self.record_managed_allocation(allocations)?;
                         let mut environment = frame.env.borrow_mut();
                         for (name, item) in bindings {
                             if name != "_" {
@@ -5620,7 +6412,7 @@ impl Vm {
                             push_integer(frame, -x.inner(), self.resource_limits)?;
                             self.record_managed_allocation(shallow_managed_allocation(
                                 frame.stack.last().expect("integer result"),
-                            ));
+                            ))?;
                         }
                         Value::Decimal(x) => {
                             let value = Value::Decimal(Rc::new(resource_decimal(
@@ -5628,7 +6420,7 @@ impl Vm {
                                 x.scale,
                                 self.resource_limits,
                             )?));
-                            self.record_managed_allocation(shallow_managed_allocation(&value));
+                            self.record_managed_allocation(shallow_managed_allocation(&value))?;
                             frame.stack.push(value);
                         }
                         _ => {
@@ -5650,7 +6442,7 @@ impl Vm {
                             push_integer(frame, !x.inner(), self.resource_limits)?;
                             self.record_managed_allocation(shallow_managed_allocation(
                                 frame.stack.last().expect("integer result"),
-                            ));
+                            ))?;
                         }
                         _ => return Err(Error::runtime("'~' expects number or integer")),
                     },
@@ -5660,12 +6452,12 @@ impl Vm {
                     }
                     Instruction::Increment => {
                         if numeric_update(frame, true, &self.resource_limits)? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Decrement => {
                         if numeric_update(frame, false, &self.resource_limits)? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Add => {
@@ -5676,7 +6468,7 @@ impl Vm {
                             |a, b, _| Ok(a + b),
                             decimal_add,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Sub => {
@@ -5687,7 +6479,7 @@ impl Vm {
                             |a, b, _| Ok(a - b),
                             decimal_sub,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Mul => {
@@ -5698,7 +6490,7 @@ impl Vm {
                             integer_mul_resource,
                             decimal_mul,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Div => {
@@ -5709,7 +6501,7 @@ impl Vm {
                             |a, b, _| integer_div(a, b),
                             decimal_exact_div,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::FloorDiv => {
@@ -5720,7 +6512,7 @@ impl Vm {
                             |a, b, _| integer_floor_div(a, b),
                             decimal_floor_div,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Rem => {
@@ -5731,7 +6523,7 @@ impl Vm {
                             |a, b, _| integer_rem(a, b),
                             decimal_rem,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Modulo => {
@@ -5742,7 +6534,7 @@ impl Vm {
                             |a, b, _| integer_modulo(a, b),
                             decimal_modulo,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitAnd => {
@@ -5754,7 +6546,7 @@ impl Vm {
                             |a, b| a & b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitOr => {
@@ -5766,7 +6558,7 @@ impl Vm {
                             |a, b| a | b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::BitXor => {
@@ -5778,21 +6570,21 @@ impl Vm {
                             |a, b| a ^ b,
                         )?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftLeft => {
                         let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
                         numeric_shift(frame, false, &self.resource_limits)?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftRight => {
                         let managed = matches!(frame.stack.last(), Some(Value::Integer(_)));
                         numeric_shift(frame, true, &self.resource_limits)?;
                         if managed {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::ShiftRightUnsigned => {
@@ -5806,7 +6598,7 @@ impl Vm {
                             integer_pow,
                             decimal_pow,
                         )? {
-                            self.record_stack_managed_allocation(frame);
+                            self.record_stack_managed_allocation(frame)?;
                         }
                     }
                     Instruction::Eq => compare(frame, equal)?,
@@ -5905,7 +6697,7 @@ impl Vm {
                                 });
                                 self.record_managed_allocation(shallow_managed_allocation(
                                     &Value::Error(script_error.clone()),
-                                ));
+                                ))?;
                                 Error::from_script_error(script_error)
                             }
                         });
@@ -5942,7 +6734,7 @@ impl Vm {
                                     bytes: (character_count as u64)
                                         .saturating_mul(LOGICAL_REFERENCE_BYTES)
                                         .saturating_add(value.len() as u64),
-                                });
+                                })?;
                                 frame.iterators.push(Iteration {
                                     kind: IterationKind::String {
                                         values: Rc::new(values),
@@ -6020,7 +6812,7 @@ impl Vm {
                                         vec![Value::String(Rc::from(key.as_str())), value.clone()]
                                     });
                                     if let Some(values) = &value {
-                                        self.record_shallow_value_allocation(1, &values[0]);
+                                        self.record_shallow_value_allocation(1, &values[0])?;
                                         *position += 1;
                                     }
                                     value
@@ -6053,7 +6845,7 @@ impl Vm {
                                     bindings.append(&mut pattern_bindings);
                                     allocations.add(pattern_allocations);
                                 }
-                                self.record_managed_allocation(allocations);
+                                self.record_managed_allocation(allocations)?;
                                 let mut environment = frame.env.borrow_mut();
                                 for (name, value) in bindings {
                                     environment.set_local(&name, value);
@@ -6096,7 +6888,7 @@ impl Vm {
                         check_array_resource(*n, self.resource_limits)?;
                         let v = take(frame, *n)?;
                         let value = Value::Array(Rc::new(v));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Append => {
@@ -6113,7 +6905,7 @@ impl Vm {
                         if cloned_backing {
                             let mut allocation = managed_array_allocation(values.len());
                             allocation.legacy_value_allocations = 1;
-                            self.record_managed_allocation(allocation);
+                            self.record_managed_allocation(allocation)?;
                         }
                         frame.stack.push(Value::Array(values));
                     }
@@ -6137,7 +6929,7 @@ impl Vm {
                             values.extend(segment.iter().cloned());
                         }
                         let value = Value::Array(Rc::new(values));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::MergeMaps(n) => {
@@ -6155,7 +6947,7 @@ impl Vm {
                         }
                         check_map_resource(values.len(), self.resource_limits)?;
                         let value = Value::Map(Rc::new(values));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::MakeRange(inclusive) => {
@@ -6164,9 +6956,9 @@ impl Vm {
                         let exact = matches!(start, Value::Integer(_));
                         let value = range_values(start, end, *inclusive, self.resource_limits)?;
                         if exact {
-                            self.record_deep_value_allocation(1, &value);
+                            self.record_deep_value_allocation(1, &value)?;
                         } else {
-                            self.record_shallow_value_allocation(1, &value);
+                            self.record_shallow_value_allocation(1, &value)?;
                         }
                         frame.stack.push(value);
                     }
@@ -6177,7 +6969,7 @@ impl Vm {
                         }
                         let v = take(frame, keys.len())?;
                         let value = Value::Map(Rc::new(keys.iter().cloned().zip(v).collect()));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Stringify => {
@@ -6185,7 +6977,7 @@ impl Vm {
                         let value = string_value(&value);
                         check_string_resource(&value, self.resource_limits)?;
                         let value = Value::String(Rc::from(value));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Concat(n) => {
@@ -6206,7 +6998,7 @@ impl Vm {
                             output.push_str(&value);
                         }
                         let value = Value::String(Rc::from(output));
-                        self.record_shallow_value_allocation(1, &value);
+                        self.record_shallow_value_allocation(1, &value)?;
                         frame.stack.push(value);
                     }
                     Instruction::Index => {
@@ -6232,7 +7024,7 @@ impl Vm {
                         let value = member_value(target, name, false)?;
                         check_member_value_resources(&value, self.resource_limits)?;
                         if matches!(value, Value::Function(_)) {
-                            self.record_shallow_value_allocation(1, &value);
+                            self.record_shallow_value_allocation(1, &value)?;
                         }
                         frame.stack.push(value);
                     }
@@ -6251,7 +7043,7 @@ impl Vm {
                                 legacy_value_allocations: 0,
                                 objects: 0,
                                 bytes: LOGICAL_MAP_ENTRY_BYTES.saturating_add(name.len() as u64),
-                            });
+                            })?;
                         }
                         frame.stack.push(value);
                     }
@@ -6357,7 +7149,7 @@ impl Vm {
                                 allocation.bytes =
                                     allocation.bytes.saturating_add(LOGICAL_REFERENCE_BYTES);
                             }
-                            self.record_managed_allocation(allocation);
+                            self.record_managed_allocation(allocation)?;
                             frame.stack.push(value);
                         }
                         _ => return Err(Error::runtime("value used as function template")),
@@ -6501,10 +7293,18 @@ impl Vm {
                             let span = frames.last().and_then(|frame| {
                                 Self::source_span(frame, frame.pc.saturating_sub(1))
                             });
-                            let error = error.with_span_if_missing(span);
+                            let error = error.with_span_if_missing(span.clone());
                             let error = Self::with_call_stack(error, &frames, include_current_call);
-                            if !handle_error(self, &mut frames, &error) {
-                                return Err(error);
+                            match handle_error(self, &mut frames, &error) {
+                                Ok(true) => {}
+                                Ok(false) => return Err(error),
+                                Err(limit_error) => {
+                                    return Err(Self::with_call_stack(
+                                        limit_error.with_span_if_missing(span),
+                                        &frames,
+                                        false,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -6513,10 +7313,18 @@ impl Vm {
                     let span = frames
                         .last()
                         .and_then(|frame| Self::source_span(frame, frame.pc.saturating_sub(1)));
-                    let error = error.with_span_if_missing(span);
+                    let error = error.with_span_if_missing(span.clone());
                     let error = Self::with_call_stack(error, &frames, false);
-                    if !handle_error(self, &mut frames, &error) {
-                        return Err(error);
+                    match handle_error(self, &mut frames, &error) {
+                        Ok(true) => {}
+                        Ok(false) => return Err(error),
+                        Err(limit_error) => {
+                            return Err(Self::with_call_stack(
+                                limit_error.with_span_if_missing(span),
+                                &frames,
+                                false,
+                            ));
+                        }
                     }
                 }
             }
@@ -6740,7 +7548,7 @@ fn set_receiver_member(
     target: Value,
     name: &str,
     value: Value,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<bool, Error> {
     check_value_resources(&value, limits)?;
     match target {
@@ -6774,15 +7582,20 @@ fn set_receiver_member(
     }
 }
 
-fn call(vm: &mut Vm, frames: &mut Vec<Frame>, callee: Value, args: &[Value]) -> Result<(), Error> {
+fn call<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    frames: &mut Vec<Frame>,
+    callee: Value,
+    args: &[Value],
+) -> Result<(), Error> {
     call_with_context(vm, frames, callee, args, None)
 }
 
 // Most class calls have at most two explicit arguments. Keep receiver
 // prepending off the allocator path for those calls while leaving uncommon
 // larger arities on a straightforward fallback.
-fn call_with_receiver(
-    vm: &mut Vm,
+fn call_with_receiver<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     frames: &mut Vec<Frame>,
     function: Rc<Function>,
     receiver: &Value,
@@ -6826,8 +7639,8 @@ fn call_with_receiver(
     }
 }
 
-fn call_with_context(
-    vm: &mut Vm,
+fn call_with_context<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     frames: &mut Vec<Frame>,
     callee: Value,
     args: &[Value],
@@ -6844,33 +7657,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_managed_allocation(allocation_profile(args, &value));
-                }
-                frames
-                    .last_mut()
-                    .expect("call has a caller frame")
-                    .stack
-                    .push(value);
-            }
-            FunctionKind::ContextualNative { function } => {
-                let mut context = NativeCallContext {
-                    cancellation: vm.cancellation.clone(),
-                    resource_limits: vm.resource_limits,
-                    host_state: vm.host_state.clone(),
-                    fuel_remaining: vm.fuel,
-                    managed_objects_allocated: 0,
-                    managed_bytes_allocated: 0,
-                };
-                let result = function(&mut context, args);
-                vm.fuel = context.fuel_remaining;
-                vm.record_managed_allocation(ManagedAllocation {
-                    legacy_value_allocations: 0,
-                    objects: context.managed_objects_allocated,
-                    bytes: context.managed_bytes_allocated,
-                });
-                let value = result?;
-                if vm.value_limits_active && value_needs_resource_check(&value) {
-                    check_value_resources(&value, vm.resource_limits)?;
+                    vm.record_managed_allocation(allocation_profile(args, &value))?;
                 }
                 frames
                     .last_mut()
@@ -6887,7 +7674,7 @@ fn call_with_context(
                     check_value_resources(&value, vm.resource_limits)?;
                 }
                 if let Some(allocation_profile) = allocation_profile {
-                    vm.record_managed_allocation(allocation_profile(args, &value));
+                    vm.record_managed_allocation(allocation_profile(args, &value))?;
                 }
                 frames
                     .last_mut()
@@ -6976,7 +7763,7 @@ fn call_with_context(
                 };
                 // ExecutionStats models one logical lexical frame per bytecode
                 // call even when an isolated fast frame needs no physical Env.
-                vm.record_environment_allocation();
+                vm.record_environment_allocation()?;
                 if fast_locals.is_none() {
                     for (index, pattern) in params.iter().enumerate() {
                         let value = args.get(index).cloned().unwrap_or(Value::Nil);
@@ -7001,7 +7788,7 @@ fn call_with_context(
                     }
                     if let Some(rest) = rest {
                         let value = Value::Array(Rc::new(args[params.len()..].to_vec()));
-                        vm.record_shallow_value_allocation(1, &value);
+                        vm.record_shallow_value_allocation(1, &value)?;
                         local.borrow_mut().set_local(rest, value);
                     }
                 }
@@ -7019,7 +7806,7 @@ fn call_with_context(
                 frames.push(Frame {
                     chunk: chunk.clone(),
                     pc: 0,
-                    stack: Vm::take_frame_stack(),
+                    stack: Vm::<TRANSIENT_LIMITS>::take_frame_stack(),
                     iterators: vec![],
                     handlers: vec![],
                     debug_info: debug_info.clone(),
@@ -7059,27 +7846,60 @@ fn call_with_context(
                     )?;
                 }
             }
+            FunctionKind::ContextualNative { function } => {
+                let mut context = NativeCallContext {
+                    cancellation: vm.cancellation.clone(),
+                    resource_limits: vm.resource_limits.public_with_transient(
+                        vm.max_transient_managed_objects,
+                        vm.max_transient_managed_bytes,
+                    ),
+                    host_bindings: vm.host_bindings.clone(),
+                    fuel_remaining: vm.fuel,
+                    managed_objects_allocated: 0,
+                    managed_bytes_allocated: 0,
+                };
+                let result = function(&mut context, args);
+                vm.fuel = context.fuel_remaining;
+                vm.record_managed_allocation(ManagedAllocation {
+                    legacy_value_allocations: 0,
+                    objects: context.managed_objects_allocated,
+                    bytes: context.managed_bytes_allocated,
+                })?;
+                let value = result?;
+                if vm.value_limits_active && value_needs_resource_check(&value) {
+                    check_value_resources(&value, vm.resource_limits)?;
+                }
+                frames
+                    .last_mut()
+                    .expect("call has a caller frame")
+                    .stack
+                    .push(value);
+            }
         },
         _ => return Err(Error::runtime("attempted to call a non-function")),
     }
     Ok(())
 }
-fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
+fn handle_error<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    frames: &mut Vec<Frame>,
+    error: &Error,
+) -> Result<bool, Error> {
     if error.kind() == ErrorKind::Resource {
-        return false;
+        return Ok(false);
     }
     loop {
         let Some(frame) = frames.last_mut() else {
-            return false;
+            return Ok(false);
         };
         if let Some(handler) = frame.handlers.pop() {
             frame.stack.truncate(handler.stack_depth);
             frame.iterators.truncate(handler.iterator_depth);
             let caught = error.catch_value();
-            vm.record_shallow_value_allocation(1, &caught);
+            vm.record_shallow_value_allocation(1, &caught)?;
             frame.env.borrow_mut().set_local(&handler.name, caught);
             frame.pc = handler.catch_pc;
-            return true;
+            return Ok(true);
         }
         let has_caller = frames.len() > 1;
         if has_caller {
@@ -7087,7 +7907,7 @@ fn handle_error(vm: &mut Vm, frames: &mut Vec<Frame>, error: &Error) -> bool {
         }
         let mut discarded = frames.pop().expect("VM has a failing frame");
         if has_caller {
-            Vm::recycle_frame_stack(std::mem::take(&mut discarded.stack));
+            Vm::<TRANSIENT_LIMITS>::recycle_frame_stack(std::mem::take(&mut discarded.stack));
         }
     }
 }
@@ -7106,7 +7926,7 @@ fn number(v: Value) -> Result<f64, Error> {
     v.as_number()
         .ok_or_else(|| Error::runtime("expected number"))
 }
-fn decimal_to_exact_number(value: &Decimal, limits: ResourceLimits) -> Result<f64, Error> {
+fn decimal_to_exact_number(value: &Decimal, limits: VmResourceLimits) -> Result<f64, Error> {
     check_decimal_power_growth(&BigInt::from(1_u8), value.scale, limits)?;
     let mut numerator = value.inner().clone();
     let mut denominator = decimal_power_of_ten(value.scale);
@@ -7141,7 +7961,7 @@ fn aggregate_numeric(
     xs: &[Value],
     name: &str,
     aggregate: Aggregate,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime(format!("{name} expects one array")));
@@ -7249,7 +8069,7 @@ fn numeric_range(
     start: f64,
     end: f64,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     if !start.is_finite()
         || !end.is_finite()
@@ -7287,7 +8107,7 @@ fn range_values(
     start: Value,
     end: Value,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     match (start, end) {
         (Value::Number(start), Value::Number(end)) => numeric_range(start, end, inclusive, limits),
@@ -7365,14 +8185,18 @@ fn truth(v: Value) -> Result<bool, Error> {
     v.as_bool()
         .ok_or_else(|| Error::runtime("condition must be bool"))
 }
-fn push_integer(f: &mut Frame, value: BigInt, limits: ResourceLimits) -> Result<(), Error> {
+fn push_integer(f: &mut Frame, value: BigInt, limits: VmResourceLimits) -> Result<(), Error> {
     f.stack
         .push(Value::Integer(Rc::new(resource_integer(value, limits)?)));
     Ok(())
 }
 // Keep the full host policy borrowed across generic Number operations. Copying
 // ResourceLimits here penalizes the scalar hot path even when no exact value is involved.
-fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Result<bool, Error> {
+fn numeric_update(
+    f: &mut Frame,
+    increment: bool,
+    limits: &VmResourceLimits,
+) -> Result<bool, Error> {
     let managed = match pop(f)? {
         Value::Number(value) => {
             f.stack.push(Value::Number(if increment {
@@ -7412,10 +8236,10 @@ fn numeric_update(f: &mut Frame, increment: bool, limits: &ResourceLimits) -> Re
 }
 fn numeric_binary(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(f64, f64) -> f64,
-    integer_op: impl FnOnce(&BigInt, &BigInt, ResourceLimits) -> Result<BigInt, Error>,
-    decimal_op: impl FnOnce(&Decimal, &Decimal, ResourceLimits) -> Result<Decimal, Error>,
+    integer_op: impl FnOnce(&BigInt, &BigInt, VmResourceLimits) -> Result<BigInt, Error>,
+    decimal_op: impl FnOnce(&Decimal, &Decimal, VmResourceLimits) -> Result<Decimal, Error>,
 ) -> Result<bool, Error> {
     let b = pop(f)?;
     let a = pop(f)?;
@@ -7480,7 +8304,7 @@ fn integer_modulo(a: &BigInt, b: &BigInt) -> Result<BigInt, Error> {
         Ok(remainder)
     }
 }
-fn integer_pow(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
+fn integer_pow(a: &BigInt, b: &BigInt, limits: VmResourceLimits) -> Result<BigInt, Error> {
     let exponent = b
         .to_u32()
         .ok_or_else(|| Error::runtime("integer exponent must be a non-negative 32-bit integer"))?;
@@ -7496,7 +8320,7 @@ fn integer_pow(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt,
     Ok(a.pow(exponent))
 }
 
-fn integer_mul_resource(a: &BigInt, b: &BigInt, limits: ResourceLimits) -> Result<BigInt, Error> {
+fn integer_mul_resource(a: &BigInt, b: &BigInt, limits: VmResourceLimits) -> Result<BigInt, Error> {
     let minimum_bits = a.bits().saturating_add(b.bits()).saturating_sub(1);
     if !a.is_zero() && !b.is_zero() && minimum_bits > integer_bit_limit(limits) {
         return Err(Error::resource(
@@ -7523,7 +8347,7 @@ fn bit_integer(value: Value) -> Result<i32, Error> {
 }
 fn numeric_bit_binary(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(i32, i32) -> i32,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> BigInt,
 ) -> Result<(), Error> {
@@ -7560,7 +8384,7 @@ fn bit_shift(f: &mut Frame, op: impl Fn(i32, u32) -> i32) -> Result<(), Error> {
     f.stack.push(Value::Number(op(value, shift as u32) as f64));
     Ok(())
 }
-fn numeric_shift(f: &mut Frame, right: bool, limits: &ResourceLimits) -> Result<(), Error> {
+fn numeric_shift(f: &mut Frame, right: bool, limits: &VmResourceLimits) -> Result<(), Error> {
     let shift = pop(f)?;
     let value = pop(f)?;
     match (value, shift) {
@@ -7631,7 +8455,7 @@ fn compare(f: &mut Frame, op: impl Fn(&Value, &Value) -> bool) -> Result<(), Err
 }
 fn numeric_order(
     f: &mut Frame,
-    limits: &ResourceLimits,
+    limits: &VmResourceLimits,
     number_op: impl FnOnce(f64, f64) -> bool,
     integer_op: impl FnOnce(&BigInt, &BigInt) -> bool,
     decimal_op: impl FnOnce(std::cmp::Ordering) -> bool,
@@ -7824,8 +8648,8 @@ fn collect_static_pattern_bindings_into(
     }
 }
 
-fn bind_pattern(
-    vm: &mut Vm,
+fn bind_pattern<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     pattern: &Pattern,
     value: Option<&Value>,
     bindings: &mut Vec<(String, Value)>,
@@ -7905,7 +8729,7 @@ fn bind_pattern(
             for (index, pattern) in patterns.iter().enumerate() {
                 if let Pattern::Rest(name) = pattern {
                     let rest = Value::Array(Rc::new(values[index..].to_vec()));
-                    vm.record_shallow_value_allocation(1, &rest);
+                    vm.record_shallow_value_allocation(1, &rest)?;
                     bindings.push((name.clone(), rest.clone()));
                     if name != "_" {
                         env.borrow_mut().set_local(name, rest);
@@ -7979,7 +8803,7 @@ fn bind_pattern(
                 }
             }
             let rest_value = Value::Map(Rc::new(remaining));
-            vm.record_shallow_value_allocation(1, &rest_value);
+            vm.record_shallow_value_allocation(1, &rest_value)?;
             bindings.push((rest.clone(), rest_value.clone()));
             if rest != "_" {
                 env.borrow_mut().set_local(rest, rest_value);
@@ -7988,7 +8812,11 @@ fn bind_pattern(
         }
     }
 }
-fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
+fn index<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
+    target: Value,
+    key: Value,
+) -> Result<Value, Error> {
     match (target, key) {
         (Value::Array(xs), i @ (Value::Number(_) | Value::Integer(_))) => xs
             .get(sequence_index(
@@ -8008,7 +8836,7 @@ fn index(vm: &mut Vm, target: Value, key: Value) -> Result<Value, Error> {
                 )?)
                 .ok_or_else(|| Error::runtime("string index out of range"))?;
             let value = Value::String(Rc::from(character.to_string()));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         (Value::Map(m), Value::String(k)) => m
@@ -8043,13 +8871,13 @@ fn sequence_index(index: i128, len: usize, kind: &str) -> Result<usize, Error> {
     }
     Ok(resolved as usize)
 }
-fn slice(
-    vm: &mut Vm,
+fn slice<const TRANSIENT_LIMITS: bool>(
+    vm: &mut Vm<TRANSIENT_LIMITS>,
     target: Value,
     start: Value,
     end: Value,
     inclusive: bool,
-    limits: ResourceLimits,
+    limits: VmResourceLimits,
 ) -> Result<Value, Error> {
     match target {
         Value::Array(values) => {
@@ -8065,7 +8893,7 @@ fn slice(
             }
             check_array_resource(end - start, limits)?;
             let value = Value::Array(Rc::new(values[start..end].to_vec()));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         Value::String(text) => {
@@ -8090,7 +8918,7 @@ fn slice(
                 .map_or(text.len(), |(offset, _)| offset);
             check_string_len_resource(end_byte - start_byte, limits)?;
             let value = Value::String(Rc::from(&text[start_byte..end_byte]));
-            vm.record_shallow_value_allocation(1, &value);
+            vm.record_shallow_value_allocation(1, &value)?;
             Ok(value)
         }
         _ => Err(Error::runtime("slice expects an array or string")),
@@ -8114,9 +8942,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_bindings_view_preserves_legacy_vm_handle_width() {
+        assert_eq!(
+            std::mem::size_of::<Option<HostBindingsViewHandle>>(),
+            std::mem::size_of::<Option<HostState>>()
+        );
+    }
+
+    #[test]
+    fn vm_resource_limits_preserve_pre_transient_policy_width() {
+        assert_eq!(
+            std::mem::size_of::<VmResourceLimits>() + 2 * std::mem::size_of::<u64>(),
+            std::mem::size_of::<ResourceLimits>()
+        );
+
+        let limits = ResourceLimits::default()
+            .with_max_json_input_bytes(11)
+            .with_max_json_output_bytes(12)
+            .with_max_json_string_bytes(13)
+            .with_max_json_container_items(14)
+            .with_max_json_values(15)
+            .with_max_json_nesting_depth(16)
+            .with_max_integer_bits(17)
+            .with_max_decimal_coefficient_bits(18)
+            .with_max_decimal_scale(19)
+            .with_max_collection_operation_items(20)
+            .with_max_text_operation_bytes(21)
+            .with_max_string_bytes(22)
+            .with_max_array_items(23)
+            .with_max_map_entries(24)
+            .with_max_retained_managed_objects(25)
+            .with_max_retained_managed_bytes(26)
+            .with_max_transient_managed_objects(27)
+            .with_max_transient_managed_bytes(28);
+        assert_eq!(
+            VmResourceLimits::from(limits).public_with_transient(27, 28),
+            limits
+        );
+    }
+
+    #[test]
+    fn program_debug_info_preserves_legacy_allocation_width() {
+        assert_eq!(
+            std::mem::size_of::<ProgramDebugInfo>(),
+            std::mem::size_of::<Option<Rc<str>>>()
+                + std::mem::size_of::<BTreeMap<usize, ChunkSourceMap>>()
+        );
+    }
+
+    #[test]
     fn literal_replacement_length_rejects_arithmetic_overflow() {
         let limits = ResourceLimits::default().with_max_string_bytes(usize::MAX);
-        let error = checked_replacement_output_len(usize::MAX, 1, 2, 1, limits).unwrap_err();
+        let error = checked_replacement_output_len(usize::MAX, 1, 2, 1, limits.into()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Resource);
         assert_eq!(error.resource_limit(), Some(ResourceLimit::StringBytes));
     }
@@ -8336,7 +9213,7 @@ mod tests {
         assert_eq!(second.last_execution(), successful_stats);
 
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());
-        Vm::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
+        Vm::<false>::recycle_frame_stack(Vec::with_capacity(MAX_REUSABLE_FRAME_STACK + 1));
         assert!(reusable_is_empty());
         assert_eq!(reusable_capacity(), MAX_REUSABLE_FRAME_STACK);
         REUSABLE_FRAME_STACK.with(|reusable| *reusable.borrow_mut() = Vec::new());

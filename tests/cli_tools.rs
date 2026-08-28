@@ -970,6 +970,89 @@ fn qcoffee_fingerprints_restricted_module_graphs_without_execution() {
 }
 
 #[test]
+fn qcoffee_compile_limit_flags_bound_reads_bytecode_and_module_graphs() {
+    let boundary = Command::new(bin("qcoffee"))
+        .args(["--max-source-bytes", "4", "-e", "true"])
+        .output()
+        .unwrap();
+    assert!(boundary.status.success());
+    assert_eq!(String::from_utf8_lossy(&boundary.stdout), "true\n");
+
+    let source_error = Command::new(bin("qcoffee"))
+        .args(["--json", "--max-source-bytes", "3", "-e", "true"])
+        .output()
+        .unwrap();
+    assert_eq!(source_error.status.code(), Some(1));
+    let source_json = String::from_utf8_lossy(&source_error.stdout);
+    assert!(source_json.contains("\"kind\":\"resource\""));
+    assert!(source_json.contains("source exceeds configured UTF-8 byte limit of 3"));
+
+    let bytecode_error = Command::new(bin("qcoffee"))
+        .args(["--max-bytecode-instructions", "1", "-e", "true"])
+        .output()
+        .unwrap();
+    assert_eq!(bytecode_error.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&bytecode_error.stderr)
+            .contains("bytecode exceeds configured recursive instruction limit of 1")
+    );
+
+    let root =
+        std::env::temp_dir().join(format!("qcoffee-cli-compile-limits-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let source_path = root.join("single.coffee");
+    fs::write(&source_path, "true\n").unwrap();
+    let read_error = Command::new(bin("qcoffee"))
+        .args([
+            "--json",
+            "--max-source-bytes",
+            "4",
+            source_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(read_error.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&read_error.stdout),
+        "{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of 4\",\"line\":null}\n"
+    );
+
+    fs::write(
+        root.join("main.coffee"),
+        "import { value } from './dependency'\nexport value = value\n",
+    )
+    .unwrap();
+    fs::write(root.join("dependency.coffee"), "export value = 42\n").unwrap();
+    let graph_error = Command::new(bin("qcoffee"))
+        .args([
+            "--max-module-graph-modules",
+            "1",
+            "--module-root",
+            root.to_str().unwrap(),
+            "main",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(graph_error.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&graph_error.stderr)
+            .contains("module graph exceeds configured unique module limit of 1")
+    );
+
+    let invalid = Command::new(bin("qcoffee"))
+        .args(["--max-source-bytes", "invalid", "-e", "true"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    let quit_conflict = Command::new(bin("qcoffee"))
+        .args(["--max-source-bytes", "4", "--quit"])
+        .output()
+        .unwrap();
+    assert_eq!(quit_conflict.status.code(), Some(2));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn qcoffee_modules_require_an_explicit_restricted_root() {
     let root = std::env::temp_dir().join(format!("qcoffee-cli-modules-{}", std::process::id()));
     let app = root.join("app");

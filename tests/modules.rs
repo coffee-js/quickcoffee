@@ -1,6 +1,7 @@
 use quickcoffee::{
-    Context, Engine, ErrorKind, MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader,
-    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
+    CapabilityKey, CapabilityKind, CompileLimits, Context, Engine, ErrorKind,
+    MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader, ModuleSource,
+    ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
     cell::Cell,
@@ -130,6 +131,135 @@ fn module_children_inherit_contextual_native_host_state() {
         .unwrap();
     assert_eq!(exports.get("value").and_then(Value::as_number), Some(42.));
     assert_eq!(context.host_state::<Cell<u64>>().unwrap().get(), 42);
+}
+
+#[test]
+fn module_children_inherit_typed_capability_handles() {
+    let audit = CapabilityKey::<Cell<u64>>::new(CapabilityKind::Logging, "module-audit");
+    let entry = Engine::new()
+        .compile_module("main", "export value = host_audit()")
+        .unwrap();
+    let mut context = Context::builder()
+        .capability(audit, Cell::new(40_u64))
+        .contextual_native("host_audit", move |call, _| {
+            let sink = call
+                .capability(audit)
+                .ok_or_else(|| quickcoffee::Error::runtime("missing module logging capability"))?;
+            sink.set(sink.get() + 1);
+            Ok(Value::from(sink.get() as f64))
+        })
+        .build();
+    let exports = context
+        .run_module(&entry, &MemoryModuleLoader::new())
+        .unwrap();
+    assert_eq!(exports.get("value").and_then(Value::as_number), Some(41.));
+    assert_eq!(context.capability(audit).unwrap().get(), 41);
+}
+
+#[test]
+fn compile_limits_bound_module_bytecode_and_preflight_graphs_before_execution() {
+    let entry_source =
+        "import { left } from 'left'\nimport { right } from 'right'\nexport total = left + right";
+    let left_source = "export left = tick()";
+    let right_source = "export right = tick()";
+    let ordinary = Engine::new().compile_module("main", entry_source).unwrap();
+    assert!(ordinary.instruction_count() > 1);
+    let error = Engine::new()
+        .with_compile_limits(
+            CompileLimits::default()
+                .with_max_bytecode_instructions(ordinary.instruction_count() - 1),
+        )
+        .compile_module("main", entry_source)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("left", left_source);
+    loader.insert("right", right_source);
+    let module_limits = CompileLimits::default().with_max_module_graph_modules(2);
+    let runtime = Runtime::builder().compile_limits(module_limits).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let calls = Rc::new(Cell::new(0_u64));
+    let observed = calls.clone();
+    let mut context = runtime
+        .context_builder()
+        .native("tick", move |_| {
+            observed.set(observed.get() + 1);
+            Ok(Value::from(1_f64))
+        })
+        .build();
+    let error = context.run_module(&entry, &loader).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphModules)
+    );
+    assert_eq!(calls.get(), 0);
+    let error = Engine::new()
+        .with_compile_limits(module_limits)
+        .fingerprint_module_graph(&entry, &loader)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphModules)
+    );
+
+    let graph_bytes = entry_source.len() + left_source.len() + right_source.len();
+    let byte_limits = CompileLimits::default().with_max_module_graph_source_bytes(graph_bytes - 1);
+    let runtime = Runtime::builder().compile_limits(byte_limits).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let mut context = runtime.new_context();
+    let error = context.run_module(&entry, &loader).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphSourceBytes)
+    );
+    assert_eq!(context.last_execution().instructions, 0);
+    let error = Engine::new()
+        .with_compile_limits(byte_limits)
+        .fingerprint_module_graph(&entry, &loader)
+        .unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphSourceBytes)
+    );
+
+    let exact = CompileLimits::default().with_max_module_graph_source_bytes(graph_bytes);
+    let runtime = Runtime::builder().compile_limits(exact).build();
+    let entry = runtime.compile_module("main", entry_source).unwrap();
+    let mut context = runtime
+        .context_builder()
+        .native("tick", |_| Ok(Value::from(1_f64)))
+        .build();
+    assert_eq!(
+        context
+            .run_module(&entry, &loader)
+            .unwrap()
+            .get("total")
+            .and_then(Value::as_number),
+        Some(2_f64)
+    );
+}
+
+#[test]
+fn restricted_file_loader_bounds_source_before_full_read() {
+    let root = module_temp("source-limit");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("main.coffee"), "export value = true").unwrap();
+    let loader = RestrictedFileModuleLoader::new(&root)
+        .unwrap()
+        .with_max_source_bytes(4);
+    let error = loader.load_entry("main").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+    assert_eq!(
+        error.labels()[0].span.source_name.as_deref(),
+        Some("main.coffee")
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -413,6 +543,45 @@ fn module_children_inherit_retained_memory_commit_limits() {
 }
 
 #[test]
+fn module_graphs_share_one_transient_managed_allocation_budget() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { dependency } from 'dependency'\nexport result = concat('', dependency)",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export dependency = concat('', 'coffee')");
+
+    let mut baseline = Context::new();
+    let exports = baseline.run_module(&main, &loader).unwrap();
+    assert_eq!(
+        exports.get("result").and_then(Value::as_str),
+        Some("coffee")
+    );
+    let expected = baseline.last_execution();
+    assert_eq!(expected.managed_objects_allocated, 2);
+    assert_eq!(expected.managed_bytes_allocated, 12);
+
+    let exact_limits = ResourceLimits::default()
+        .with_max_transient_managed_objects(expected.managed_objects_allocated)
+        .with_max_transient_managed_bytes(expected.managed_bytes_allocated);
+    let mut exact = Context::new().with_resource_limits(exact_limits);
+    assert!(exact.run_module(&main, &loader).is_ok());
+    assert_eq!(exact.last_execution(), expected);
+
+    let mut limited = Context::new()
+        .with_resource_limits(ResourceLimits::default().with_max_transient_managed_objects(1));
+    let error = limited.run_module(&main, &loader).unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::TransientManagedObjects)
+    );
+    assert_eq!(limited.last_execution().managed_objects_allocated, 2);
+}
+
+#[test]
 fn modules_export_classes_without_exposing_their_receiver_state() {
     let engine = Engine::new();
     let main = engine
@@ -576,7 +745,7 @@ fn module_cycles_are_rejected_and_resources_cover_dependencies() {
             .contains("circular module dependency: main -> a -> b -> a")
     );
 
-    loader.insert("a", "loop 1");
+    loader.insert("a", "loop 1\nexport value = 1");
     let error = Context::new()
         .with_fuel(8)
         .run_module(&main, &loader)

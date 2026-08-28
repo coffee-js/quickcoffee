@@ -20,7 +20,9 @@ Embedded modules may use named import/export; `Engine::compile_module` and `Cont
 
 `qcoffee --module-root ROOT ENTRY` explicitly grants one restricted-file module root to that operation; ENTRY is root-relative and imports stay ./ or ../. The ordinary mode executes the graph and prints the ordered export Map (or an exports JSON record), while combining `--fingerprint` prints only its 16-digit graph key without execution. Single-file, stdin, -e, REPL, check, and disassembly modes never gain that authority.
 
-Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, and Decimal scale; constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable.
+Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, Decimal scale, retained-state commit size, and per-run cumulative managed allocation. Constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable. The transient allocation budget also counts created-and-discarded values but is not RSS or an instantaneous live-memory peak.
+
+`CompileLimits` separately bound raw source bytes, recursive bytecode instructions, unique modules, and cumulative module-graph source; module execution preflights the complete graph before any script runs, and `qcoffee` exposes matching `--max-*` options.
 
 `IntoValue` and `TryFromValue` convert owned host scalars, Vec, `BTreeMap<String, T>`, and Option recursively without running a script; nil alone maps to None, and Number, Integer, Decimal, and other kinds never coerce across their boundaries.
 
@@ -48,7 +50,7 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qcoffee --json` emits one JSON value or structured error for a single execution, suitable for CI and hosts.
 
-Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, and retained-memory boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
+Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, retained-memory boundaries, and transient managed-allocation boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
 
 `Engine::compile_program` verifies once; `Context::run_program` reuses the immutable verified bytecode for repeated embedding calls.
 
@@ -75,6 +77,8 @@ Embedders may call `Context::set_fuel` or set_resource_limits between runs witho
 `Runtime::context_builder` creates isolated contexts that share only bounded verified Program/Module compilation caches; globals, evaluated exports, fuel, cancellation, statistics, and retained-memory state remain context-owned.
 
 Opt-in contextual natives use `NativeCallContext` to poll cancellation, charge fuel, record managed allocation telemetry, and access typed script-invisible `HostState` without ambient authority.
+
+`HostCapabilities` and `CapabilityKey<T>` place clock, random, logging, file, and network handles in a Context-owned allowlist; modules inherit handles, independent Contexts are isolated by default, and the host still accounts cancellation, fuel, and allocation explicitly.
 
 `cargo run --example embed` compiles a minimal Rust host that sets a global, registers a native callback, and evaluates QuickCoffee.
 

@@ -20,6 +20,8 @@ Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Cont
 
 `Engine::fingerprint_module_graph` per eundem loader totum graphum legit et verificat sine exsecutione, clavem u64 versionatam fontibus, nominibus canonicis, import/export et marginibus sensibilem reddens.
 
+`CompileLimits` separatim bytes fontis crudi, instructiones bytecodicis recursivas, modulos unicos et fontem cumulatum graphi finiunt; graphus totus ante ullum scriptum modulorum currens probatur, et `qcoffee` optiones pares `--max-*` praebet.
+
 `qcoffee --check FILE` fontem verificat sine cursu.
 
 `qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit.
@@ -71,6 +73,8 @@ Hospes inter cursus `Context::set_fuel` vocare potest; `Context::fuel` budgetum 
 `Runtime::context_builder` contextus separatos creat qui tantum caches finitas Program/Module verificatorum communicant; globalia, exportata aestimata, alimentum, cancellatio, statistica et memoria retenta cuique contextui propria manent.
 
 Native contextualis opt-in per `NativeCallContext` cancellationem explorat, alimentum consumit, allocationes administratas refert, et `HostState` typatum scriptis invisibile accedit sine auctoritate ambiente.
+
+`HostCapabilities` et `CapabilityKey<T>` ansas clock, random, logging, file, network in indice Context proprio ponunt; moduli ansas hereditant, Contextus separati sponte non communicant, et hospes cancellationem, alimentum, allocationes explicite rationem reddit.
 
 `cargo run --example embed` hospitem Rust minimum compilat: globale ponit, callback nativum addit, et QuickCoffee currit.
 

@@ -30,6 +30,7 @@ impl ChunkSourceMap {
 pub(crate) struct CompiledSourceMap {
     pub(crate) top: ChunkSourceMap,
     pub(crate) nested: Vec<(Rc<Chunk>, ChunkSourceMap)>,
+    pub(crate) instruction_count: usize,
 }
 impl CompiledSourceMap {
     fn span(&self, top_chunk: usize, chunk: usize, pc: usize) -> Option<crate::SourceSpan> {
@@ -81,6 +82,12 @@ fn lower(program: &[Stmt], record_source_map: bool) -> Result<Compiler, Error> {
 pub(crate) fn compile_mapped(program: &[Stmt]) -> Result<(Chunk, CompiledSourceMap), Error> {
     let c = lower(program, true)?;
     debug_assert_eq!(c.chunk.code.len(), c.instruction_spans.len());
+    let instruction_count = c
+        .nested_source_maps
+        .iter()
+        .fold(c.chunk.code.len(), |count, (_, source_map)| {
+            count.saturating_add(source_map.instructions.len())
+        });
     Ok((
         c.chunk,
         CompiledSourceMap {
@@ -89,12 +96,16 @@ pub(crate) fn compile_mapped(program: &[Stmt]) -> Result<(Chunk, CompiledSourceM
                 spans: c.span_table,
             },
             nested: c.nested_source_maps,
+            instruction_count,
         },
     ))
 }
 
-pub(crate) fn compile(program: &[Stmt]) -> Result<Chunk, Error> {
-    lower(program, false).map(|compiler| compiler.chunk)
+pub(crate) fn compile(program: &[Stmt]) -> Result<(Chunk, usize), Error> {
+    lower(program, false).map(|compiler| {
+        let instruction_count = crate::vm::count_new(&compiler.chunk);
+        (compiler.chunk, instruction_count)
+    })
 }
 
 /// Evaluates only side-effect-free literal expressions at compile time. A
@@ -1452,11 +1463,25 @@ mod tests {
         let value = constant_value(&expression).expect("integer addition folds");
         assert_eq!(value.to_string(), "3n");
         let program = parser::parse("1n + 2n").unwrap();
-        let chunk = compile(&program).unwrap();
+        let (chunk, _) = compile(&program).unwrap();
         assert_eq!(chunk.code.len(), 2);
         assert!(!chunk.disassemble().contains("Add"));
         let public_chunk = crate::compile("1n + 2n").unwrap();
         assert_eq!(public_chunk.code.len(), 2);
+    }
+
+    #[test]
+    fn emitted_instruction_count_covers_nested_functions_and_pattern_defaults() {
+        let program =
+            parser::parse("outer = (x = 1) ->\n  [y = 2] = []\n  -> x + y\nouter()()").unwrap();
+        let (chunk, instruction_count) = compile(&program).unwrap();
+        assert_eq!(instruction_count, crate::vm::count_bcs(&chunk));
+
+        let (mapped_chunk, source_map) = compile_mapped(&program).unwrap();
+        assert_eq!(
+            source_map.instruction_count,
+            crate::vm::count_bcs(&mapped_chunk)
+        );
     }
 
     fn replace_mapped_chunk(

@@ -24,6 +24,8 @@
 
 `Engine::fingerprint_module_graph` तेनैव loader द्वारा सम्पूर्णं स्थिर-graph पठित्वा सत्यापयति, न चालयति; version-युक्ता u64-कुञ्जी dependency-source, canonical-name, import/export तथा edge-परिवर्तनं ज्ञापयति।
 
+`CompileLimits` पृथक् raw-source-bytes, recursive-bytecode-instructions, unique-modules तथा cumulative-module-graph-source सीमयति; सम्पूर्ण-graph पूर्वं सत्यापिते एव module-script चलति, `qcoffee` समान `--max-*` विकल्पान् ददाति।
+
 `qcoffee --check FILE` स्रोतं verify करोति, न चालयति।
 
 `qcoffee --interactive` (वा `-i`) एकं Context पङ्क्ति-क्रमेण धारयति; `:help` दर्शयति, `:quit` निर्गच्छति।
@@ -75,6 +77,8 @@ host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्श�
 `Runtime::context_builder` पृथक् Context निर्माति; केवलं सीमित-सत्यापित Program/Module compilation-cache साझा भवति, globals, exports, fuel, cancellation, statistics, retained-memory च प्रत्येक-Context-स्वामित्वे तिष्ठन्ति।
 
 Opt-in contextual native `NativeCallContext` द्वारा cancellation परीक्षते, fuel घटयति, managed-allocation telemetry लिखति, typed script-अदृश्य `HostState` प्राप्नोति, ambient authority न ददाति।
+
+`HostCapabilities` तथा `CapabilityKey<T>` clock, random, logging, file, network handles Context-स्वामिके allowlist मध्ये स्थापयतः; module handles अनुवर्तते, पृथक् Context स्वतः न साझीकुरुतः, host cancellation, fuel, allocation स्पष्टतया गणयति।
 
 `cargo run --example embed` लघुं Rust-आश्रयं संयोजयति, वैश्विकं स्थापयति, native-callback योजयति, QuickCoffee च चालयति।
 
