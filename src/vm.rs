@@ -1572,32 +1572,47 @@ fn check_map_resource(len: usize, limits: VmResourceLimits) -> Result<(), Error>
 }
 
 fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), Error> {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
+    // Process the root directly so ordinary immutable maps/arrays whose children
+    // are scalar do not allocate a traversal stack on every guarded load. Keep a
+    // stack for nested resource-bearing values so hostile host input remains
+    // iterative rather than consuming the Rust call stack.
+    let mut pending = Vec::new();
+    let mut value = value;
+    loop {
         match value {
             Value::Integer(value) => check_integer_resource(value.inner(), limits)?,
             Value::Decimal(value) => check_decimal_resource(value, limits)?,
             Value::String(value) => check_string_resource(value, limits)?,
             Value::Array(values) => {
                 check_array_resource(values.len(), limits)?;
-                pending.extend(values.iter());
+                pending.extend(
+                    values
+                        .iter()
+                        .filter(|value| value_needs_resource_check(value)),
+                );
             }
             Value::Map(values) => {
                 check_map_resource(values.len(), limits)?;
                 for (key, value) in values.iter() {
                     check_string_resource(key, limits)?;
-                    pending.push(value);
+                    if value_needs_resource_check(value) {
+                        pending.push(value);
+                    }
                 }
             }
             Value::Error(error) => {
                 check_string_resource(&error.code, limits)?;
                 check_string_resource(&error.message, limits)?;
-                pending.push(&error.data);
+                if value_needs_resource_check(&error.data) {
+                    pending.push(&error.data);
+                }
                 let mut cause = error.cause.as_deref();
                 while let Some(error) = cause {
                     check_string_resource(&error.code, limits)?;
                     check_string_resource(&error.message, limits)?;
-                    pending.push(&error.data);
+                    if value_needs_resource_check(&error.data) {
+                        pending.push(&error.data);
+                    }
                     cause = error.cause.as_deref();
                 }
             }
@@ -1608,6 +1623,10 @@ fn check_value_resources(value: &Value, limits: VmResourceLimits) -> Result<(), 
             | Value::Instance(_)
             | Value::Function(_) => {}
         }
+        let Some(next) = pending.pop() else {
+            break;
+        };
+        value = next;
     }
     Ok(())
 }
