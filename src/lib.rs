@@ -24,8 +24,10 @@ pub use vm::{
     CancellationToken, CapabilityKey, CapabilityKind, Context, ContextBuilder,
     ContextualNativeFunction, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
     ErrorKind, ExecutionStats, Function, HostCapabilities, HostState, Integer, IntoValue,
-    NativeCallContext, NativeFunction, Program, RetainedMemory, Runtime, RuntimeBuilder,
-    RuntimeCacheStats, ScriptError, SourcePosition, SourceSpan, TryFromValue, Value, ValueKind,
+    LiveManagedMemory, LiveMemoryCheckpoint, LiveMemoryObservation, LiveMemoryOutcome,
+    LiveMemoryReport, NativeCallContext, NativeFunction, Program, RetainedMemory, Runtime,
+    RuntimeBuilder, RuntimeCacheStats, ScriptError, SourcePosition, SourceSpan, TryFromValue,
+    Value, ValueKind,
 };
 
 /// Compiles `source` to verified bytecode without executing it.

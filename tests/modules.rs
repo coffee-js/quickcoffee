@@ -1,7 +1,7 @@
 use quickcoffee::{
     CapabilityKey, CapabilityKind, CompileLimits, Context, Engine, ErrorKind,
-    MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader, ModuleSource,
-    ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
+    LiveMemoryObservation, MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, ModuleLoader,
+    ModuleSource, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
     cell::Cell,
@@ -523,6 +523,32 @@ fn module_execution_and_host_roots_need_explicit_high_water_samples() {
     assert!(snapshot.objects > initial_high_water.objects);
     assert!(snapshot.bytes > initial_high_water.bytes);
     assert_eq!(context.retained_memory_high_water(), snapshot);
+}
+
+#[test]
+fn module_execution_aggregates_opt_in_live_memory_reports() {
+    let engine = Engine::new();
+    let main = engine
+        .compile_module(
+            "main",
+            "import { beans } from 'dependency'\nexport result = len(beans)",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export beans = ['coffee', 'beans']");
+    let mut context =
+        Context::new().with_live_memory_observation(LiveMemoryObservation::Checkpointed);
+    assert_eq!(
+        context
+            .run_module(&main, &loader)
+            .unwrap()
+            .get("result")
+            .and_then(Value::as_number),
+        Some(2.)
+    );
+    let report = context.last_live_memory_report().unwrap();
+    assert!(report.samples >= 4);
+    assert!(report.high_water.objects >= report.final_snapshot.objects);
 }
 
 #[test]
