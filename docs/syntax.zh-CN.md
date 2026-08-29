@@ -20,6 +20,8 @@
 
 `qtest --timeout-ms N` 为每个选中的文件创建隔离 Context worker，在 N 个正整数毫秒后协作取消，作为普通单文件失败记录，并按确定输入顺序继续执行。它不替代 fuel 或资源限制，也不能强制停止同步且不协作的宿主 callback；qtest 默认不提供这种 callback 注入 surface。
 
+`qtest --module-root ROOT ENTRY...` 显式授予一个受限文件模块根。每个规范化的根内相对入口先预检为内存 `ModulePackage`，再在新的 Context 中执行；只有入口导出严格 Bool 的 `test = true` 才通过。模块用例复用 fuel、每 case timeout、stats、filter/list、JSON、TAP 与 JUnit 契约；普通文件模式仍无模块权限。
+
 `qtest --junit FILE` 在选中文件结束后写入一份字节稳定的 UTF-8 JUnit XML 报告，可与普通、JSON 或 TAP 输出并用；它会 XML 转义 case 路径和失败详情，刻意省略测量时间。
 
 内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，`qcoffee --fingerprint --module-root ROOT ENTRY` 以同一格式输出完整受限模块图的独立版本化指纹；两者都使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成带稳定模板版本标记的说明、围栏源码和最终值，`--incremental` 会在最终渲染字节不变时保留已有产物，但不会跳过执行；嵌入方可用 `CompileLimits` 管理编译输入与图预算，用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉。`IntoValue` 与 `TryFromValue` 可递归转换常用的拥有型 Rust 标量、`Vec`、`BTreeMap<String, T>` 与 `Option`，不执行脚本，也不在 Number、Integer 与 Decimal 间 coercion；也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。

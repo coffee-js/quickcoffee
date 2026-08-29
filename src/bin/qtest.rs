@@ -1,6 +1,6 @@
 //! Test runner for executable QuickCoffee scripts and literate manuals.
 
-use quickcoffee::{CancellationToken, Context, Value};
+use quickcoffee::{CancellationToken, Context, Error, RestrictedFileModuleLoader, Runtime, Value};
 use std::{
     collections::HashSet,
     env, fs,
@@ -59,7 +59,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --version"
+        "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest [OPTIONS] --module-root ROOT ENTRY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] --module-root ROOT ENTRY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
@@ -92,6 +92,20 @@ struct TestRun {
     outcome: Result<(), String>,
     instructions: Option<u64>,
     fuel_remaining: Option<u64>,
+}
+
+#[derive(Clone)]
+enum TestCase {
+    File(PathBuf),
+    Module { root: PathBuf, entry: String },
+}
+impl TestCase {
+    fn label(&self) -> String {
+        match self {
+            Self::File(path) => path.display().to_string(),
+            Self::Module { entry, .. } => entry.clone(),
+        }
+    }
 }
 
 struct JunitCase {
@@ -167,15 +181,89 @@ fn run_file(path: PathBuf, fuel: u64, cancellation: Option<CancellationToken>) -
     }
 }
 
-fn run_file_with_timeout(path: PathBuf, fuel: u64, timeout_ms: Option<u64>) -> TestRun {
+fn module_error_detail(error: &Error) -> String {
+    let detail = error.to_string();
+    let Some(span) = error
+        .labels()
+        .iter()
+        .find(|label| label.kind == quickcoffee::DiagnosticLabelKind::Primary)
+        .map(|label| &label.span)
+    else {
+        return detail;
+    };
+    let Some(source_name) = span.source_name.as_deref() else {
+        return detail;
+    };
+    match span.start.column {
+        Some(column) => format!("{detail} at {source_name}:{}:{column}", span.start.line),
+        None => format!("{detail} at {source_name}:{}", span.start.line),
+    }
+}
+
+fn prepare_module_case(
+    root: &Path,
+    entry: &str,
+) -> Result<(Runtime, quickcoffee::ModulePackage), Error> {
+    let loader = RestrictedFileModuleLoader::new(root)?;
+    let source = loader.load_entry(entry)?;
+    let runtime = Runtime::new();
+    let module = runtime.compile_module(source.name(), source.source())?;
+    let package = runtime.prepare_module_package(&module, &loader)?;
+    Ok((runtime, package))
+}
+
+fn run_module(
+    root: PathBuf,
+    entry: String,
+    fuel: u64,
+    cancellation: Option<CancellationToken>,
+) -> TestRun {
+    let (runtime, package) = match prepare_module_case(&root, &entry) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return TestRun {
+                outcome: Err(module_error_detail(&error)),
+                instructions: None,
+                fuel_remaining: None,
+            };
+        }
+    };
+    let mut context = runtime.new_context().with_fuel(fuel);
+    if let Some(cancellation) = cancellation {
+        context.set_cancellation_token(cancellation);
+    }
+    let outcome = match context.run_module_package(&package) {
+        Ok(exports) => match exports.get("test") {
+            Some(Value::Bool(true)) => Ok(()),
+            Some(value) => Err(format!("export test was {value}, expected true")),
+            None => Err("module did not export test, expected true".to_owned()),
+        },
+        Err(error) => Err(module_error_detail(&error)),
+    };
+    let execution = context.last_execution();
+    TestRun {
+        outcome,
+        instructions: Some(execution.instructions),
+        fuel_remaining: Some(execution.fuel_remaining),
+    }
+}
+
+fn run_case(case: TestCase, fuel: u64, cancellation: Option<CancellationToken>) -> TestRun {
+    match case {
+        TestCase::File(path) => run_file(path, fuel, cancellation),
+        TestCase::Module { root, entry } => run_module(root, entry, fuel, cancellation),
+    }
+}
+
+fn run_case_with_timeout(case: TestCase, fuel: u64, timeout_ms: Option<u64>) -> TestRun {
     let Some(timeout_ms) = timeout_ms else {
-        return run_file(path, fuel, None);
+        return run_case(case, fuel, None);
     };
     let cancellation = CancellationToken::new();
     let worker_cancellation = cancellation.clone();
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
-        let _ = sender.send(run_file(path, fuel, Some(worker_cancellation)));
+        let _ = sender.send(run_case(case, fuel, Some(worker_cancellation)));
     });
     match receiver.recv_timeout(Duration::from_millis(timeout_ms)) {
         Ok(run) => run,
@@ -210,6 +298,7 @@ fn main() -> ExitCode {
     let mut tap = false;
     let mut filter = None;
     let mut list = false;
+    let mut module_root = None;
     let mut inputs: Vec<String> = vec![];
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -247,6 +336,17 @@ fn main() -> ExitCode {
             "--json" => json = true,
             "--tap" => tap = true,
             "--list" => list = true,
+            "--module-root" => match args.next() {
+                Some(root) if module_root.is_none() => module_root = Some(PathBuf::from(root)),
+                Some(_) => {
+                    eprintln!("--module-root may be specified only once");
+                    return ExitCode::from(2);
+                }
+                None => {
+                    eprintln!("--module-root requires a root directory");
+                    return ExitCode::from(2);
+                }
+            },
             "--filter" => match args.next() {
                 Some(value) if !value.is_empty() => filter = Some(value),
                 _ => {
@@ -269,36 +369,76 @@ fn main() -> ExitCode {
         eprintln!("--json and --tap cannot be used together");
         return ExitCode::from(2);
     }
-    let mut files = vec![];
-    let mut visited_directories = HashSet::new();
-    let mut visited_files = HashSet::new();
-    for input in inputs {
-        if let Err(error) = collect(
-            Path::new(&input),
-            &mut files,
-            &mut visited_directories,
-            &mut visited_files,
-        ) {
-            if tap {
-                println!("TAP version 13");
-                println!("Bail out! {input}: {error}");
-            } else {
-                eprintln!("not ok {input}: {error}");
+    let mut cases = if let Some(root) = module_root {
+        let loader = match RestrictedFileModuleLoader::new(&root) {
+            Ok(loader) => loader,
+            Err(error) => {
+                if tap {
+                    println!("TAP version 13");
+                    println!("Bail out! {}: {error}", root.display());
+                } else {
+                    eprintln!("not ok {}: {error}", root.display());
+                }
+                return ExitCode::from(1);
             }
-            return ExitCode::from(1);
+        };
+        let mut cases = Vec::new();
+        let mut visited_modules = HashSet::new();
+        for input in inputs {
+            let source = match loader.load_entry(&input) {
+                Ok(source) => source,
+                Err(error) => {
+                    if tap {
+                        println!("TAP version 13");
+                        println!("Bail out! {input}: {error}");
+                    } else {
+                        eprintln!("not ok {input}: {error}");
+                    }
+                    return ExitCode::from(1);
+                }
+            };
+            let entry = source.name().to_owned();
+            if visited_modules.insert(entry.clone()) {
+                cases.push(TestCase::Module {
+                    root: root.clone(),
+                    entry,
+                });
+            }
         }
-    }
-    files.sort();
-    files.dedup();
+        cases
+    } else {
+        let mut files = vec![];
+        let mut visited_directories = HashSet::new();
+        let mut visited_files = HashSet::new();
+        for input in inputs {
+            if let Err(error) = collect(
+                Path::new(&input),
+                &mut files,
+                &mut visited_directories,
+                &mut visited_files,
+            ) {
+                if tap {
+                    println!("TAP version 13");
+                    println!("Bail out! {input}: {error}");
+                } else {
+                    eprintln!("not ok {input}: {error}");
+                }
+                return ExitCode::from(1);
+            }
+        }
+        files.into_iter().map(TestCase::File).collect()
+    };
+    cases.sort_by_key(TestCase::label);
     let filtered = filter.is_some();
     if let Some(filter) = filter.as_deref() {
-        files.retain(|path| {
-            fs::canonicalize(path)
+        cases.retain(|case| match case {
+            TestCase::File(path) => fs::canonicalize(path)
                 .map(|canonical| canonical.to_string_lossy().contains(filter))
-                .unwrap_or(false)
+                .unwrap_or(false),
+            TestCase::Module { entry, .. } => entry.contains(filter),
         });
     }
-    if files.is_empty() {
+    if cases.is_empty() {
         let message = if filtered {
             "no matching .coffee or .litcoffee test files found"
         } else {
@@ -319,8 +459,8 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(2);
         }
-        for path in files {
-            println!("{}", path.display());
+        for case in cases {
+            println!("{}", case.label());
         }
         return ExitCode::SUCCESS;
     }
@@ -328,11 +468,11 @@ fn main() -> ExitCode {
         println!("TAP version 13");
     }
     let mut failed = 0;
-    let total = files.len();
+    let total = cases.len();
     let mut junit_cases = junit.as_ref().map(|_| Vec::with_capacity(total));
-    for (index, path) in files.into_iter().enumerate() {
-        let label = path.display().to_string();
-        let run = run_file_with_timeout(path, fuel, timeout_ms);
+    for (index, case) in cases.into_iter().enumerate() {
+        let label = case.label();
+        let run = run_case_with_timeout(case, fuel, timeout_ms);
         if stats {
             if let (Some(instructions), Some(fuel_remaining)) =
                 (run.instructions, run.fuel_remaining)
