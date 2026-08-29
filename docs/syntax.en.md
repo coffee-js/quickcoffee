@@ -95,6 +95,9 @@ Supported: decimal, hexadecimal (`0xff`), binary (`0b1010`), octal (`0o755`), an
 Identifiers use Unicode XID rules: XID start or `_` first, XID continue or `_` after, with no normalization. `#` is a line comment; non-nesting `### … ###` block comments are removed before layout. Excluded: embedded JavaScript, global/free `this`, arbitrary-function construction, public prototype capabilities, regexes, computed map-pattern keys, unparenthesized default/rest/destructuring parameter forms, generators, async, and member/index/destructuring `?=`. Space-only indentation blocks are supported for multi-statement bodies. Indented classes support constructors, instance/static methods, class-confined `this`/`@`, dedicated Class/Instance values, confined field writes, receiver-aware calls, `new`, private `extends` chains, statically resolved `super`, and safely escaping receiver-bound `=>`; the historical factory form produces a migration diagnostic. Conditions accept only booleans and names must be declared by assignment or the host.
 
 Implicit calls are supported on one logical line: `print value`, `add 20, 22`, `double add 20, 22`, and `len [1, 2, 3]`. Their arguments use ordinary expression precedence; explicit parentheses remain required for calls spanning layout boundaries.
+
+`map_set(map, key, value)` and `map_delete(map, key)` require String keys and return new lexically ordered Maps without mutating their inputs. RFC 0159 defines their pre-allocation collection-operation and Map-entry limits.
+
 ## Benchmark statistics
 
 `qbench --json --repeat 11` reports the upper median and a `*_mad_ns` (median absolute deviation) dispersion value for compilation, verification, and execution. `qbench --compare-qjs PATH` reports separate medians and MAD values for startup, compilation, precompiled hot execution, and CLI-total time for both runtimes.

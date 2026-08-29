@@ -156,6 +156,12 @@ fn main() {
             expected: "8",
         },
         Workload {
+            name: "stdlib-map-updates",
+            source: "base = {a: 1, b: 2, c: 3}\nupdated = map_set(base, 'b', 4)\nout = map_delete(updated, 'a')\nbase.a + out.b + out.c",
+            iterations: 20_000,
+            expected: "8",
+        },
+        Workload {
             name: "member-lookup-loop",
             source: "record = {alpha: 1, beta: 2, gamma: 3, delta: 4}\nsum = 0\ni = 0\nwhile i < 100\n  sum += record.alpha + record.beta + record.gamma + record.delta\n  i++\nsum",
             iterations: 10_000,

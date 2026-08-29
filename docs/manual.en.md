@@ -22,6 +22,8 @@ Embedded modules may use named import/export; `Engine::compile_module` and `Cont
 
 `Engine::prepare_module_package` and `Runtime::prepare_module_package` construct an immutable in-memory preflighted graph from that explicit loader boundary. `Context::run_module_package` never calls the loader and creates fresh module globals and exports for every run; a package is a snapshot, so hosts rebuild it explicitly when their sources change.
 
+`map_set(map, key, value)` and `map_delete(map, key)` return new lexically ordered Maps without mutating their inputs; copying and output growth are resource-bounded before allocation.
+
 `qcoffee --module-root ROOT ENTRY` explicitly grants one restricted-file module root to that operation; ENTRY is root-relative and imports stay ./ or ../. The ordinary mode executes the graph and prints the ordered export Map (or an exports JSON record), while combining `--fingerprint` prints only its 16-digit graph key without execution. Single-file, stdin, -e, REPL, check, and disassembly modes never gain that authority.
 
 Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array items, Map entries, JSON sizes, collection-operation item counts, Integer bits, Decimal coefficient bits, Decimal scale, retained-state commit size, and per-run cumulative managed allocation. Constants, globals, native results, member reads, and generated values are rechecked under the current Context policy. Boundary failures are Resource errors that scripts cannot catch, while JSON syntax errors remain catchable. The transient allocation budget also counts created-and-discarded values but is not RSS or an instantaneous live-memory peak.

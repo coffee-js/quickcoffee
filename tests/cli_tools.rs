@@ -1523,6 +1523,7 @@ fn qbench_json_is_guarded_and_machine_readable() {
         "call-containing-local-loop",
         "captured-local-loop",
         "map-spread",
+        "stdlib-map-updates",
         "member-lookup-loop",
         "class-construction-dispatch",
         "class-inherited-super-dispatch",

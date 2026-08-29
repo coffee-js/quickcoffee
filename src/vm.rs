@@ -4526,6 +4526,14 @@ fn concat_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
     ManagedAllocation::legacy_shallow(legacy, value)
 }
 
+fn map_update_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
+    let legacy = match value {
+        Value::Map(values) => values.len() as u64 + 1,
+        _ => 0,
+    };
+    ManagedAllocation::legacy_shallow(legacy, value)
+}
+
 fn replace_all_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
     ManagedAllocation::legacy_shallow(u64::from(matches!(value, Value::String(_))), value)
 }
@@ -4738,6 +4746,49 @@ fn concat_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error
             "concat expects two strings or two arrays of the same type",
         )),
     }
+}
+
+fn map_set_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 3 {
+        return Err(Error::runtime("map_set expects map, string key, and value"));
+    }
+    let (Value::Map(input), Value::String(key)) = (&xs[0], &xs[1]) else {
+        return Err(Error::runtime("map_set expects a map and string key"));
+    };
+    let output_len = input
+        .len()
+        .checked_add(usize::from(!input.contains_key(key.as_ref())))
+        .ok_or_else(|| Error::resource(ResourceLimit::MapEntries, "map is too large"))?;
+    let operation_limit = limits.max_collection_operation_items();
+    if output_len > operation_limit {
+        return Err(Error::resource(
+            ResourceLimit::CollectionOperationItems,
+            format!("map_set output exceeds {operation_limit} items"),
+        ));
+    }
+    check_map_resource(output_len, limits)?;
+    let mut output = input.as_ref().clone();
+    output.insert(key.to_string(), xs[2].clone());
+    Ok(Value::Map(Rc::new(output)))
+}
+
+fn map_delete_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
+    if xs.len() != 2 {
+        return Err(Error::runtime("map_delete expects map and string key"));
+    }
+    let (Value::Map(input), Value::String(key)) = (&xs[0], &xs[1]) else {
+        return Err(Error::runtime("map_delete expects a map and string key"));
+    };
+    let operation_limit = limits.max_collection_operation_items();
+    if input.len() > operation_limit {
+        return Err(Error::resource(
+            ResourceLimit::CollectionOperationItems,
+            format!("map_delete input exceeds {operation_limit} items"),
+        ));
+    }
+    let mut output = input.as_ref().clone();
+    output.remove(key.as_ref());
+    Ok(Value::Map(Rc::new(output)))
 }
 
 fn replace_all_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
@@ -5464,6 +5515,8 @@ impl Context {
         self.add_resource_builtin("replace_all", replace_all_builtin, replace_all_allocations);
         self.add_resource_builtin("sort", sort_builtin, sorted_array_allocations);
         self.add_resource_builtin("concat", concat_builtin, concat_allocations);
+        self.add_resource_builtin("map_set", map_set_builtin, map_update_allocations);
+        self.add_resource_builtin("map_delete", map_delete_builtin, map_update_allocations);
         self.install_json_builtins();
         self.add_builtin(
             "integer",
