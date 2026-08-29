@@ -58,6 +58,8 @@
 
 `qtest --fuel N` 者，为各可行文别限其指令之数。
 
+`qtest --module-root ROOT ENTRY...` 明授受限模块根；各规范 ENTRY 先预验全图成内存 `ModulePackage`，别以新 Context 行之，惟导出严格 Bool 之 `test = true` 者为通过。常篇不因之得模块之权。
+
 `qtest --stats` 更书各篇所试指令与余燃料于标准错误，而 ok 之出不改。
 
 `qtest --json` 每篇出一行 JSON，便于 CI 取用；`--stats` 仍书于标准错误。

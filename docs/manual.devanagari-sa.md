@@ -44,6 +44,8 @@
 
 `qtest --fuel N` प्रत्येक executable-document पृथक् instruction-budget ददाति।
 
+`qtest --module-root ROOT ENTRY...` स्पष्टं restricted module-root ददाति; प्रत्येकं canonical ENTRY स्मृतिस्थे `ModulePackage` मध्ये पूर्वं verify भवति, नूतने Context मध्ये चलति, strict Bool `test = true` export कृते एव सफलं भवति। सामान्य file-mode module-अधिकारं न प्राप्नोति।
+
 `qtest --stats` प्रत्येकस्य documentस्य instruction-संख्या तथा अवशिष्ट-fuel standard error मध्ये लिखति, ok-निर्गमं न परिवर्तयति।
 
 `qtest --json` प्रत्येकस्य लेखस्य स्थिरं JSON फलम् एकस्मिन् पङ्क्तौ लिखति; `--stats` stderr मध्ये एव।

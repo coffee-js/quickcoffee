@@ -764,6 +764,284 @@ fn qtest_tap_output_is_deterministic_and_describes_failures() {
     assert_eq!(conflict.status.code(), Some(2));
     let _ = fs::remove_dir_all(temp);
 }
+
+#[test]
+fn qtest_module_root_runs_canonical_isolated_cases_in_every_output_mode() {
+    let repository_example = Command::new(bin("qtest"))
+        .args(["--module-root", "examples/modules", "test"])
+        .output()
+        .unwrap();
+    assert!(repository_example.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&repository_example.stdout),
+        "ok test.coffee\n"
+    );
+
+    let root = std::env::temp_dir().join(format!("qcoffee-qtest-modules-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("shared.coffee"), "export value = true\n").unwrap();
+    fs::write(root.join("a-pass.coffee"), "export test = true\n").unwrap();
+    fs::write(
+        root.join("b-fail.litcoffee"),
+        "# Executable module case.\n\n    export test = false\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("c-import.coffee"),
+        "import { value } from './shared'\nexport test = value\n",
+    )
+    .unwrap();
+    let root_text = root.to_str().unwrap();
+
+    let plain = Command::new(bin("qtest"))
+        .args([
+            "--module-root",
+            root_text,
+            "c-import",
+            "b-fail.litcoffee",
+            "a-pass.coffee",
+            "a-pass",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(plain.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout),
+        "ok a-pass.coffee\nok c-import.coffee\n"
+    );
+    assert!(
+        String::from_utf8_lossy(&plain.stderr)
+            .contains("not ok b-fail.litcoffee: export test was false, expected true")
+    );
+
+    let stats = Command::new(bin("qtest"))
+        .args(["--stats", "--module-root", root_text, "a-pass"])
+        .output()
+        .unwrap();
+    assert!(stats.status.success());
+    assert!(
+        String::from_utf8_lossy(&stats.stderr).contains("qtest stats: a-pass.coffee instructions=")
+    );
+
+    let json = Command::new(bin("qtest"))
+        .args([
+            "--json",
+            "--module-root",
+            root_text,
+            "c-import",
+            "b-fail.litcoffee",
+            "a-pass",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&json.stdout),
+        concat!(
+            "{\"ok\":true,\"file\":\"a-pass.coffee\"}\n",
+            "{\"ok\":false,\"file\":\"b-fail.litcoffee\",",
+            "\"error\":\"export test was false, expected true\"}\n",
+            "{\"ok\":true,\"file\":\"c-import.coffee\"}\n"
+        )
+    );
+
+    let tap = Command::new(bin("qtest"))
+        .args([
+            "--tap",
+            "--module-root",
+            root_text,
+            "c-import",
+            "b-fail.litcoffee",
+            "a-pass",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(tap.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&tap.stdout),
+        concat!(
+            "TAP version 13\n",
+            "ok 1 - a-pass.coffee\n",
+            "not ok 2 - b-fail.litcoffee\n",
+            "# export test was false, expected true\n",
+            "ok 3 - c-import.coffee\n",
+            "1..3\n"
+        )
+    );
+
+    let report = root.join("module-results.xml");
+    let junit = Command::new(bin("qtest"))
+        .args(["--module-root", root_text, "--junit"])
+        .arg(&report)
+        .args(["c-import", "a-pass"])
+        .output()
+        .unwrap();
+    assert!(junit.status.success());
+    assert_eq!(
+        fs::read_to_string(&report).unwrap(),
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+            "<testsuite name=\"qtest\" tests=\"2\" failures=\"0\" errors=\"0\" skipped=\"0\">\n",
+            "  <testcase name=\"a-pass.coffee\"></testcase>\n",
+            "  <testcase name=\"c-import.coffee\"></testcase>\n",
+            "</testsuite>\n"
+        )
+    );
+
+    let listed = Command::new(bin("qtest"))
+        .args([
+            "--list",
+            "--filter",
+            "import",
+            "--module-root",
+            root_text,
+            "a-pass",
+            "c-import",
+        ])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(String::from_utf8_lossy(&listed.stdout), "c-import.coffee\n");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn qtest_module_root_reports_contract_preflight_and_execution_failures() {
+    let temp = std::env::temp_dir().join(format!(
+        "qcoffee-qtest-module-errors-{}",
+        std::process::id()
+    ));
+    let root = temp.join("root");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(temp.join("outside.coffee"), "export test = true\n").unwrap();
+    fs::write(root.join("missing-export.coffee"), "export value = true\n").unwrap();
+    fs::write(root.join("wrong-type.coffee"), "export test = 1\n").unwrap();
+    fs::write(
+        root.join("missing-dependency.coffee"),
+        "import { value } from './absent'\nexport test = value\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("cycle-a.coffee"),
+        "import { test as other } from './cycle-b'\nexport test = other\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("cycle-b.coffee"),
+        "import { test as other } from './cycle-a'\nexport test = other\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("fuel.coffee"),
+        "value = 0\nwhile true then value += 1\nexport test = true\n",
+    )
+    .unwrap();
+    fs::write(root.join("broken.coffee"), "export fail = -> 1 + 'wrong'\n").unwrap();
+    fs::write(
+        root.join("runtime-dependency.coffee"),
+        "import { fail } from './broken'\nexport test = fail()\n",
+    )
+    .unwrap();
+    fs::write(root.join("syntax.coffee"), "export value = [\n").unwrap();
+    fs::write(
+        root.join("syntax-dependency.coffee"),
+        "import { value } from './syntax'\nexport test = value\n",
+    )
+    .unwrap();
+    let root_text = root.to_str().unwrap();
+
+    let contract = Command::new(bin("qtest"))
+        .args([
+            "--json",
+            "--module-root",
+            root_text,
+            "wrong-type",
+            "missing-export",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(contract.status.code(), Some(1));
+    let contract_stdout = String::from_utf8_lossy(&contract.stdout);
+    assert!(contract_stdout.contains("module did not export test, expected true"));
+    assert!(contract_stdout.contains("export test was 1, expected true"));
+
+    for (entry, detail) in [
+        ("missing-dependency", "module not found: absent.coffee"),
+        ("cycle-a", "circular module dependency"),
+        ("runtime-dependency", "broken.coffee:1"),
+        ("syntax-dependency", "syntax.coffee:1"),
+    ] {
+        let output = Command::new(bin("qtest"))
+            .args(["--module-root", root_text, entry])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains(detail));
+    }
+
+    let fuel = Command::new(bin("qtest"))
+        .args(["--fuel", "8", "--module-root", root_text, "fuel"])
+        .output()
+        .unwrap();
+    assert_eq!(fuel.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&fuel.stderr).contains("fuel exhausted"));
+
+    let timeout = Command::new(bin("qtest"))
+        .args([
+            "--timeout-ms",
+            "50",
+            "--fuel",
+            "1000000000",
+            "--module-root",
+            root_text,
+            "fuel",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(timeout.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&timeout.stderr).contains("execution timed out after 50 ms"));
+
+    let ordinary = Command::new(bin("qtest"))
+        .arg(root.join("cycle-a.coffee"))
+        .output()
+        .unwrap();
+    assert_eq!(ordinary.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&ordinary.stderr).contains("module directives"));
+
+    let escape = Command::new(bin("qtest"))
+        .args(["--module-root", root_text, "../outside"])
+        .output()
+        .unwrap();
+    assert_eq!(escape.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&escape.stderr).contains("invalid module entry"));
+
+    let missing_root = Command::new(bin("qtest"))
+        .arg("--module-root")
+        .output()
+        .unwrap();
+    assert_eq!(missing_root.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&missing_root.stderr)
+            .contains("--module-root requires a root directory")
+    );
+
+    let duplicate_root = Command::new(bin("qtest"))
+        .args([
+            "--module-root",
+            root_text,
+            "--module-root",
+            root_text,
+            "missing-export",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(duplicate_root.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&duplicate_root.stderr)
+            .contains("--module-root may be specified only once")
+    );
+    let _ = fs::remove_dir_all(temp);
+}
 #[test]
 fn qcoffee_evaluation_fuel_and_disassembly_match_the_cli_contract() {
     let version = Command::new(bin("qcoffee"))

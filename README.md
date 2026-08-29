@@ -92,6 +92,7 @@ QuickCoffee 已提供：
 | 从标准输入执行 | `qcoffee - < script.coffee` |
 | 运行受限模块图 | `qcoffee --module-root modules app/main -- first` |
 | 检查模块图指纹 | `qcoffee --fingerprint --module-root modules app/main` |
+| 运行隔离模块测试 | `qtest --module-root examples/modules test` |
 | 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
 | 只检查、不执行 | `qcoffee --check script.coffee` |
 | 稳定 JSON 输出 | `qcoffee --json script.coffee` |
@@ -101,6 +102,8 @@ QuickCoffee 已提供：
 | 检查编译结果 | `qcoffee --dump-bytecode script.coffee` 或 `qcoffee --fingerprint script.coffee` |
 
 `.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 使用 GitHub 原生支持的 Literate CoffeeScript 形式：Markdown 正文保持未缩进，技术标识使用反引号行内代码，可执行代码块统一缩进四个空格并与正文留出空行。`` ```coffee `` 围栏只适用于生成后的普通 Markdown，不会成为 `.litcoffee` 的可执行代码。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成带版本标记的文档，`--incremental` 会在最终产物字节不变时保留已有文件。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
+
+`qtest --module-root ROOT ENTRY...` 显式授予一个受限模块根，把每个规范化入口预检为内存 `ModulePackage` 后在隔离 Context 中运行；入口必须 `export test = true`。该模式复用 fuel、每 case timeout、filter/list、stats、JSON、TAP 与 JUnit 契约，普通文件模式仍不获得模块权限。
 
 ## 嵌入 Rust 应用
 

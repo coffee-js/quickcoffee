@@ -44,6 +44,8 @@ Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Cont
 
 `qtest --fuel N` cuique documento exsecutabili budget instructionum proprium dat.
 
+`qtest --module-root ROOT ENTRY...` radicem modulorum restrictam aperte concedit; quodque ENTRY canonicum in `ModulePackage` memoriae praevalidatur, Context novo currit, atque solum exportato Bool stricto `test = true` transit. Modus ordinarius nullam auctoritatem modulorum accipit.
+
 `qtest --stats` numeros instructionum et alimenti reliqui cuiusque documenti ad errorem ordinarium scribit, sine mutatione exitus ok.
 
 `qtest --json` unam lineam JSON pro unoquoque documento scribit ad usum CI; `--stats` in stderr manet.
