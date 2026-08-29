@@ -220,3 +220,23 @@ fn pricing_cli_demo_is_one_command_and_machine_readable() {
         )
     );
 }
+
+#[test]
+fn pricing_rule_runs_as_an_isolated_qtest_module_case() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/pricing");
+    let output = Command::new(env!("CARGO_BIN_EXE_qtest"))
+        .args(["--module-root"])
+        .arg(root)
+        .arg("test")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "ok test.coffee\n"
+    );
+}
