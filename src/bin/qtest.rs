@@ -1,5 +1,8 @@
 //! Test runner for executable QuickCoffee scripts and literate manuals.
 
+#[path = "../cli_diagnostic.rs"]
+mod cli_diagnostic;
+
 use quickcoffee::{CancellationToken, Context, Error, RestrictedFileModuleLoader, Runtime, Value};
 use std::{
     collections::HashSet,
@@ -171,7 +174,9 @@ fn run_file(path: PathBuf, fuel: u64, cancellation: Option<CancellationToken>) -
     let outcome = match context.eval_named(&source_name, &source) {
         Ok(Value::Bool(true)) => Ok(()),
         Ok(value) => Err(format!("final value was {value}, expected true")),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(cli_diagnostic::render_error(&error, None, |requested| {
+            (requested == source_name).then(|| source.clone())
+        })),
     };
     let execution = context.last_execution();
     TestRun {
@@ -181,34 +186,23 @@ fn run_file(path: PathBuf, fuel: u64, cancellation: Option<CancellationToken>) -
     }
 }
 
-fn module_error_detail(error: &Error) -> String {
-    let detail = error.to_string();
-    let Some(span) = error
-        .labels()
-        .iter()
-        .find(|label| label.kind == quickcoffee::DiagnosticLabelKind::Primary)
-        .map(|label| &label.span)
-    else {
-        return detail;
-    };
-    let Some(source_name) = span.source_name.as_deref() else {
-        return detail;
-    };
-    match span.start.column {
-        Some(column) => format!("{detail} at {source_name}:{}:{column}", span.start.line),
-        None => format!("{detail} at {source_name}:{}", span.start.line),
-    }
+fn module_error_detail(
+    error: &Error,
+    loader: &cli_diagnostic::RecordingModuleLoader<'_>,
+) -> String {
+    cli_diagnostic::render_error(error, None, |source_name| loader.source(source_name))
 }
 
 fn prepare_module_case(
-    root: &Path,
+    loader: &RestrictedFileModuleLoader,
+    diagnostic_loader: &cli_diagnostic::RecordingModuleLoader<'_>,
     entry: &str,
 ) -> Result<(Runtime, quickcoffee::ModulePackage), Error> {
-    let loader = RestrictedFileModuleLoader::new(root)?;
     let source = loader.load_entry(entry)?;
+    diagnostic_loader.record(&source);
     let runtime = Runtime::new();
     let module = runtime.compile_module(source.name(), source.source())?;
-    let package = runtime.prepare_module_package(&module, &loader)?;
+    let package = runtime.prepare_module_package(&module, diagnostic_loader)?;
     Ok((runtime, package))
 }
 
@@ -218,11 +212,22 @@ fn run_module(
     fuel: u64,
     cancellation: Option<CancellationToken>,
 ) -> TestRun {
-    let (runtime, package) = match prepare_module_case(&root, &entry) {
+    let loader = match RestrictedFileModuleLoader::new(&root) {
+        Ok(loader) => loader,
+        Err(error) => {
+            return TestRun {
+                outcome: Err(cli_diagnostic::render_error(&error, None, |_| None)),
+                instructions: None,
+                fuel_remaining: None,
+            };
+        }
+    };
+    let diagnostic_loader = cli_diagnostic::RecordingModuleLoader::new(&loader);
+    let (runtime, package) = match prepare_module_case(&loader, &diagnostic_loader, &entry) {
         Ok(prepared) => prepared,
         Err(error) => {
             return TestRun {
-                outcome: Err(module_error_detail(&error)),
+                outcome: Err(module_error_detail(&error, &diagnostic_loader)),
                 instructions: None,
                 fuel_remaining: None,
             };
@@ -238,7 +243,7 @@ fn run_module(
             Some(value) => Err(format!("export test was {value}, expected true")),
             None => Err("module did not export test, expected true".to_owned()),
         },
-        Err(error) => Err(module_error_detail(&error)),
+        Err(error) => Err(module_error_detail(&error, &diagnostic_loader)),
     };
     let execution = context.last_execution();
     TestRun {

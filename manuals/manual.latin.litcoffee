@@ -24,7 +24,7 @@ Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Cont
 
 `qcoffee --check FILE` fontem verificat sine cursu.
 
-`qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit.
+`qcoffee --interactive` (vel `-i`) unum Context per lineas servat; `:help` docet, `:quit` exit. Unaquaeque linea physica non imperativa semel aestimatur et fontem stabilem `<repl:N>` habet; programmata multilinea fasciculis `.coffee` vel `.litcoffee` utuntur.
 
 `qcoffee --interactive --stats` unam instructionum et alimenti reliqui notam lineae non vacuae exsecutæ vel errorem currendi ferenti scribit; errores analysi vel verificationis nihil scribunt.
 
@@ -49,6 +49,8 @@ Moduli hospitis import/export nominata habent; `Engine::compile_module` et `Cont
 `qtest --filter TEXT` itinera congruentia eligit; `qtest --list` tantum documenta electa enumerat sine exsecutione.
 
 `qcoffee --json` unam lineam JSON valoris vel erroris structi reddit, aptam CI hospitibusque.
+
+Errores scripti in `qcoffee` et `qtest` primam lineam veterem servant, deinde omnes regiones primary et secondary ordine cum brevi fonte ostendunt. Mixtura numerorum strictorum, clavis Map absens, et forma argumentorum prava etiam consilium `help:` accipiunt. Diagnostica literaria lineam physicam Markdown servant nec columnas incertas fingunt. Eventus JSON prosperi manent; errores campos veteres servant et `diagnostic: {version: 1, labels: [...]}` addunt.
 
 Errores hospitis `ErrorKind::Parse`, Verify, Runtime habent atque detail sine textu ostenso praebent; `error.position()` lineam fontis a uno numeratam interdum dat.
 

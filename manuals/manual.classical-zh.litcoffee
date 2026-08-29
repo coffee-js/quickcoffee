@@ -44,7 +44,7 @@
 
 `qcoffee --check FILE` 者，析编验其文而不行也。
 
-`qcoffee --interactive`（或 `-i`）者，逐行共用一 Context；`:help` 示命，`:quit` 出之。
+`qcoffee --interactive`（或 `-i`）者，逐行共用一 Context；`:help` 示命，`:quit` 出之。每非命之实行各一求值，以 `<repl:N>` 稳记其源；多行之篇当载 `.coffee` 或 `.litcoffee`。
 
 `qcoffee --interactive --stats` 惟非空行之行而行或运行时有误者，书指令与余燃料一条；析验之误不更书。
 
@@ -69,6 +69,8 @@
 `qtest --filter TEXT` 依路径择篇；`qtest --list` 但列所择之篇而不行其文。
 
 `qcoffee --json` 一行以 JSON 载其值或错状，俾 CI 与宿主取用。
+
+凡 `qcoffee`、`qtest` 之脚本误，首仍旧辞，次依序列 primary、secondary 之域，并示简短源码。数类相杂、Map 键阙、参数不合者，复书 `help:`。文学源码仍指 Markdown 实行；不可确知之列不妄补。JSON 成功之状不改，错误之状留旧字段，而增 `diagnostic: {version: 1, labels: [...]}`。
 
 宿主之误，有 `ErrorKind::Parse`、Verify、Runtime 三类，且可别取其详；`error.position()` 或示从一始之源码行。
 

@@ -28,7 +28,7 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qcoffee --check FILE` parses, compiles, and verifies without executing FILE.
 
-`qcoffee --interactive` (or `-i`) keeps one Context for a line-oriented session; `:help` and `:quit` are built-in commands.
+`qcoffee --interactive` (or `-i`) keeps one Context for a line-oriented session; `:help` and `:quit` are built-in commands. Each non-command physical line is one evaluation with a stable `<repl:N>` diagnostic source; multiline programs use `.coffee` or `.litcoffee` files.
 
 `qcoffee --interactive --stats` writes one instruction/fuel record for each non-empty line that executes or reaches a runtime error; parse and verify errors write none.
 
@@ -55,6 +55,8 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 `qtest --filter TEXT` selects matching paths, while `qtest --list` enumerates selected files without executing them.
 
 `qcoffee --json` emits one JSON value or structured error for a single execution, suitable for CI and hosts.
+
+Human `qcoffee` and `qtest` failures keep the legacy error first line, then show every primary and secondary range in order with a compact source excerpt. Known strict numeric mixing, absent Map keys, and invalid argument shapes also receive a presentation-only `help:` line. Literate diagnostics point to the original Markdown physical line and omit columns that preprocessing cannot recover reliably. JSON success records stay unchanged; error records retain legacy fields and add `diagnostic: {version: 1, labels: [...]}` with complete nullable ranges.
 
 Rust embedding errors expose `ErrorKind::Parse`, Verify, Runtime, or Resource plus a display-independent message; `error.resource_limit()` distinguishes fuel, call depth, cancellation, JSON boundaries, `StringBytes`, `ArrayItems`, `MapEntries`, `IntegerBits`, `DecimalCoefficientBits`, `DecimalScale`, `CollectionOperationItems`, `TextOperationBytes`, retained-memory boundaries, and transient managed-allocation boundaries. Host callbacks may return `Error::runtime("message")`, and `error.position()` may give a one-based source line.
 

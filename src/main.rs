@@ -1,9 +1,12 @@
 //! Command-line entry point for the `qcoffee` interpreter.
 
+mod cli_diagnostic;
+
 use quickcoffee::{
     CompileLimits, Context, Engine, Error, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
+    collections::BTreeMap,
     env, fmt, fs,
     io::{self, BufRead, IsTerminal, Read, Write},
     process::ExitCode,
@@ -164,24 +167,77 @@ fn json_error(error: &Error) -> String {
             )
         });
     format!(
-        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\"{domain}{source},\"line\":{line}}}",
+        "{{\"ok\":false,\"kind\":\"{}\",\"message\":\"{}\"{domain}{source},\"line\":{line},\"diagnostic\":{}}}",
         error.kind(),
-        json_escape(error.message())
+        json_escape(error.message()),
+        json_diagnostic(error)
     )
+}
+fn json_diagnostic(error: &Error) -> String {
+    let labels = error
+        .labels()
+        .iter()
+        .map(json_label)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{\"version\":1,\"labels\":[{labels}]}}")
+}
+fn json_label(label: &quickcoffee::DiagnosticLabel) -> String {
+    let kind = match label.kind {
+        quickcoffee::DiagnosticLabelKind::Primary => "primary",
+        quickcoffee::DiagnosticLabelKind::Secondary => "secondary",
+    };
+    let source = label.span.source_name.as_deref().map_or_else(
+        || "null".to_owned(),
+        |source| format!("\"{}\"", json_escape(source)),
+    );
+    let end = label.span.end.map_or_else(
+        || "null".to_owned(),
+        |position| json_position(position.line, position.column),
+    );
+    let message = label.message.as_deref().map_or_else(
+        || "null".to_owned(),
+        |message| format!("\"{}\"", json_escape(message)),
+    );
+    format!(
+        "{{\"kind\":\"{kind}\",\"source\":{source},\"start\":{},\"end\":{end},\"message\":{message}}}",
+        json_position(label.span.start.line, label.span.start.column)
+    )
+}
+fn json_position(line: usize, column: Option<usize>) -> String {
+    let column = column.map_or_else(|| "null".to_owned(), |column| column.to_string());
+    format!("{{\"line\":{line},\"column\":{column}}}")
+}
+fn empty_json_diagnostic() -> &'static str {
+    "{\"version\":1,\"labels\":[]}"
 }
 fn json_io_error(stage: &str, message: &str) -> String {
     format!(
-        "{{\"ok\":false,\"stage\":\"{stage}\",\"kind\":\"io\",\"message\":\"{}\",\"line\":null}}",
-        json_escape(message)
+        "{{\"ok\":false,\"stage\":\"{stage}\",\"kind\":\"io\",\"message\":\"{}\",\"line\":null,\"diagnostic\":{}}}",
+        json_escape(message),
+        empty_json_diagnostic()
     )
 }
 fn json_read_error(error: &ReadSourceError) -> String {
     match error {
         ReadSourceError::Io(message) => json_io_error("read", &format!("read error: {message}")),
         ReadSourceError::SourceBytes(limit) => format!(
-            "{{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of {limit}\",\"line\":null}}"
+            "{{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of {limit}\",\"line\":null,\"diagnostic\":{}}}",
+            empty_json_diagnostic()
         ),
     }
+}
+fn render_source_error(error: &Error, source_name: Option<&str>, source: &str) -> String {
+    let anonymous_source = source_name.is_none().then_some(source);
+    cli_diagnostic::render_error(error, anonymous_source, |requested| {
+        (source_name == Some(requested)).then(|| source.to_owned())
+    })
+}
+fn render_module_error(
+    error: &Error,
+    loader: &cli_diagnostic::RecordingModuleLoader<'_>,
+) -> String {
+    cli_diagnostic::render_error(error, None, |source_name| loader.source(source_name))
 }
 fn module_exports_value(exports: &quickcoffee::ModuleExports) -> Value {
     Value::map(
@@ -211,6 +267,8 @@ fn repl(
         );
     }
     let mut lines = stdin.lock().lines();
+    let mut source_index = 0u64;
+    let mut sources = BTreeMap::<String, String>::new();
     loop {
         if show_prompt {
             print!("qcoffee> ");
@@ -231,11 +289,16 @@ fn repl(
         match line.trim() {
             ":quit" | ":exit" => break,
             ":help" => {
-                println!(":help  show this help\n:quit  exit the session");
+                println!(
+                    ":help  show this help\n:quit  exit the session\n\nEach non-command input line is one source unit."
+                );
             }
             "" => {}
             source => {
-                let result = context.eval(source);
+                source_index = source_index.saturating_add(1);
+                let source_name = format!("<repl:{source_index}>");
+                sources.insert(source_name.clone(), source.to_owned());
+                let result = context.eval_named(&source_name, source);
                 let report_stats = stats
                     && (result.is_ok()
                         || result.as_ref().err().is_some_and(|error| {
@@ -265,7 +328,12 @@ fn repl(
                 match result {
                     Ok(value) if !matches!(value, Value::Nil) => println!("{value}"),
                     Ok(_) => {}
-                    Err(error) => eprintln!("{error}"),
+                    Err(error) => eprintln!(
+                        "{}",
+                        cli_diagnostic::render_error(&error, None, |requested| {
+                            sources.get(requested).cloned()
+                        })
+                    ),
                 }
             }
         }
@@ -585,18 +653,22 @@ fn main() -> ExitCode {
                 if json {
                     println!("{}", json_error(&error));
                 } else {
-                    eprintln!("{error}");
+                    eprintln!("{}", cli_diagnostic::render_error(&error, None, |_| None));
                 }
                 return ExitCode::from(1);
             }
         };
+        let diagnostic_loader = cli_diagnostic::RecordingModuleLoader::new(&loader);
         let source = match loader.load_entry(&entry) {
-            Ok(source) => source,
+            Ok(source) => {
+                diagnostic_loader.record(&source);
+                source
+            }
             Err(error) => {
                 if json {
                     println!("{}", json_error(&error));
                 } else {
-                    eprintln!("{error}");
+                    eprintln!("{}", render_module_error(&error, &diagnostic_loader));
                 }
                 return ExitCode::from(1);
             }
@@ -608,19 +680,22 @@ fn main() -> ExitCode {
                 if json {
                     println!("{}", json_error(&error));
                 } else {
-                    eprintln!("{error}");
+                    eprintln!("{}", render_module_error(&error, &diagnostic_loader));
                 }
                 return ExitCode::from(1);
             }
         };
         if fingerprint {
-            return match runtime.engine().fingerprint_module_graph(&module, &loader) {
+            return match runtime
+                .engine()
+                .fingerprint_module_graph(&module, &diagnostic_loader)
+            {
                 Ok(fingerprint) => {
                     println!("{fingerprint:016x}");
                     ExitCode::SUCCESS
                 }
                 Err(error) => {
-                    eprintln!("{error}");
+                    eprintln!("{}", render_module_error(&error, &diagnostic_loader));
                     ExitCode::from(1)
                 }
             };
@@ -630,7 +705,7 @@ fn main() -> ExitCode {
             "argv",
             Value::array(script_args.into_iter().map(Value::from).collect::<Vec<_>>()),
         );
-        let result = context.run_module(&module, &loader);
+        let result = context.run_module(&module, &diagnostic_loader);
         if stats {
             let execution = context.last_execution();
             eprintln!(
@@ -663,7 +738,7 @@ fn main() -> ExitCode {
                 if json {
                     println!("{}", json_error(&error));
                 } else {
-                    eprintln!("{error}");
+                    eprintln!("{}", render_module_error(&error, &diagnostic_loader));
                 }
                 ExitCode::from(1)
             }
@@ -693,7 +768,10 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(errors) => {
                 for error in errors {
-                    eprintln!("{error}");
+                    eprintln!(
+                        "{}",
+                        render_source_error(&error, source_name.as_deref(), &source)
+                    );
                 }
                 ExitCode::from(1)
             }
@@ -709,7 +787,10 @@ fn main() -> ExitCode {
             if json {
                 println!("{}", json_error(&e));
             } else {
-                eprintln!("{e}");
+                eprintln!(
+                    "{}",
+                    render_source_error(&e, source_name.as_deref(), &source)
+                );
             }
             return ExitCode::from(1);
         }
@@ -760,7 +841,10 @@ fn main() -> ExitCode {
             if json {
                 println!("{}", json_error(&e));
             } else {
-                eprintln!("{e}");
+                eprintln!(
+                    "{}",
+                    render_source_error(&e, source_name.as_deref(), &source)
+                );
             }
             ExitCode::from(1)
         }

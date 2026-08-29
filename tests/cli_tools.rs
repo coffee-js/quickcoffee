@@ -41,6 +41,21 @@ fn json_escape(value: &str) -> String {
     }
     escaped
 }
+fn xml_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\'' => escaped.push_str("&apos;"),
+            '"' => escaped.push_str("&quot;"),
+            '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' => escaped.push('\u{fffd}'),
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
 #[test]
 fn qdocco_renders_escaped_source_and_checks() {
     let temp = std::env::temp_dir().join(format!("qcoffee-{}", std::process::id()));
@@ -507,14 +522,13 @@ fn qtest_writes_a_deterministic_escaped_junit_report() {
     assert_eq!(
         fs::read_to_string(&report).unwrap(),
         format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"qtest\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n  <testcase name=\"{}\"></testcase>\n  <testcase name=\"{}\">\n    <failure message=\"runtime error: thrown: &lt;&amp;&quot;\">runtime error: thrown: &lt;&amp;&quot;</failure>\n  </testcase>\n</testsuite>\n",
-            pass.display()
-                .to_string()
-                .replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('"', "&quot;")
-                .replace('\'', "&apos;"),
-            failure.display(),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"qtest\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n  <testcase name=\"{}\"></testcase>\n  <testcase name=\"{}\">\n    <failure message=\"{failure_detail}\">{failure_detail}</failure>\n  </testcase>\n</testsuite>\n",
+            xml_escape(&pass.display().to_string()),
+            xml_escape(&failure.display().to_string()),
+            failure_detail = xml_escape(&format!(
+                "runtime error: thrown: <&\"\n  --> {}:1:1-1:6\n 1 | throw '<&\"'\n   | ^^^^^",
+                failure.display()
+            )),
         )
     );
 
@@ -979,7 +993,16 @@ fn qtest_module_root_reports_contract_preflight_and_execution_failures() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(1));
-        assert!(String::from_utf8_lossy(&output.stderr).contains(detail));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(detail));
+        if entry == "runtime-dependency" {
+            assert!(stderr.contains("1 | export fail = -> 1 + 'wrong'"));
+            assert!(stderr.contains("::: runtime-dependency.coffee:2"));
+            assert!(stderr.contains("called from here"));
+        }
+        if entry == "syntax-dependency" {
+            assert!(stderr.contains("1 | export value = ["));
+        }
     }
 
     let fuel = Command::new(bin("qtest"))
@@ -1249,7 +1272,11 @@ fn qcoffee_json_file_errors_include_the_opaque_input_path() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json_path = json_escape(path);
     assert!(stdout.contains(&format!("\"source\":\"{json_path}\"")));
-    assert!(stdout.ends_with(",\"line\":2}\n"));
+    assert!(stdout.contains("\"line\":2,\"diagnostic\":{\"version\":1"));
+    assert!(stdout.contains(&format!(
+        "\"kind\":\"primary\",\"source\":\"{json_path}\",\"start\":{{\"line\":2,\"column\":1}}"
+    )));
+    assert!(stdout.ends_with("]}}\n"));
     assert!(output.stderr.is_empty());
 
     fs::write(&temp, "value = 1\nvalue + 'x'\n").unwrap();
@@ -1261,9 +1288,105 @@ fn qcoffee_json_file_errors_include_the_opaque_input_path() {
     let stdout = String::from_utf8_lossy(&runtime.stdout);
     assert!(stdout.contains("\"kind\":\"runtime\""));
     assert!(stdout.contains(&format!("\"source\":\"{json_path}\"")));
-    assert!(stdout.ends_with(",\"line\":2}\n"));
+    assert!(stdout.contains("\"line\":2,\"diagnostic\":{\"version\":1"));
+    assert!(stdout.contains("\"start\":{\"line\":2,\"column\":1}"));
+    assert!(stdout.ends_with("]}}\n"));
     assert!(runtime.stderr.is_empty());
     let _ = fs::remove_file(temp);
+}
+
+#[test]
+fn qcoffee_human_diagnostics_render_ranges_excerpts_call_sites_and_litcoffee_lines() {
+    let temp =
+        std::env::temp_dir().join(format!("qcoffee-human-diagnostic-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let source = temp.join("nested.coffee");
+    fs::write(
+        &source,
+        "inner = ->\n  1 + 2n\nouter = ->\n  inner()\nouter()\n",
+    )
+    .unwrap();
+    let output = Command::new(bin("qcoffee")).arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("runtime error: cannot mix number, integer, and decimal operands"));
+    assert!(stderr.contains(&format!("--> {}:2:3-2:4", source.display())));
+    assert!(stderr.contains(" 2 |   1 + 2n\n   |   ^"));
+    let inner_call = stderr
+        .find(&format!("::: {}:4:3-4:8", source.display()))
+        .expect("nearest call site is rendered");
+    let outer_call = stderr
+        .find(&format!("::: {}:5:1-5:6", source.display()))
+        .expect("outer call site is rendered");
+    assert!(inner_call < outer_call);
+    assert_eq!(stderr.matches("called from here").count(), 2);
+    assert!(stderr.contains(
+        "help: convert both operands explicitly with number(...), integer(...), or decimal(...)"
+    ));
+
+    let json = Command::new(bin("qcoffee"))
+        .args(["--json", source.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(1));
+    assert!(json.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&json.stdout);
+    let json_path = json_escape(source.to_str().unwrap());
+    assert!(stdout.contains("\"diagnostic\":{\"version\":1,\"labels\":["));
+    let primary = stdout
+        .find(&format!(
+            "\"kind\":\"primary\",\"source\":\"{json_path}\",\"start\":{{\"line\":2,\"column\":3}}"
+        ))
+        .expect("JSON exposes the primary range");
+    let inner_call = stdout
+        .find(&format!(
+            "\"kind\":\"secondary\",\"source\":\"{json_path}\",\"start\":{{\"line\":4,\"column\":3}}"
+        ))
+        .expect("JSON exposes the nearest call site");
+    let outer_call = stdout
+        .find(&format!(
+            "\"kind\":\"secondary\",\"source\":\"{json_path}\",\"start\":{{\"line\":5,\"column\":1}}"
+        ))
+        .expect("JSON exposes the outer call site");
+    assert!(primary < inner_call && inner_call < outer_call);
+
+    let missing_key = Command::new(bin("qcoffee"))
+        .args(["-e", "record = {answer: 42}; record.missing"])
+        .output()
+        .unwrap();
+    assert_eq!(missing_key.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing_key.stderr).contains(
+            "help: test membership with 'key of map' before reading a possibly missing key"
+        )
+    );
+
+    let wrong_arity = Command::new(bin("qcoffee"))
+        .args(["-e", "identity = (value) -> value; identity()"])
+        .output()
+        .unwrap();
+    assert_eq!(wrong_arity.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&wrong_arity.stderr).contains(
+        "help: check the function parameter count; QuickCoffee does not add or discard arguments"
+    ));
+
+    let literate = temp.join("broken.litcoffee");
+    fs::write(
+        &literate,
+        "# Broken rule\n\nInline `missing` remains Markdown.\n\n    missing + 1\n",
+    )
+    .unwrap();
+    let output = Command::new(bin("qcoffee"))
+        .arg(&literate)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&format!("--> {}:5", literate.display())));
+    assert!(stderr.contains(" 5 |     missing + 1"));
+    assert!(!stderr.contains(&format!("--> {}:5:1", literate.display())));
+    let _ = fs::remove_dir_all(temp);
 }
 
 #[test]
@@ -1354,7 +1477,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     assert!(!uncaught_domain.status.success());
     assert_eq!(
         String::from_utf8_lossy(&uncaught_domain.stdout),
-        "{\"ok\":false,\"kind\":\"runtime\",\"message\":\"missing\",\"code\":\"invoice.missing\",\"data\":{\"id\":42},\"cause\":null,\"line\":1}\n"
+        "{\"ok\":false,\"kind\":\"runtime\",\"message\":\"missing\",\"code\":\"invoice.missing\",\"data\":{\"id\":42},\"cause\":null,\"line\":1,\"diagnostic\":{\"version\":1,\"labels\":[{\"kind\":\"primary\",\"source\":null,\"start\":{\"line\":1,\"column\":1},\"end\":{\"line\":1,\"column\":6},\"message\":null}]}}\n"
     );
 
     let nil = Command::new(bin("qcoffee"))
@@ -1374,7 +1497,7 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     assert!(!parse_error.status.success());
     assert_eq!(
         String::from_utf8_lossy(&parse_error.stdout),
-        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"expected receiver member name after @\",\"line\":1}\n"
+        "{\"ok\":false,\"kind\":\"parse\",\"message\":\"expected receiver member name after @\",\"line\":1,\"diagnostic\":{\"version\":1,\"labels\":[{\"kind\":\"primary\",\"source\":null,\"start\":{\"line\":1,\"column\":1},\"end\":{\"line\":1,\"column\":2},\"message\":null}]}}\n"
     );
     assert!(parse_error.stderr.is_empty());
 
@@ -1386,7 +1509,8 @@ fn qcoffee_json_reports_values_and_structured_errors() {
     let resource_stdout = String::from_utf8_lossy(&resource_error.stdout);
     assert!(resource_stdout.starts_with("{\"ok\":false,\"kind\":\"resource\""));
     assert!(resource_stdout.contains("fuel exhausted"));
-    assert!(resource_stdout.ends_with("\"line\":1}\n"));
+    assert!(resource_stdout.contains("\"line\":1,\"diagnostic\":{\"version\":1"));
+    assert!(resource_stdout.ends_with("]}}\n"));
 
     let missing = Command::new(bin("qcoffee"))
         .args(["--json", "qcoffee-file-that-does-not-exist.coffee"])
@@ -1399,7 +1523,10 @@ fn qcoffee_json_reports_values_and_structured_errors() {
             "{\"ok\":false,\"stage\":\"read\",\"kind\":\"io\",\"message\":\"read error:"
         )
     );
-    assert!(missing_stdout.ends_with("\",\"line\":null}\n"));
+    assert!(
+        missing_stdout
+            .ends_with("\",\"line\":null,\"diagnostic\":{\"version\":1,\"labels\":[]}}\n")
+    );
     assert!(missing.stderr.is_empty());
 
     let reverse_conflict = Command::new(bin("qcoffee"))
@@ -1572,7 +1699,7 @@ fn qcoffee_compile_limit_flags_bound_reads_bytecode_and_module_graphs() {
     assert_eq!(read_error.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&read_error.stdout),
-        "{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of 4\",\"line\":null}\n"
+        "{\"ok\":false,\"stage\":\"read\",\"kind\":\"resource\",\"limit\":\"source_bytes\",\"message\":\"source exceeds configured UTF-8 byte limit of 4\",\"line\":null,\"diagnostic\":{\"version\":1,\"labels\":[]}}\n"
     );
 
     fs::write(
@@ -1693,7 +1820,11 @@ fn qcoffee_modules_require_an_explicit_restricted_root() {
     assert_eq!(broken.status.code(), Some(1));
     let broken_stdout = String::from_utf8_lossy(&broken.stdout);
     assert!(broken_stdout.contains("\"source\":\"lib/broken.coffee\""));
-    assert!(broken_stdout.ends_with(",\"line\":1}\n"));
+    assert!(broken_stdout.contains("\"line\":1,\"diagnostic\":{\"version\":1"));
+    assert!(broken_stdout.contains(
+        "\"kind\":\"primary\",\"source\":\"lib/broken.coffee\",\"start\":{\"line\":1,\"column\":1}"
+    ));
+    assert!(broken_stdout.ends_with("]}}\n"));
 
     fs::write(
         app.join("escape.coffee"),
@@ -2174,7 +2305,36 @@ fn qcoffee_interactive_session_preserves_context_and_recovers_from_errors() {
     let output = process.wait_with_output().unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "40\n42\n42\n");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown name 'missing'"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown name 'missing'"));
+    assert!(stderr.contains("--> <repl:3>:1:1-1:8"));
+    assert!(stderr.contains("1 | missing + 1"));
+
+    let mut cross_entry = Command::new(bin("qcoffee"))
+        .arg("--interactive")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    cross_entry
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"fail = -> 1 + 2n\nfail()\n:quit\n")
+        .unwrap();
+    let cross_entry = cross_entry.wait_with_output().unwrap();
+    assert!(cross_entry.status.success());
+    let stderr = String::from_utf8_lossy(&cross_entry.stderr);
+    let definition = stderr
+        .find("--> <repl:1>:1:11-1:12")
+        .expect("primary range keeps its defining REPL source");
+    let call = stderr
+        .find("::: <repl:2>:1:1-1:5")
+        .expect("secondary range keeps its calling REPL source");
+    assert!(definition < call);
+    assert!(stderr.contains("1 | fail = -> 1 + 2n"));
+    assert!(stderr.contains("1 | fail()"));
 
     let mut stats_process = Command::new(bin("qcoffee"))
         .args(["--interactive", "--stats"])
