@@ -5,6 +5,7 @@ use quickcoffee::{
 };
 use std::{
     cell::Cell,
+    collections::BTreeMap,
     fs,
     path::PathBuf,
     rc::Rc,
@@ -29,6 +30,145 @@ impl ModuleLoader for CanonicalModuleLoader {
     fn load(&self, _specifier: &str, _referrer: &str) -> Result<ModuleSource, quickcoffee::Error> {
         Ok(ModuleSource::new(self.canonical_name, self.source))
     }
+}
+
+struct CountingModuleLoader {
+    modules: BTreeMap<String, String>,
+    calls: Rc<Cell<u64>>,
+}
+
+impl CountingModuleLoader {
+    fn new(calls: Rc<Cell<u64>>) -> Self {
+        Self {
+            modules: BTreeMap::new(),
+            calls,
+        }
+    }
+
+    fn insert(&mut self, name: &str, source: &str) {
+        self.modules.insert(name.to_owned(), source.to_owned());
+    }
+}
+
+impl ModuleLoader for CountingModuleLoader {
+    fn load(&self, specifier: &str, _referrer: &str) -> Result<ModuleSource, quickcoffee::Error> {
+        self.calls.set(self.calls.get() + 1);
+        self.modules
+            .get(specifier)
+            .map(|source| ModuleSource::new(specifier, source))
+            .ok_or_else(|| quickcoffee::Error::runtime(format!("missing module: {specifier}")))
+    }
+}
+
+#[test]
+fn module_packages_are_loader_free_and_isolate_each_context_run() {
+    let engine = Engine::new();
+    let entry = engine
+        .compile_module(
+            "main",
+            "import { value } from 'dependency'\nexport result = value",
+        )
+        .unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let mut loader = CountingModuleLoader::new(calls.clone());
+    loader.insert("dependency", "export value = tick()");
+
+    let package = engine.prepare_module_package(&entry, &loader).unwrap();
+    assert_eq!(package.entry_name(), "main");
+    assert_eq!(package.module_count(), 2);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        package.fingerprint(),
+        engine.fingerprint_module_graph(&entry, &loader).unwrap()
+    );
+    assert_eq!(calls.get(), 2);
+
+    let ticks = Rc::new(Cell::new(0_u64));
+    let make_context = || {
+        let ticks = ticks.clone();
+        Context::builder()
+            .native("tick", move |_| {
+                let next = ticks.get() + 1;
+                ticks.set(next);
+                Ok(Value::from(next as f64))
+            })
+            .build()
+    };
+    let mut first = make_context();
+    let mut second = make_context();
+    assert_eq!(
+        first
+            .run_module_package(&package)
+            .unwrap()
+            .get("result")
+            .and_then(Value::as_number),
+        Some(1.)
+    );
+    assert_eq!(
+        second
+            .run_module_package(&package)
+            .unwrap()
+            .get("result")
+            .and_then(Value::as_number),
+        Some(2.)
+    );
+    assert_eq!(calls.get(), 2, "package execution must not call its loader");
+}
+
+#[test]
+fn module_packages_recheck_the_running_context_compile_policy() {
+    let engine = Engine::new();
+    let entry = engine
+        .compile_module(
+            "main",
+            "import { value } from 'dependency'\nexport result = value",
+        )
+        .unwrap();
+    let mut loader = MemoryModuleLoader::new();
+    loader.insert("dependency", "export value = tick()");
+    let package = engine.prepare_module_package(&entry, &loader).unwrap();
+
+    let ticks = Rc::new(Cell::new(0_u64));
+    let observed = ticks.clone();
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_module_graph_modules(1))
+        .build();
+    let mut context = runtime
+        .context_builder()
+        .native("tick", move |_| {
+            observed.set(observed.get() + 1);
+            Ok(Value::from(1_f64))
+        })
+        .build();
+    let error = context.run_module_package(&package).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::ModuleGraphModules)
+    );
+    assert_eq!(ticks.get(), 0);
+    assert_eq!(context.last_execution().instructions, 0);
+
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_source_bytes(1))
+        .build();
+    let mut context = runtime.new_context();
+    let error = context.run_module_package(&package).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::SourceBytes));
+    assert_eq!(context.last_execution().instructions, 0);
+
+    let runtime = Runtime::builder()
+        .compile_limits(CompileLimits::default().with_max_bytecode_instructions(0))
+        .build();
+    let mut context = runtime.new_context();
+    let error = context.run_module_package(&package).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Resource);
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::BytecodeInstructions)
+    );
+    assert_eq!(context.last_execution().instructions, 0);
 }
 
 #[test]
@@ -1054,10 +1194,12 @@ fn restricted_file_loader_executes_explicit_litcoffee_modules() {
     let loader = RestrictedFileModuleLoader::new(&root).unwrap();
     let source = loader.load_entry("app/main.litcoffee").unwrap();
     assert_eq!(source.name(), "app/main.litcoffee");
-    let module = Engine::new()
+    let engine = Engine::new();
+    let module = engine
         .compile_module(source.name(), source.source())
         .unwrap();
-    let exports = Context::new().run_module(&module, &loader).unwrap();
+    let package = engine.prepare_module_package(&module, &loader).unwrap();
+    let exports = Context::new().run_module_package(&package).unwrap();
     assert_eq!(exports.get("answer").and_then(Value::as_number), Some(42.));
     let _ = fs::remove_dir_all(root);
 }

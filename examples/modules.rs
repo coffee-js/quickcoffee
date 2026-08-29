@@ -11,7 +11,8 @@ fn main() -> Result<(), Error> {
     loader.insert("pricing", "export rate = 2");
 
     println!("{:016x}", engine.fingerprint_module_graph(&main, &loader)?);
-    let exports = Context::new().run_module(&main, &loader)?;
+    let package = engine.prepare_module_package(&main, &loader)?;
+    let exports = Context::new().run_module_package(&package)?;
     println!("{}", exports.get("total").expect("declared module export"));
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/modules");
@@ -19,7 +20,8 @@ fn main() -> Result<(), Error> {
     let source = loader.load_entry("main")?;
     let main = engine.compile_module(source.name(), source.source())?;
     println!("{:016x}", engine.fingerprint_module_graph(&main, &loader)?);
-    let exports = Context::new().run_module(&main, &loader)?;
+    let package = engine.prepare_module_package(&main, &loader)?;
+    let exports = Context::new().run_module_package(&package)?;
     println!("{}", exports.get("total").expect("declared module export"));
     Ok(())
 }
