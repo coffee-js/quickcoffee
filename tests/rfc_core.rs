@@ -1,6 +1,6 @@
 use quickcoffee::{
     Chunk, Constant, Context, Engine, ErrorKind, Instruction, Pattern, Program, ResourceLimit,
-    Value, compile,
+    ResourceLimits, Value, compile,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -2043,6 +2043,71 @@ fn concat_is_immutable_strict_and_deterministic() {
     );
     assert_eq!(context.last_execution().value_allocations, 1);
 }
+
+#[test]
+fn immutable_map_updates_are_strict_deterministic_and_bounded() {
+    assert_eq!(
+        eval("source = {b: 2, a: 1}\nupdated = map_set(source, 'c', 3)\nremoved = map_delete(updated, 'b')\nsource == {a: 1, b: 2} and removed == {a: 1, c: 3}")
+            .to_string(),
+        "true"
+    );
+    assert_eq!(eval("map_delete({a: 1}, 'missing')").to_string(), "{a: 1}");
+    assert_eq!(
+        eval("encode_json(map_delete(map_set(parse_json('{\"b\":2}'), 'a', 1n), 'b'))").as_str(),
+        Some("{\"a\":1}")
+    );
+    let mut telemetry = Context::new();
+    telemetry.eval("map_set({a: 1}, 'b', 2)").unwrap();
+    assert_eq!(telemetry.last_execution().value_allocations, 3);
+    assert_eq!(telemetry.last_execution().managed_objects_allocated, 1);
+    telemetry.eval("map_delete({a: 1}, 'a')").unwrap();
+    assert_eq!(telemetry.last_execution().value_allocations, 1);
+    assert_eq!(telemetry.last_execution().managed_objects_allocated, 1);
+    for source in [
+        "map_set()",
+        "map_set({}, 'a')",
+        "map_set([], 'a', 1)",
+        "map_set({}, 1, 1)",
+        "map_delete()",
+        "map_delete({}, 'a', 1)",
+        "map_delete({}, 1)",
+    ] {
+        assert!(
+            Context::new().eval(source).is_err(),
+            "expected {source} to fail"
+        );
+    }
+    let mut context = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_map_entries(1)
+            .with_max_collection_operation_items(2),
+    );
+    let error = context.eval("map_set({a: 1}, 'b', 2)").unwrap_err();
+    assert_eq!(error.resource_limit(), Some(ResourceLimit::MapEntries));
+    let mut context = Context::new().with_resource_limits(
+        ResourceLimits::default()
+            .with_max_map_entries(2)
+            .with_max_collection_operation_items(1),
+    );
+    assert_eq!(
+        context.eval("map_set({a: 1}, 'a', 2)").unwrap().to_string(),
+        "{a: 2}"
+    );
+    let error = context.eval("map_set({a: 1}, 'b', 2)").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::CollectionOperationItems)
+    );
+    let mut context = Context::new();
+    context.eval("input = {a: 1, b: 2}").unwrap();
+    context.set_resource_limits(ResourceLimits::default().with_max_collection_operation_items(1));
+    let error = context.eval("map_delete(input, 'a')").unwrap_err();
+    assert_eq!(
+        error.resource_limit(),
+        Some(ResourceLimit::CollectionOperationItems)
+    );
+}
+
 #[test]
 fn literal_replace_all_is_strict_non_rescanning_and_deterministic() {
     assert_eq!(eval("replace_all('banana', 'na', 'X')").to_string(), "baXX");

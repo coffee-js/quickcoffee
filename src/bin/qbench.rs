@@ -49,7 +49,7 @@ const COMPARISON_WORKLOADS: &[ComparisonWorkload] = &[
     },
     ComparisonWorkload {
         name: "map-functional-update",
-        quickcoffee: "record = {alpha: 1, beta: 2, gamma: 3}\nsum = 0\ni = 0\nwhile i < 1000\n  record = {...record, beta: record.beta + 1}\n  sum += record.alpha + record.beta + record.gamma\n  i++\nsum + record.beta",
+        quickcoffee: "record = {alpha: 1, beta: 2, gamma: 3}\nsum = 0\ni = 0\nwhile i < 1000\n  record = map_set(record, 'beta', record.beta + 1)\n  sum += record.alpha + record.beta + record.gamma\n  i++\nsum + record.beta",
         quickjs: "(function () { /* map-functional-update */ let record = {alpha: 1, beta: 2, gamma: 3}; let sum = 0; for (let i = 0; i < 1000; i++) { record = {...record, beta: record.beta + 1}; sum += record.alpha + record.beta + record.gamma; } return sum + record.beta; })",
         expected: "507502",
     },
@@ -131,6 +131,11 @@ const WORKLOADS: &[Workload] = &[
     Workload {
         name: "map-spread",
         source: "base = {a: 1, b: 2}\nout = {...base, b: 3, c: 4}\nout.a + out.b + out.c",
+        expected: "8",
+    },
+    Workload {
+        name: "stdlib-map-updates",
+        source: "base = {a: 1, b: 2, c: 3}\nupdated = map_set(base, 'b', 4)\nout = map_delete(updated, 'a')\nbase.a + out.b + out.c",
         expected: "8",
     },
     Workload {

@@ -93,6 +93,9 @@
 数组遍历可另绑定从零开始的下标：`for value, index in items then value + index`；使用 `by step` 时下标仍是实际数组位置。
 
 推导亦可用 CoffeeScript 风格后置形式：`value * 2 for value in items`，或以方括号包住写作 `[value * 2 for value in items]`。后置形式与前置形式共享 `by`、`when`、映射、模式、`break`、`continue` 语义；方括号只是推导界标，不再增加一层嵌套数组。
+
+`map_set(map, key, value)` 与 `map_delete(map, key)` 要求 String key，返回按字典序组织的新 Map 且不改变输入。RFC 0159 规定其分配前的集合操作与 Map 条目边界。
+
 ## 基准统计
 
 `qbench --json --repeat 11` 对编译、验证与执行输出上侧中位数及对应 `*_mad_ns`（median absolute deviation）离散度。`qbench --compare-qjs PATH` 对两端的启动、编译、预编译热执行及 CLI 总耗时分别输出中位数与 MAD。
