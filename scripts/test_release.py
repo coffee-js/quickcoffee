@@ -36,6 +36,10 @@ class ReleaseToolTests(unittest.TestCase):
         )
         for name in ("README.md", "LICENSE-MIT", "LICENSE-APACHE"):
             (self.repo / name).write_text(f"{name}\n", encoding="utf-8")
+        for source_name in release.EXAMPLE_SOURCES:
+            source = self.repo / source_name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(f"fixture:{source_name}\n", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -107,7 +111,7 @@ class ReleaseToolTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "missing"):
             release.write_checksums(dist, "1.2.3", targets)
 
-    def test_clean_install_uses_only_extracted_binaries_and_generated_sources(self) -> None:
+    def test_clean_install_uses_extracted_binaries_and_packaged_examples(self) -> None:
         for target in ("aarch64-apple-darwin", "x86_64-pc-windows-msvc"):
             with self.subTest(target=target):
                 original_binaries = self.binaries(target)
@@ -146,21 +150,29 @@ class ReleaseToolTests(unittest.TestCase):
                         )
                         self.assertIn("Inline `qdocco`", source)
                         stdout = ""
-                    elif name == "qtest" and arguments == (
-                        "--module-root",
-                        "policy",
-                        "test",
+                    elif (
+                        name in {"qcoffee", "qtest"}
+                        and len(arguments) == 3
+                        and arguments[0] == "--module-root"
                     ):
-                        literate = (cwd / "policy" / "pricing.litcoffee").read_text(
-                            encoding="utf-8"
-                        )
-                        self.assertIn("Inline `quote`", literate)
-                        self.assertIn("    quote =", literate)
-                        entry = (cwd / "policy" / "test.coffee").read_text(
-                            encoding="utf-8"
-                        )
-                        self.assertIn("from './pricing.litcoffee'", entry)
-                        stdout = "ok test.coffee\n"
+                        pricing = Path(arguments[1])
+                        self.assertEqual(pricing.parent.parent, binary.parent)
+                        for source_name in release.EXAMPLE_SOURCES:
+                            packaged = binary.parent / source_name
+                            self.assertEqual(
+                                packaged.read_text(encoding="utf-8"),
+                                f"fixture:{source_name}\n",
+                            )
+                        if name == "qcoffee" and arguments[2] == "demo":
+                            stdout = (
+                                "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
+                                "tax: 14.04m, total: 122.04m}, "
+                                "rejection: pricing.ineligible}\n"
+                            )
+                        elif name == "qtest" and arguments[2] == "test":
+                            stdout = "ok test.coffee\n"
+                        else:
+                            self.fail(f"unexpected installed module command: {command!r}")
                     else:
                         self.fail(f"unexpected installed command: {command!r}")
                     return subprocess.CompletedProcess(command, 0, stdout, "")
@@ -176,7 +188,7 @@ class ReleaseToolTests(unittest.TestCase):
                     ],
                     list(release.BINARIES),
                 )
-                self.assertEqual(len(calls), 8)
+                self.assertEqual(len(calls), 9)
 
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]
@@ -200,6 +212,7 @@ class ReleaseToolTests(unittest.TestCase):
         )
         self.assertIn("matrix.runner_arch", workflow)
         self.assertIn("scripts/release.py verify-install", workflow)
+        self.assertNotIn("cargo publish --locked", workflow)
         workflows = "\n".join(
             path.read_text(encoding="utf-8")
             for path in sorted((repository / ".github/workflows").glob("*.yml"))

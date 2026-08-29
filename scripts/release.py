@@ -19,6 +19,11 @@ import zipfile
 
 BINARIES = ("qcoffee", "qtest", "qdocco", "qbench")
 DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
+EXAMPLE_SOURCES = (
+    "examples/pricing/rule.litcoffee",
+    "examples/pricing/demo.coffee",
+    "examples/pricing/test.coffee",
+)
 VERSION_PATTERN = re.compile(
     r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
 )
@@ -100,6 +105,13 @@ def archive_entries(repo: Path, binary_dir: Path, target: str) -> list[tuple[str
         if path.is_symlink():
             raise ReleaseError(f"release document must not be a symlink: {path}")
         entries.append((document, path, 0o644))
+    for source_name in EXAMPLE_SOURCES:
+        path = repo / source_name
+        if not path.is_file():
+            raise ReleaseError(f"missing release example source: {path}")
+        if path.is_symlink():
+            raise ReleaseError(f"release example source must not be a symlink: {path}")
+        entries.append((source_name, path, 0o644))
     return sorted(entries)
 
 
@@ -150,12 +162,13 @@ def expected_members(version: str, target: str) -> set[str]:
     executable_suffix = ".exe" if "windows" in target else ""
     names = [f"{binary}{executable_suffix}" for binary in BINARIES]
     names.extend(DOCUMENTS)
+    names.extend(EXAMPLE_SOURCES)
     return {f"{root}/{name}" for name in names}
 
 
 def safe_member(name: str) -> bool:
     path = PurePosixPath(name)
-    return not path.is_absolute() and ".." not in path.parts and len(path.parts) == 2
+    return not path.is_absolute() and ".." not in path.parts and len(path.parts) >= 2
 
 
 def verify_archive(path: Path, version: str, target: str) -> None:
@@ -363,23 +376,6 @@ def verify_install(path: Path, version: str, target: str) -> None:
             "    true\n",
             encoding="utf-8",
         )
-        policy = workspace / "policy"
-        policy.mkdir()
-        (policy / "pricing.litcoffee").write_text(
-            "# Installed Decimal pricing rule\n\n"
-            "Inline `quote` stays Markdown on GitHub.\n\n"
-            "    quote = (subtotal) ->\n"
-            "      discount = round_decimal(subtotal * 0.10m, 2, 'half_even')\n"
-            "      round_decimal(subtotal - discount, 2, 'half_even')\n\n"
-            "    export { quote }\n",
-            encoding="utf-8",
-        )
-        (policy / "test.coffee").write_text(
-            "import { quote } from './pricing.litcoffee'\n"
-            "export test = quote(120m) == 108m\n",
-            encoding="utf-8",
-        )
-
         run_installed(
             [os.fspath(binaries["qcoffee"]), "plain.coffee"], workspace, "42\n"
         )
@@ -392,11 +388,23 @@ def verify_install(path: Path, version: str, target: str) -> None:
             [os.fspath(binaries["qdocco"]), "--check", "document.litcoffee"],
             workspace,
         )
+        pricing = (install / "examples" / "pricing").resolve()
+        run_installed(
+            [
+                os.fspath(binaries["qcoffee"]),
+                "--module-root",
+                os.fspath(pricing),
+                "demo",
+            ],
+            workspace,
+            "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
+            "tax: 14.04m, total: 122.04m}, rejection: pricing.ineligible}\n",
+        )
         run_installed(
             [
                 os.fspath(binaries["qtest"]),
                 "--module-root",
-                "policy",
+                os.fspath(pricing),
                 "test",
             ],
             workspace,
