@@ -213,6 +213,13 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("matrix.runner_arch", workflow)
         self.assertIn("scripts/release.py verify-install", workflow)
         self.assertNotIn("cargo publish --locked", workflow)
+        distribution = workflow.split("  verify_distribution:\n", 1)[1].split(
+            "\n  publish:\n", 1
+        )[0]
+        self.assertNotIn("actions/checkout", distribution)
+        self.assertIn("dist/verify-release.py verify-checksums", distribution)
+        self.assertIn("dist/verify-release.py verify-install", distribution)
+        self.assertIn("needs: [validate, bundle, verify_distribution]", workflow)
         workflows = "\n".join(
             path.read_text(encoding="utf-8")
             for path in sorted((repository / ".github/workflows").glob("*.yml"))

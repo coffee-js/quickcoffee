@@ -19,7 +19,7 @@ macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow
 - `qdocco --check`；
 - 归档自带的 Decimal 定价 `qcoffee --module-root` demo 与 `qtest --module-root` 用例。
 
-聚合 job 只接受完整且不重复的四平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。
+聚合 job 只接受完整且不重复的四平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。聚合 artifact 上传完成后，另一个没有仓库 checkout、没有 Rust 工具链的 Ubuntu job 会重新下载最终 bundle，校验全部四个 checksum，并从下载的 Linux 归档完成同一 clean-install 工作流。只有这个 artifact round-trip 通过后，tag workflow 才能发布 GitHub Release。
 
 修改发布配置的 pull request 和在 GitHub Actions 手动运行该 workflow 都只会生成可下载的演练 artifacts，不会创建 GitHub Release。只有匹配的 tag push 且全部门禁通过时，聚合 job 才会发布 release。当前范围不包含代码签名、公证、包管理器配方、crates.io publish、Linux musl 或 Windows arm64。
 
@@ -107,7 +107,7 @@ Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, chang
 - `qdocco --check`; and
 - the packaged Decimal-pricing `qcoffee --module-root` demo and `qtest --module-root` case.
 
-The aggregation job accepts exactly one artifact for every one of the four required platforms, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again.
+The aggregation job accepts exactly one artifact for every one of the four required platforms, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again. After uploading the aggregate artifact, a separate Ubuntu job with no repository checkout and no Rust toolchain downloads the final bundle again, verifies all four checksums, and exercises the same clean-install workflow from the downloaded Linux archive. The tag workflow cannot publish a GitHub Release until this artifact round-trip passes.
 
 Pull requests that change release configuration and manual GitHub Actions dispatches produce downloadable rehearsal artifacts but never create a GitHub Release. Only a matching tag push publishes after every gate succeeds. Code signing, notarization, package-manager formulae, crates.io publishing, Linux musl, and Windows arm64 are outside this slice.
 
