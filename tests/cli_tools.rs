@@ -399,7 +399,10 @@ fn qtest_reports_success_and_failure() {
 
 #[test]
 fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
-    const TIMEOUT_MS: &str = "100";
+    // A release-mode Windows runner can take more than 100 ms to initialize a fresh
+    // qtest worker under load. This test validates cancellation and continued discovery,
+    // not timer precision; the single-file JUnit case below retains the tighter boundary.
+    const TIMEOUT_MS: &str = "1000";
     const TIMEOUT_FUEL: &str = "1000000000";
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-timeout-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
@@ -422,7 +425,7 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
     assert_eq!(plain.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&plain.stdout).contains(&format!("ok {}", pass.display())));
     let plain_stderr = String::from_utf8_lossy(&plain.stderr);
-    assert!(plain_stderr.contains("execution timed out after 100 ms"));
+    assert!(plain_stderr.contains(&format!("execution timed out after {TIMEOUT_MS} ms")));
     assert!(plain_stderr.contains(&format!("qtest stats: {}", timeout.display())));
 
     let json = Command::new(bin("qtest"))
@@ -440,7 +443,7 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     assert_eq!(json_stdout.lines().count(), 2);
     assert!(json_stdout.contains("\"ok\":false"));
-    assert!(json_stdout.contains("execution timed out after 100 ms"));
+    assert!(json_stdout.contains(&format!("execution timed out after {TIMEOUT_MS} ms")));
     assert!(json_stdout.contains("\"ok\":true"));
 
     let tap = Command::new(bin("qtest"))
@@ -458,7 +461,7 @@ fn qtest_timeout_cancels_one_file_and_keeps_output_deterministic() {
     assert_eq!(
         String::from_utf8_lossy(&tap.stdout),
         format!(
-            "TAP version 13\nnot ok 1 - {}\n# execution timed out after 100 ms\nok 2 - {}\n1..2\n",
+            "TAP version 13\nnot ok 1 - {}\n# execution timed out after {TIMEOUT_MS} ms\nok 2 - {}\n1..2\n",
             timeout.display(),
             pass.display()
         )

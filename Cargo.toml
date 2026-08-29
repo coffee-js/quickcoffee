@@ -47,6 +47,10 @@ path = "src/bin/qbench.rs"
 name = "core"
 harness = false
 
+[[bench]]
+name = "pricing"
+harness = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
