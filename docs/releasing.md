@@ -6,11 +6,22 @@
 
 - `x86_64-unknown-linux-gnu`：`.tar.gz`
 - `x86_64-apple-darwin`：`.tar.gz`
+- `aarch64-apple-darwin`：`.tar.gz`
 - `x86_64-pc-windows-msvc`：`.zip`
 
-每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志和双许可证。平台 job 会执行 release tests、crate package verification、四个 CLI 的版本 smoke check，并重新读取归档验证成员与路径。聚合 job 只接受完整且不重复的三平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。
+macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow 会在构建前校验 `uname -m`，避免 runner label 漂移后悄悄生成错误架构的制品。
 
-修改发布配置的 pull request 和在 GitHub Actions 手动运行该 workflow 都只会生成可下载的演练 artifacts，不会创建 GitHub Release。只有匹配的 tag push 且全部门禁通过时，聚合 job 才会发布 release。当前范围不包含代码签名、公证、包管理器配方、crates.io publish、macOS arm64、Linux musl 或 Windows arm64。
+每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志和双许可证。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和四个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制运行：
+
+- 四个 CLI 的版本检查；
+- 一个独立 `.coffee` 脚本；
+- 一个含 Markdown 行内代码与四空格可执行块的 GitHub-compatible `.litcoffee`；
+- `qdocco --check`；
+- 一个由 `.litcoffee` 规则和 `.coffee` 测试入口组成的 Decimal 定价 `qtest --module-root` 用例。
+
+聚合 job 只接受完整且不重复的四平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。
+
+修改发布配置的 pull request 和在 GitHub Actions 手动运行该 workflow 都只会生成可下载的演练 artifacts，不会创建 GitHub Release。只有匹配的 tag push 且全部门禁通过时，聚合 job 才会发布 release。当前范围不包含代码签名、公证、包管理器配方、crates.io publish、Linux musl 或 Windows arm64。
 
 下载后可在 Unix-like 系统校验：
 
@@ -29,11 +40,21 @@ make check
 
 ## English
 
-Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package version in `Cargo.toml` and a version heading in `CHANGELOG.md`. The release workflow uses the committed `Cargo.lock` and Rust 1.85.0 to build native `x86_64-unknown-linux-gnu` and `x86_64-apple-darwin` `.tar.gz` archives plus an `x86_64-pc-windows-msvc` `.zip` archive.
+Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package version in `Cargo.toml` and a version heading in `CHANGELOG.md`. The release workflow uses the committed `Cargo.lock` and Rust 1.85.0 to build native `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin` `.tar.gz` archives plus an `x86_64-pc-windows-msvc` `.zip` archive.
 
-Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, and dual licenses. Each platform job runs release tests, crate package verification, version smoke checks for all four CLIs, and archive member/path verification. The aggregation job accepts exactly one artifact for every required platform, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again.
+macOS Intel uses `macos-15-intel`, while Apple silicon uses `macos-15`. The workflow asserts `uname -m` before building so runner-label drift cannot silently produce an artifact for the wrong architecture.
 
-Pull requests that change release configuration and manual GitHub Actions dispatches produce downloadable rehearsal artifacts but never create a GitHub Release. Only a matching tag push publishes after every gate succeeds. Code signing, notarization, package-manager formulae, crates.io publishing, macOS arm64, Linux musl, and Windows arm64 are outside this slice.
+Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, and dual licenses. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all four CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries to run:
+
+- version checks for all four CLIs;
+- one standalone `.coffee` script;
+- one GitHub-compatible `.litcoffee` document containing Markdown inline code and a four-space executable block;
+- `qdocco --check`; and
+- a Decimal-pricing `qtest --module-root` case composed from a `.litcoffee` rule and `.coffee` test entry.
+
+The aggregation job accepts exactly one artifact for every one of the four required platforms, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again.
+
+Pull requests that change release configuration and manual GitHub Actions dispatches produce downloadable rehearsal artifacts but never create a GitHub Release. Only a matching tag push publishes after every gate succeeds. Code signing, notarization, package-manager formulae, crates.io publishing, Linux musl, and Windows arm64 are outside this slice.
 
 On Unix-like systems, verify downloads with:
 

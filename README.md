@@ -23,7 +23,7 @@ cargo install --path .
 qcoffee --version
 ```
 
-正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS x86_64 和 Windows x86_64 归档。每个归档包含四个 CLI、README、更新日志与双许可证，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；下载、校验和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and checksum verification are documented bilingually in the same guide.
+正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS Intel、macOS Apple silicon 和 Windows x86_64 归档。每个归档包含四个 CLI、README、更新日志与双许可证，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；发布门禁会从解包后的干净工作区验证 `.coffee`、GitHub-compatible `.litcoffee`、`qdocco` 和 `qtest`。下载、校验和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and clean-install verification are documented bilingually in the same guide.
 
 创建 `invoice.coffee`：
 

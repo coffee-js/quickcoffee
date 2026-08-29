@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -84,6 +86,7 @@ class ReleaseToolTests(unittest.TestCase):
         targets = [
             "x86_64-unknown-linux-gnu",
             "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
             "x86_64-pc-windows-msvc",
         ]
         dist = self.root / "dist"
@@ -104,6 +107,77 @@ class ReleaseToolTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "missing"):
             release.write_checksums(dist, "1.2.3", targets)
 
+    def test_clean_install_uses_only_extracted_binaries_and_generated_sources(self) -> None:
+        for target in ("aarch64-apple-darwin", "x86_64-pc-windows-msvc"):
+            with self.subTest(target=target):
+                original_binaries = self.binaries(target)
+                archive = release.create_archive(
+                    self.repo, original_binaries, self.root / "dist", target
+                )
+                calls: list[tuple[str, tuple[str, ...]]] = []
+
+                def run(command, *, cwd, check, capture_output, text):
+                    self.assertFalse(check)
+                    self.assertTrue(capture_output)
+                    self.assertTrue(text)
+                    binary = Path(command[0])
+                    self.assertTrue(binary.is_file())
+                    self.assertNotEqual(binary.parent, original_binaries)
+                    cwd = Path(cwd)
+                    self.assertTrue(cwd.is_dir())
+                    name = binary.name.removesuffix(".exe")
+                    arguments = tuple(command[1:])
+                    calls.append((name, arguments))
+                    if arguments == ("--version",):
+                        stdout = f"{name} 1.2.3\n"
+                    elif name == "qcoffee" and arguments in {
+                        ("plain.coffee",),
+                        ("literate.litcoffee",),
+                    }:
+                        source = (cwd / arguments[0]).read_text(encoding="utf-8")
+                        self.assertIn("answer + 2", source)
+                        stdout = "42\n"
+                    elif name == "qdocco" and arguments == (
+                        "--check",
+                        "document.litcoffee",
+                    ):
+                        source = (cwd / "document.litcoffee").read_text(
+                            encoding="utf-8"
+                        )
+                        self.assertIn("Inline `qdocco`", source)
+                        stdout = ""
+                    elif name == "qtest" and arguments == (
+                        "--module-root",
+                        "policy",
+                        "test",
+                    ):
+                        literate = (cwd / "policy" / "pricing.litcoffee").read_text(
+                            encoding="utf-8"
+                        )
+                        self.assertIn("Inline `quote`", literate)
+                        self.assertIn("    quote =", literate)
+                        entry = (cwd / "policy" / "test.coffee").read_text(
+                            encoding="utf-8"
+                        )
+                        self.assertIn("from './pricing.litcoffee'", entry)
+                        stdout = "ok test.coffee\n"
+                    else:
+                        self.fail(f"unexpected installed command: {command!r}")
+                    return subprocess.CompletedProcess(command, 0, stdout, "")
+
+                with mock.patch.object(release.subprocess, "run", side_effect=run):
+                    release.verify_install(archive, "1.2.3", target)
+
+                self.assertEqual(
+                    [
+                        name
+                        for name, arguments in calls
+                        if arguments == ("--version",)
+                    ],
+                    list(release.BINARIES),
+                )
+                self.assertEqual(len(calls), 8)
+
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]
         workflow = (repository / ".github/workflows/release.yml").read_text(
@@ -117,6 +191,15 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("cargo test --locked --release --target", workflow)
         self.assertIn("cargo package --locked", workflow)
         self.assertIn("gh release create", workflow)
+        self.assertIn(
+            "os: macos-15-intel\n            target: x86_64-apple-darwin",
+            workflow,
+        )
+        self.assertIn(
+            "os: macos-15\n            target: aarch64-apple-darwin", workflow
+        )
+        self.assertIn("matrix.runner_arch", workflow)
+        self.assertIn("scripts/release.py verify-install", workflow)
         workflows = "\n".join(
             path.read_text(encoding="utf-8")
             for path in sorted((repository / ".github/workflows").glob("*.yml"))

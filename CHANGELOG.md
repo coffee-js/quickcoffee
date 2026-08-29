@@ -15,6 +15,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - 多文件嵌入式策略包验证隔离 Context、typed host state、显式 capability、取消与资源策略。
 - `qcoffee` / `qtest` 人类错误显示完整 ranges、源码片段与可操作 hints；`qcoffee --json` 错误附带 version 1 完整 labels。
 - 包含精确数值、不可变集合、受限 class、静态模块图、结构化诊断与显式资源治理。
+- 为 Linux x86_64、macOS Intel、macOS Apple silicon 与 Windows x86_64 生成可校验归档，并从干净解包目录验证 CLI、`.coffee`、`.litcoffee`、`qdocco` 与 `qtest` 工作流。
 
 ### English
 
@@ -25,3 +26,4 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - A multi-file embedded policy package validates isolated Contexts, typed host state, explicit capabilities, cancellation, and resource policy.
 - Human `qcoffee` / `qtest` errors render complete ranges, source excerpts, and actionable hints; `qcoffee --json` errors include complete version 1 labels.
 - Includes exact numeric values, immutable collections, restricted classes, static module graphs, structured diagnostics, and explicit resource governance.
+- Produces verified archives for Linux x86_64, macOS Intel, macOS Apple silicon, and Windows x86_64, then exercises the CLIs, `.coffee`, `.litcoffee`, `qdocco`, and `qtest` from clean extracted directories.
