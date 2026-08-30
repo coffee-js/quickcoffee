@@ -51,6 +51,10 @@ harness = false
 name = "pricing"
 harness = false
 
+[[bench]]
+name = "normalization"
+harness = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

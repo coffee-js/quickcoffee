@@ -1,0 +1,24 @@
+{
+  "transient": "discarded root field",
+  "schema": "profile-events/v1",
+  "events": [
+    {
+      "id": "  evt-002  ",
+      "name": "　Ada ☕　",
+      "tags": ["中", "a", "☕"],
+      "amount": 12.30,
+      "sequence": 9007199254740993,
+      "note": "  priority  ",
+      "metadata": {"source": "  portal  ", "channel": "web", "transient": true}
+    },
+    {
+      "id": "evt-001",
+      "name": "  林 中  ",
+      "tags": ["rust", "coffee", "coffee"],
+      "amount": 100.00,
+      "sequence": 2,
+      "note": "　　",
+      "metadata": {"source": " app ", "channel": "mobile"}
+    }
+  ]
+}

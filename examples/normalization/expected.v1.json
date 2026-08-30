@@ -1,0 +1,1 @@
+{"events":[{"amount":12.3,"id":"evt-002","metadata":{"channel":"web","source":"portal"},"name":"Ada ☕","note":"priority","sequence":9007199254740993,"tags":["a","☕","中"]},{"amount":100.0,"id":"evt-001","metadata":{"channel":"mobile","source":"app"},"name":"林 中","sequence":2,"tags":["coffee","coffee","rust"]}],"schema":"profile-events/v1"}
