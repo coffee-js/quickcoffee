@@ -5,23 +5,33 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  stable:
+    name: check (stable)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: ["1.85.0", stable]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: stable
           components: rustfmt, clippy
-      - run: make docs && make check
+      - run: make docs check-fast
+      - if: github.event_name != 'pull_request'
+        run: make check-extended
       - run: git diff --exit-code
       - run: test -z "$(git status --short)"
+
+  msrv:
+    name: check (1.85.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - run: make check-msrv

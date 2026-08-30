@@ -79,12 +79,29 @@ fn ci_runs_for_pull_requests_and_main_pushes_without_duplicate_feature_pushes() 
 
     assert_eq!(
         triggers,
-        "  push:\n    branches:\n      - main\n  pull_request:\n"
+        "  push:\n    branches:\n      - main\n  pull_request:\n  workflow_dispatch:\n"
     );
-    assert!(ci.contains("toolchain: [\"1.85.0\", stable]"));
-    assert!(ci.contains("- run: make docs && make check"));
+    assert!(ci.contains("name: check (stable)"));
+    assert!(ci.contains("toolchain: stable"));
+    assert!(ci.contains("- run: make docs check-fast"));
+    assert!(
+        ci.contains("- if: github.event_name != 'pull_request'\n        run: make check-extended")
+    );
     assert!(ci.contains("- run: git diff --exit-code"));
     assert!(ci.contains("- run: test -z \"$(git status --short)\""));
+    assert!(ci.contains("name: check (1.85.0)"));
+    assert!(ci.contains("toolchain: 1.85.0"));
+    assert!(ci.contains("- run: make check-msrv"));
+
+    let makefile = repository_file("Makefile");
+    assert!(makefile.contains(
+        "check-fast: fmt test examples package-metadata release-tool-check qbench-check clippy api-doc doc-check"
+    ));
+    assert!(
+        makefile.contains("check-msrv:\n\tcargo test --locked --lib --bins --tests --examples")
+    );
+    assert!(makefile.contains("check-extended: release-test package"));
+    assert!(makefile.contains("check: check-fast check-extended"));
 }
 
 #[test]
