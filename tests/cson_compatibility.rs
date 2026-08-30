@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use quickcoffee::{Context, Value};
+use quickcoffee::{Context, Value, parse_cson};
 
 const CORPUS_ROOT: &str = "tests/cson";
 const REQUIRED_FEATURES: &[&str] = &[
@@ -109,6 +109,17 @@ fn canonical_json(source: &str) -> String {
         .to_owned()
 }
 
+fn canonical_value(value: Value) -> String {
+    let mut context = Context::new();
+    context.set_global("value", value);
+    context
+        .eval("encode_json(value)")
+        .expect("CSON value is JSON-compatible")
+        .as_str()
+        .expect("encode_json returns String")
+        .to_owned()
+}
+
 fn assert_identifier(value: &str, separator: char) {
     assert!(!value.is_empty());
     assert!(value.bytes().all(|byte| {
@@ -117,7 +128,7 @@ fn assert_identifier(value: &str, separator: char) {
 }
 
 #[test]
-fn cson_matrix_is_complete_and_executable_before_the_parser_exists() {
+fn cson_matrix_is_complete_and_executes_against_the_parser() {
     let cases = load_cases();
     assert!(cases.len() >= 20, "the compatibility surface is too small");
 
@@ -181,6 +192,10 @@ fn cson_matrix_is_complete_and_executable_before_the_parser_exists() {
             Decision::Accept => {
                 let normalized = expectation.trim_end_matches(['\r', '\n']);
                 assert_eq!(canonical_json(&expectation), normalized);
+                let parsed = parse_cson(&fixture).unwrap_or_else(|error| {
+                    panic!("accepted CSON case {} failed: {error}", case.id)
+                });
+                assert_eq!(canonical_value(parsed), normalized, "case {}", case.id);
             }
             Decision::Reject => {
                 let code = expectation.trim();
@@ -188,8 +203,13 @@ fn cson_matrix_is_complete_and_executable_before_the_parser_exists() {
                 assert!(code.bytes().all(|byte| byte.is_ascii_uppercase()
                     || byte.is_ascii_digit()
                     || byte == b'_'));
+                let error = parse_cson(&fixture).unwrap_err();
+                assert_eq!(error.code().as_str(), code, "case {}", case.id);
             }
-            Decision::Defer => assert_identifier(expectation.trim(), '-'),
+            Decision::Defer => {
+                assert_identifier(expectation.trim(), '-');
+                assert!(parse_cson(&fixture).is_err(), "deferred case {}", case.id);
+            }
         }
 
         assert!(referenced_files.insert(case.fixture.to_owned()));
