@@ -94,9 +94,9 @@ QuickCoffee 已提供：
 | 检查模块图指纹 | `qcoffee --fingerprint --module-root modules app/main` |
 | 运行隔离模块测试 | `qtest --module-root examples/pricing test` |
 | 规范化 JSON 文件 | `cargo run --example normalization -- examples/normalization/input.v1.json` |
-| 持久交互会话 | `qcoffee --interactive`（`:help`、`:quit`） |
+| 持久交互会话 | `qcoffee --interactive`（逐物理行求值；`:help`、`:quit`） |
 | 只检查、不执行 | `qcoffee --check script.coffee` |
-| 稳定 JSON 输出 | `qcoffee --json script.coffee` |
+| 稳定 JSON 输出 | `qcoffee --json script.coffee`（错误保留 legacy 字段并附带 version 1 完整 labels） |
 | 限制本次执行 fuel | `qcoffee --fuel 100000 script.coffee` |
 | 限制源码与字节码 | `qcoffee --max-source-bytes 1000000 --max-bytecode-instructions 1000000 script.coffee` |
 | 限制模块图 | `qcoffee --max-module-graph-modules 1024 --max-module-graph-source-bytes 16000000 --module-root modules app/main` |
@@ -105,6 +105,10 @@ QuickCoffee 已提供：
 `.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 使用 GitHub 原生支持的 Literate CoffeeScript 形式：Markdown 正文保持未缩进，技术标识使用反引号行内代码，可执行代码块统一缩进四个空格并与正文留出空行。`` ```coffee `` 围栏只适用于生成后的普通 Markdown，不会成为 `.litcoffee` 的可执行代码。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成带版本标记的文档，`--incremental` 会在最终产物字节不变时保留已有文件。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
 
 `qtest --module-root ROOT ENTRY...` 显式授予一个受限模块根，把每个规范化入口预检为内存 `ModulePackage` 后在隔离 Context 中运行；入口必须 `export test = true`。该模式复用 fuel、每 case timeout、filter/list、stats、JSON、TAP 与 JUnit 契约，普通文件模式仍不获得模块权限。
+
+普通 `qcoffee`/`qtest` 脚本错误会在 legacy 错误首行之后显示 primary range、按调用顺序排列的 secondary ranges、紧凑源码片段与可操作 hint；`.litcoffee` 继续指向原始 Markdown 的物理行，无法可靠恢复的列不会被伪造。`qcoffee --json` 成功记录不变；错误记录保留既有 `kind`、`message`、`source`、`line` 与领域字段，并增加 `diagnostic: {version: 1, labels: [...]}`。完整契约见 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md)。
+
+REPL 不猜测多行块：每个非命令物理行是一次求值，并以稳定的 `<repl:N>` 来源名保留到会话结束，让跨输入调用链仍能指回定义行；多行程序请使用 `.coffee` / `.litcoffee` 文件。
 
 ## 嵌入 Rust 应用
 
@@ -177,4 +181,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0159](RFCs/0159-resource-bounded-immutable-map-updates.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。

@@ -28,7 +28,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qcoffee --check FILE` 只解析、编译并验证 FILE，不执行它。
 
-`qcoffee --interactive`（或 `-i`）逐行复用同一 Context；`:help` 显示命令，`:quit` 退出。
+`qcoffee --interactive`（或 `-i`）逐行复用同一 Context；`:help` 显示命令，`:quit` 退出。每个非命令物理行是一次求值，并有稳定的 `<repl:N>` 诊断来源；多行程序使用 `.coffee` 或 `.litcoffee` 文件。
 
 `qcoffee --interactive --stats` 仅为实际执行或运行时失败的非空输入行输出指令/燃料统计；解析、验证错误不输出新记录。
 
@@ -57,6 +57,8 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 `qtest --filter TEXT` 按路径筛选；`qtest --list` 只列出筛选后的文件而不执行。
 
 `qcoffee --json` 单次执行输出一行 JSON 值或结构化错误，便于 CI 与宿主消费。
+
+普通 `qcoffee` 与 `qtest` 错误先保留 legacy 首行，再按顺序显示全部 primary/secondary range 与紧凑源码片段；已知的严格数值混用、缺失 Map key 和参数形状错误还会得到只影响展示的 `help:`。文学源码诊断指向原始 Markdown 物理行，预处理后无法可靠恢复的列保持省略。JSON 成功记录不变；错误记录保留 legacy 字段，并增加含完整 nullable ranges 的 `diagnostic: {version: 1, labels: [...]}`。
 
 Rust 嵌入错误有 `ErrorKind::Parse`、Verify、Runtime、Resource；`error.resource_limit()` 可分辨 fuel、调用深度、取消、JSON 六类边界、`StringBytes`、`ArrayItems`、`MapEntries`、`IntegerBits`、`DecimalCoefficientBits`、`DecimalScale`、`CollectionOperationItems`、`TextOperationBytes`、retained-memory 与 transient managed-allocation 边界，宿主回调仍可返回 `Error::runtime("message")`，`error.position()` 可给出从 1 开始的源码行。
 
