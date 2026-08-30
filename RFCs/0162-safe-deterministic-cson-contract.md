@@ -73,7 +73,7 @@ QuickCoffee 源码的 `n` / `m` 后缀属于 defer 的版本化扩展。CSON v1 
 
 - UTF-8、LF、两空格缩进、恰好一个末尾 LF；
 - Map key 以 Unicode scalar lexicographic order 排序；符合 ASCII key 规则的 key 不加引号，其余用 quoted String；
-- 非空根 Map 无 braces，嵌套非空 Map 使用缩进形式，空 Map 为 `{}`；
+- 非空根 Map 无 braces，Map value 的嵌套非空 Map 使用缩进形式，空 Map 为 `{}`；Array item 中的非空 Map 使用多行 braces，以免连续 Map items 被解析为同一个缩进 Map；
 - Array 每项独占一行、无逗号；空 Array 为 `[]`；
 - 单行 String 使用单引号和最小确定性 escape；包含 LF 且不含 `'''` 时使用三单引号，否则使用 `\n` escape；
 - Integer 使用规范十进制，Decimal 使用 RFC 0138 的无指数文本并为 scale-zero Decimal 保留 `.0`；
@@ -165,7 +165,7 @@ The later `to_cson` implementation emits one byte representation:
 
 - UTF-8, LF, two-space indentation, and exactly one final LF;
 - Map keys sorted by Unicode-scalar lexicographic order; ASCII-safe keys remain bare and all others are quoted;
-- non-empty root Maps without braces, nested non-empty Maps in indentation form, and empty Maps as `{}`;
+- non-empty root Maps without braces, nested non-empty Map values in indentation form, and empty Maps as `{}`; a non-empty Map used as an Array item uses multiline braces so consecutive Map items cannot merge into one indentation Map;
 - one Array item per line without commas, and `[]` for an empty Array;
 - single quotes plus minimal deterministic escaping for one-line Strings; triple-single form for LF-containing values without `'''`, otherwise quoted `\n` escapes;
 - canonical decimal Integer text and RFC 0138 non-exponent Decimal text, retaining `.0` for scale-zero Decimal;

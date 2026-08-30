@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use quickcoffee::{Context, Value, parse_cson};
+use quickcoffee::{Context, Value, parse_cson, to_cson};
 
 const CORPUS_ROOT: &str = "tests/cson";
 const REQUIRED_FEATURES: &[&str] = &[
@@ -136,6 +136,7 @@ fn cson_matrix_is_complete_and_executes_against_the_parser() {
     let mut features = BTreeSet::new();
     let mut referenced_files = BTreeSet::new();
     let mut decisions = BTreeSet::new();
+    let mut accepted = 0;
 
     for case in &cases {
         assert_identifier(case.id, '_');
@@ -190,12 +191,41 @@ fn cson_matrix_is_complete_and_executes_against_the_parser() {
 
         match case.decision {
             Decision::Accept => {
+                accepted += 1;
                 let normalized = expectation.trim_end_matches(['\r', '\n']);
                 assert_eq!(canonical_json(&expectation), normalized);
                 let parsed = parse_cson(&fixture).unwrap_or_else(|error| {
                     panic!("accepted CSON case {} failed: {error}", case.id)
                 });
-                assert_eq!(canonical_value(parsed), normalized, "case {}", case.id);
+                assert_eq!(
+                    canonical_value(parsed.clone()),
+                    normalized,
+                    "case {}",
+                    case.id
+                );
+
+                let canonical = to_cson(&parsed)
+                    .unwrap_or_else(|error| panic!("case {} did not serialize: {error}", case.id));
+                let mut previous = canonical.clone();
+                for round in 1..=3 {
+                    let reparsed = parse_cson(&previous).unwrap_or_else(|error| {
+                        panic!("case {} round {round} did not reparse: {error}", case.id)
+                    });
+                    assert_eq!(
+                        canonical_value(reparsed.clone()),
+                        normalized,
+                        "case {} round {round}",
+                        case.id
+                    );
+                    let next = to_cson(&reparsed).unwrap_or_else(|error| {
+                        panic!(
+                            "case {} round {round} did not reserialize: {error}",
+                            case.id
+                        )
+                    });
+                    assert_eq!(next, canonical, "case {} round {round}", case.id);
+                    previous = next;
+                }
             }
             Decision::Reject => {
                 let code = expectation.trim();
@@ -217,6 +247,7 @@ fn cson_matrix_is_complete_and_executes_against_the_parser() {
     }
 
     assert_eq!(decisions, BTreeSet::from(["accept", "defer", "reject"]));
+    assert_eq!(accepted, 14, "the accepted CSON metric changed");
     for required in REQUIRED_FEATURES {
         assert!(
             features.contains(required),

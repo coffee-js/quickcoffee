@@ -1,4 +1,4 @@
-//! Resource-bounded, data-only CSON parsing.
+//! Resource-bounded, data-only CSON parsing and canonical serialization.
 
 use crate::vm::{decimal_text_resource_preflight, integer_digits_resource_preflight};
 use crate::{Decimal, Integer, ResourceLimits, SourcePosition, SourceSpan, Value};
@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, error, fmt, ops::Range, rc::Rc};
 
 const IMPLEMENTATION_MAX_RECURSION_DEPTH: usize = 128;
 
-/// Stable category for a CSON parsing failure.
+/// Stable category for a CSON operation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CsonErrorCode {
@@ -23,10 +23,14 @@ pub enum CsonErrorCode {
     Expression,
     /// A bare identifier was used as a value.
     IdentifierValue,
-    /// A numeric token is malformed or exceeds a numeric boundary.
+    /// A numeric token or Value is malformed or exceeds a numeric boundary.
     Number,
+    /// A serializer input is not a CSON data Value.
+    Type,
     /// The UTF-8 input byte boundary was exceeded.
     InputLimit,
+    /// The canonical output byte boundary was exceeded.
+    OutputLimit,
     /// A decoded String byte boundary was exceeded.
     StringLimit,
     /// The total parsed Value boundary was exceeded.
@@ -35,7 +39,7 @@ pub enum CsonErrorCode {
     ContainerLimit,
     /// The configured or implementation-safe nesting boundary was exceeded.
     DepthLimit,
-    /// The deterministic parser-work boundary was exceeded.
+    /// The deterministic parser- or serializer-work boundary was exceeded.
     WorkLimit,
     /// The diagnostic boundary does not permit another diagnostic.
     DiagnosticLimit,
@@ -52,7 +56,9 @@ impl CsonErrorCode {
             Self::Expression => "E_CSON_EXPRESSION",
             Self::IdentifierValue => "E_CSON_IDENTIFIER_VALUE",
             Self::Number => "E_CSON_NUMBER",
+            Self::Type => "E_CSON_TYPE",
             Self::InputLimit => "E_CSON_INPUT_LIMIT",
+            Self::OutputLimit => "E_CSON_OUTPUT_LIMIT",
             Self::StringLimit => "E_CSON_STRING_LIMIT",
             Self::ValueLimit => "E_CSON_VALUE_LIMIT",
             Self::ContainerLimit => "E_CSON_CONTAINER_LIMIT",
@@ -69,7 +75,7 @@ impl fmt::Display for CsonErrorCode {
     }
 }
 
-/// A stable CSON error with an original-input byte range and physical source span.
+/// A stable CSON error with source location information when input text exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsonError {
     code: CsonErrorCode,
@@ -90,12 +96,12 @@ impl CsonError {
         &self.message
     }
 
-    /// Returns the half-open UTF-8 byte range in the original input.
+    /// Returns the half-open UTF-8 byte range, or `0..0` for serialization errors.
     pub fn byte_range(&self) -> Range<usize> {
         self.byte_start..self.byte_end
     }
 
-    /// Returns the one-based physical source span in the original input.
+    /// Returns the one-based physical source span, using `1:1` for serialization errors.
     pub fn span(&self) -> &SourceSpan {
         &self.span
     }
@@ -129,6 +135,10 @@ impl CsonError {
                 end: Some(source_position(source, end)),
             },
         }
+    }
+
+    fn serializer(code: CsonErrorCode, message: impl Into<String>, limits: CsonLimits) -> Self {
+        Self::original("", 0, 0, code, message, limits.max_diagnostics)
     }
 }
 
@@ -198,7 +208,7 @@ impl CsonLimits {
         self
     }
 
-    /// Returns the reserved maximum canonical output bytes for the later serializer.
+    /// Returns the maximum canonical CSON output bytes.
     pub const fn max_output_bytes(&self) -> usize {
         self.max_output_bytes
     }
@@ -209,18 +219,18 @@ impl CsonLimits {
         self
     }
 
-    /// Returns the maximum UTF-8 bytes in one decoded String or Map key.
+    /// Returns the maximum UTF-8 bytes in one String or Map key.
     pub const fn max_string_bytes(&self) -> usize {
         self.max_string_bytes
     }
 
-    /// Returns a policy with a replacement decoded-String boundary.
+    /// Returns a policy with a replacement String boundary.
     pub const fn with_max_string_bytes(mut self, limit: usize) -> Self {
         self.max_string_bytes = limit;
         self
     }
 
-    /// Returns the maximum total Values created by one parse.
+    /// Returns the maximum total Values created or visited by one operation.
     pub const fn max_values(&self) -> usize {
         self.max_values
     }
@@ -286,7 +296,7 @@ impl CsonLimits {
         self
     }
 
-    /// Returns the maximum deterministic lexer and parser work units.
+    /// Returns the maximum deterministic parser or serializer work units.
     pub const fn max_work_units(&self) -> usize {
         self.max_work_units
     }
@@ -297,7 +307,7 @@ impl CsonLimits {
         self
     }
 
-    /// Returns the maximum diagnostics available to a parse operation.
+    /// Returns the maximum diagnostics available to one CSON operation.
     pub const fn max_diagnostics(&self) -> usize {
         self.max_diagnostics
     }
@@ -326,6 +336,17 @@ pub fn parse_cson_with_limits(source: &str, limits: CsonLimits) -> Result<Value,
     let normalized = NormalizedSource::new(source, limits)?;
     let (tokens, work) = Lexer::new(&normalized, limits).lex()?;
     Parser::new(&normalized, &tokens, limits, work).parse_document()
+}
+
+/// Serializes a supported data [`Value`] to canonical CSON with [`CsonLimits::default`].
+pub fn to_cson(value: &Value) -> Result<String, CsonError> {
+    to_cson_with_limits(value, CsonLimits::default())
+}
+
+/// Serializes a supported data [`Value`] to canonical CSON under explicit limits.
+pub fn to_cson_with_limits(value: &Value, limits: CsonLimits) -> Result<String, CsonError> {
+    let work = CsonValidator::new(limits).validate(value)?;
+    CsonEncoder::new(limits, work).encode_document(value)
 }
 
 fn source_position(source: &str, offset: usize) -> SourcePosition {
@@ -1651,4 +1672,402 @@ impl<'a> Parser<'a> {
     ) -> CsonError {
         self.source.error(start, end, code, message)
     }
+}
+
+struct CsonValidator {
+    limits: CsonLimits,
+    values: usize,
+    work: usize,
+}
+
+impl CsonValidator {
+    fn new(limits: CsonLimits) -> Self {
+        Self {
+            limits,
+            values: 0,
+            work: 0,
+        }
+    }
+
+    fn validate(mut self, value: &Value) -> Result<usize, CsonError> {
+        self.validate_value(value, 0)?;
+        Ok(self.work)
+    }
+
+    fn validate_value(&mut self, value: &Value, depth: usize) -> Result<(), CsonError> {
+        self.count_value()?;
+        match value {
+            Value::Nil | Value::Bool(_) => Ok(()),
+            Value::Number(_) => Err(self.error(
+                CsonErrorCode::Type,
+                "canonical CSON does not support binary Number values",
+            )),
+            Value::Integer(value) => {
+                if value.inner().bits() > self.limits.max_integer_bits {
+                    Err(self.error(
+                        CsonErrorCode::Number,
+                        "CSON Integer exceeds its configured numeric boundary",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            Value::Decimal(value) => {
+                if value.scale() > self.limits.max_decimal_scale
+                    || value.inner().bits() > self.limits.max_decimal_coefficient_bits
+                {
+                    Err(self.error(
+                        CsonErrorCode::Number,
+                        "CSON Decimal exceeds its configured numeric boundary",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            Value::String(value) => self.validate_string(value),
+            Value::Array(values) => {
+                self.validate_container(depth, values.len(), "Array")?;
+                for value in values.iter() {
+                    self.validate_value(value, depth + 1)?;
+                }
+                Ok(())
+            }
+            Value::Map(values) => {
+                self.validate_container(depth, values.len(), "Map")?;
+                for (key, value) in values.iter() {
+                    self.validate_string(key)?;
+                    self.validate_value(value, depth + 1)?;
+                }
+                Ok(())
+            }
+            Value::Error(_) => Err(self.unsupported("Error")),
+            Value::Class(_) => Err(self.unsupported("Class")),
+            Value::Instance(_) => Err(self.unsupported("Instance")),
+            Value::Function(_) => Err(self.unsupported("Function")),
+        }
+    }
+
+    fn count_value(&mut self) -> Result<(), CsonError> {
+        if self.values >= self.limits.max_values {
+            return Err(self.error(
+                CsonErrorCode::ValueLimit,
+                format!("CSON value count exceeds {}", self.limits.max_values),
+            ));
+        }
+        self.charge(1)?;
+        self.values += 1;
+        Ok(())
+    }
+
+    fn validate_container(
+        &mut self,
+        depth: usize,
+        items: usize,
+        kind: &str,
+    ) -> Result<(), CsonError> {
+        let effective = self
+            .limits
+            .max_nesting_depth
+            .min(IMPLEMENTATION_MAX_RECURSION_DEPTH);
+        if depth >= effective {
+            return Err(self.error(
+                CsonErrorCode::DepthLimit,
+                format!("CSON nesting exceeds {effective}"),
+            ));
+        }
+        if items > self.limits.max_container_items {
+            return Err(self.error(
+                CsonErrorCode::ContainerLimit,
+                format!(
+                    "CSON {kind} exceeds {} items",
+                    self.limits.max_container_items
+                ),
+            ));
+        }
+        self.charge(1)
+    }
+
+    fn validate_string(&mut self, value: &str) -> Result<(), CsonError> {
+        if value.len() > self.limits.max_string_bytes {
+            return Err(self.error(
+                CsonErrorCode::StringLimit,
+                format!("CSON string exceeds {} bytes", self.limits.max_string_bytes),
+            ));
+        }
+        self.charge(value.len())
+    }
+
+    fn charge(&mut self, amount: usize) -> Result<(), CsonError> {
+        let next = self.work.saturating_add(amount);
+        if next > self.limits.max_work_units {
+            return Err(self.error(
+                CsonErrorCode::WorkLimit,
+                format!(
+                    "CSON serializer work exceeds {} units",
+                    self.limits.max_work_units
+                ),
+            ));
+        }
+        self.work = next;
+        Ok(())
+    }
+
+    fn unsupported(&self, kind: &str) -> CsonError {
+        self.error(
+            CsonErrorCode::Type,
+            format!("canonical CSON does not support {kind} values"),
+        )
+    }
+
+    fn error(&self, code: CsonErrorCode, message: impl Into<String>) -> CsonError {
+        CsonError::serializer(code, message, self.limits)
+    }
+}
+
+struct CsonEncoder {
+    limits: CsonLimits,
+    output: String,
+    work: usize,
+}
+
+impl CsonEncoder {
+    fn new(limits: CsonLimits, work: usize) -> Self {
+        Self {
+            limits,
+            output: String::new(),
+            work,
+        }
+    }
+
+    fn encode_document(mut self, value: &Value) -> Result<String, CsonError> {
+        self.encode_block(value, 0, 0, false)?;
+        self.push("\n")?;
+        Ok(self.output)
+    }
+
+    fn encode_block(
+        &mut self,
+        value: &Value,
+        indentation: usize,
+        depth: usize,
+        brace_map: bool,
+    ) -> Result<(), CsonError> {
+        if let Value::Map(values) = value {
+            if !values.is_empty() {
+                if brace_map {
+                    self.write_indentation(indentation)?;
+                    return self.encode_braced_map(values, indentation, depth);
+                }
+                return self.encode_map_entries(values, indentation, depth);
+            }
+        }
+        self.write_indentation(indentation)?;
+        self.encode_prefixed(value, indentation, indentation, depth)
+    }
+
+    fn encode_map_entries(
+        &mut self,
+        values: &BTreeMap<String, Value>,
+        indentation: usize,
+        depth: usize,
+    ) -> Result<(), CsonError> {
+        for (index, (key, value)) in values.iter().enumerate() {
+            if index > 0 {
+                self.push("\n")?;
+            }
+            self.encode_map_entry(key, value, indentation, depth)?;
+        }
+        Ok(())
+    }
+
+    fn encode_braced_map(
+        &mut self,
+        values: &BTreeMap<String, Value>,
+        indentation: usize,
+        depth: usize,
+    ) -> Result<(), CsonError> {
+        self.push("{")?;
+        for (key, value) in values {
+            self.push("\n")?;
+            self.encode_map_entry(key, value, indentation + 1, depth)?;
+        }
+        self.push("\n")?;
+        self.write_indentation(indentation)?;
+        self.push("}")
+    }
+
+    fn encode_map_entry(
+        &mut self,
+        key: &str,
+        value: &Value,
+        indentation: usize,
+        depth: usize,
+    ) -> Result<(), CsonError> {
+        self.write_indentation(indentation)?;
+        self.encode_key(key)?;
+        if let Value::Map(children) = value {
+            if !children.is_empty() {
+                self.push(":\n")?;
+                return self.encode_map_entries(children, indentation + 1, depth + 1);
+            }
+        }
+        self.push(": ")?;
+        self.encode_prefixed(value, indentation, indentation + 1, depth + 1)
+    }
+
+    fn encode_prefixed(
+        &mut self,
+        value: &Value,
+        container_indentation: usize,
+        string_indentation: usize,
+        depth: usize,
+    ) -> Result<(), CsonError> {
+        match value {
+            Value::Nil => self.push("null"),
+            Value::Bool(value) => self.push(if *value { "true" } else { "false" }),
+            Value::Integer(value) => self.push(&value.to_decimal_string()),
+            Value::Decimal(value) => {
+                self.push(&value.to_plain_string())?;
+                if value.scale() == 0 {
+                    self.push(".0")?;
+                }
+                Ok(())
+            }
+            Value::String(value) => self.encode_string(value, string_indentation),
+            Value::Array(values) => self.encode_array(values, container_indentation, depth),
+            Value::Map(values) if values.is_empty() => self.push("{}"),
+            Value::Map(_) => Err(self.error(
+                CsonErrorCode::Type,
+                "internal CSON Map placement is not serializable",
+            )),
+            Value::Number(_)
+            | Value::Error(_)
+            | Value::Class(_)
+            | Value::Instance(_)
+            | Value::Function(_) => Err(self.error(
+                CsonErrorCode::Type,
+                "canonical CSON only supports data Values",
+            )),
+        }
+    }
+
+    fn encode_array(
+        &mut self,
+        values: &[Value],
+        indentation: usize,
+        depth: usize,
+    ) -> Result<(), CsonError> {
+        if values.is_empty() {
+            return self.push("[]");
+        }
+        self.push("[")?;
+        for value in values {
+            self.push("\n")?;
+            self.encode_block(value, indentation + 1, depth + 1, true)?;
+        }
+        self.push("\n")?;
+        self.write_indentation(indentation)?;
+        self.push("]")
+    }
+
+    fn encode_key(&mut self, key: &str) -> Result<(), CsonError> {
+        if is_safe_key(key) {
+            self.push(key)
+        } else {
+            self.encode_quoted_string(key)
+        }
+    }
+
+    fn encode_string(&mut self, value: &str, indentation: usize) -> Result<(), CsonError> {
+        if value.contains('\n') && !value.contains("'''") && !value.contains('\r') {
+            self.push("'''")?;
+            for line in value.split('\n') {
+                self.push("\n")?;
+                self.write_indentation(indentation)?;
+                self.push(line)?;
+            }
+            self.push("\n")?;
+            self.write_indentation(indentation)?;
+            self.push("'''")
+        } else {
+            self.encode_quoted_string(value)
+        }
+    }
+
+    fn encode_quoted_string(&mut self, value: &str) -> Result<(), CsonError> {
+        self.push("'")?;
+        for character in value.chars() {
+            match character {
+                '\'' => self.push("\\'")?,
+                '\\' => self.push("\\\\")?,
+                '\u{0008}' => self.push("\\b")?,
+                '\u{000c}' => self.push("\\f")?,
+                '\n' => self.push("\\n")?,
+                '\r' => self.push("\\r")?,
+                '\t' => self.push("\\t")?,
+                '\u{0000}'..='\u{001f}' => {
+                    const HEX: &[u8; 16] = b"0123456789abcdef";
+                    let scalar = u32::from(character) as usize;
+                    let escape = [
+                        b'\\',
+                        b'u',
+                        b'0',
+                        b'0',
+                        HEX[(scalar >> 4) & 0xf],
+                        HEX[scalar & 0xf],
+                    ];
+                    self.push(std::str::from_utf8(&escape).expect("CSON escape is ASCII"))?;
+                }
+                _ => {
+                    let mut buffer = [0_u8; 4];
+                    self.push(character.encode_utf8(&mut buffer))?;
+                }
+            }
+        }
+        self.push("'")
+    }
+
+    fn write_indentation(&mut self, indentation: usize) -> Result<(), CsonError> {
+        for _ in 0..indentation {
+            self.push("  ")?;
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, value: &str) -> Result<(), CsonError> {
+        if self.output.len().saturating_add(value.len()) > self.limits.max_output_bytes {
+            return Err(self.error(
+                CsonErrorCode::OutputLimit,
+                format!("CSON output exceeds {} bytes", self.limits.max_output_bytes),
+            ));
+        }
+        self.charge(value.len())?;
+        self.output.push_str(value);
+        Ok(())
+    }
+
+    fn charge(&mut self, amount: usize) -> Result<(), CsonError> {
+        let next = self.work.saturating_add(amount);
+        if next > self.limits.max_work_units {
+            return Err(self.error(
+                CsonErrorCode::WorkLimit,
+                format!(
+                    "CSON serializer work exceeds {} units",
+                    self.limits.max_work_units
+                ),
+            ));
+        }
+        self.work = next;
+        Ok(())
+    }
+
+    fn error(&self, code: CsonErrorCode, message: impl Into<String>) -> CsonError {
+        CsonError::serializer(code, message, self.limits)
+    }
+}
+
+fn is_safe_key(key: &str) -> bool {
+    let mut bytes = key.bytes();
+    matches!(bytes.next(), Some(byte) if is_identifier_start(byte))
+        && bytes.all(is_identifier_continue)
 }

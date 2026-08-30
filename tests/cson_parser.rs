@@ -58,7 +58,9 @@ fn stable_error_codes_are_public_and_machine_readable() {
         (CsonErrorCode::Expression, "E_CSON_EXPRESSION"),
         (CsonErrorCode::IdentifierValue, "E_CSON_IDENTIFIER_VALUE"),
         (CsonErrorCode::Number, "E_CSON_NUMBER"),
+        (CsonErrorCode::Type, "E_CSON_TYPE"),
         (CsonErrorCode::InputLimit, "E_CSON_INPUT_LIMIT"),
+        (CsonErrorCode::OutputLimit, "E_CSON_OUTPUT_LIMIT"),
         (CsonErrorCode::StringLimit, "E_CSON_STRING_LIMIT"),
         (CsonErrorCode::ValueLimit, "E_CSON_VALUE_LIMIT"),
         (CsonErrorCode::ContainerLimit, "E_CSON_CONTAINER_LIMIT"),
@@ -181,7 +183,7 @@ fn integer_decimal_and_work_boundaries_are_exact() {
 }
 
 #[test]
-fn diagnostic_and_reserved_output_boundaries_are_independent() {
+fn diagnostic_and_serializer_output_boundaries_are_independent() {
     let defaults = CsonLimits::default();
     assert_eq!(
         error_code("", defaults.with_max_diagnostics(0)),
@@ -196,8 +198,7 @@ fn diagnostic_and_reserved_output_boundaries_are_independent() {
         CsonErrorCode::Syntax
     );
 
-    // Output is deliberately reserved for the follow-up serializer and cannot
-    // constrain this parser-only API.
+    // Output is serializer-only and cannot constrain this parser-only API.
     for boundary in [0, 1, 2] {
         assert!(parse_cson_with_limits("0", defaults.with_max_output_bytes(boundary)).is_ok());
     }
