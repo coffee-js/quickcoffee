@@ -1,0 +1,3 @@
+plain: 'coffee'
+escaped: "line\n\u8336"
+backslash: 'C:\\rules'
