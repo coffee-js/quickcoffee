@@ -68,6 +68,26 @@ fn vm_fuzz_target_is_bounded_seeded_and_part_of_smoke() {
 }
 
 #[test]
+fn ci_runs_for_pull_requests_and_main_pushes_without_duplicate_feature_pushes() {
+    let ci = repository_file(".github/workflows/ci.yml");
+    let (_, after_on) = ci
+        .split_once("on:\n")
+        .expect("CI workflow declares event triggers");
+    let (triggers, _) = after_on
+        .split_once("\npermissions:")
+        .expect("CI workflow declares permissions after its triggers");
+
+    assert_eq!(
+        triggers,
+        "  push:\n    branches:\n      - main\n  pull_request:\n"
+    );
+    assert!(ci.contains("toolchain: [\"1.85.0\", stable]"));
+    assert!(ci.contains("- run: make docs && make check"));
+    assert!(ci.contains("- run: git diff --exit-code"));
+    assert!(ci.contains("- run: test -z \"$(git status --short)\""));
+}
+
+#[test]
 fn dependency_and_miri_workflows_keep_their_pinned_boundaries() {
     let toolchain = repository_file("fuzz/rust-toolchain.toml");
     assert!(toolchain.contains("nightly-2026-08-20"));
