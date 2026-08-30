@@ -30,7 +30,7 @@
 
 `qcoffee --check FILE` स्रोतं verify करोति, न चालयति।
 
-`qcoffee --interactive` (वा `-i`) एकं Context पङ्क्ति-क्रमेण धारयति; `:help` दर्शयति, `:quit` निर्गच्छति।
+`qcoffee --interactive` (वा `-i`) एकं Context पङ्क्ति-क्रमेण धारयति; `:help` दर्शयति, `:quit` निर्गच्छति। प्रत्येकं non-command भौतिक-पङ्क्तिः एकं evaluation अस्ति तथा स्थिरं `<repl:N>` निदान-स्रोतम् लभते; बहुपङ्क्ति-program `.coffee` वा `.litcoffee` सञ्चिकायां भवति।
 
 `qcoffee --interactive --stats` केवलं कार्यितायै वा runtime-दोषयुक्तायै non-empty पङ्क्त्यै instruction तथा fuel लेखं लिखति; parse अथवा verify-दोषे नूतनं लेखं न लिखति।
 
@@ -55,6 +55,8 @@
 `qtest --filter TEXT` मार्ग-साम्येन परीक्षां चिनोति; `qtest --list` चयनित-पत्राणि केवलं गणयति, न चालयति।
 
 `qcoffee --json` एकस्मिन् प्रयोगे JSON-मूल्यं वा संरचितं दोषं एकया पङ्क्त्या ददाति, CI-होष्ट्रयोः उपयोगाय।
+
+मानव-पाठ्य `qcoffee`-`qtest` दोषाः प्राचीन-दोष-पङ्क्तिं रक्षन्ति, ततः सर्वाणि primary-secondary-स्थानानि क्रमेण संक्षिप्त-स्रोतसा दर्शयन्ति। strict-सङ्ख्या-मिश्रणम्, अनुपस्थित-Map-key, दोषपूर्ण-argument-shape च `help:` सूचनां लभन्ते। Literate-दोषः Markdown-भौतिक-पङ्क्तिमेव दर्शयति, अनिश्चित-column न कल्पयति। JSON-सफल-लेखः न परिवर्तते; दोष-लेखः प्राचीन-क्षेत्राणि रक्षन् `diagnostic: {version: 1, labels: [...]}` योजयति।
 
 host-error `ErrorKind::Parse`, Verify, Runtime तथा प्रदर्शनात् स्वतन्त्रं विवरणं ददाति; `error.position()` कदाचित् एकतः गणितां स्रोत-पङ्क्तिं ददाति।
 
