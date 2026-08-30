@@ -1,0 +1,3 @@
+# Configuration comment.
+name: 'quick # coffee' # Inline comment.
+enabled: true

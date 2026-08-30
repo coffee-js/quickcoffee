@@ -186,4 +186,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0161](RFCs/0161-scenario-execution-policy.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0162](RFCs/0162-safe-deterministic-cson-contract.md) 是当前已采纳的语义、字节码、嵌入 API、工具与安全 CSON 数据契约；测试是这些契约的可执行验收。

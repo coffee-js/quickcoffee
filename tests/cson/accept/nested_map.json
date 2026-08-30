@@ -1,0 +1,1 @@
+{"service":{"endpoint":"https://example.invalid","retry":{"count":3}}}

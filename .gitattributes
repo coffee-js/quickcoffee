@@ -5,6 +5,8 @@
 *.coffee    text linguist-language=CoffeeScript
 # GitHub Linguist natively maps this to its Literate CoffeeScript grammar.
 *.litcoffee text
+# Preserve the physical CRLF compatibility fixture across checkouts.
+tests/cson/accept/crlf_tabs.cson -text !eol whitespace=cr-at-eol
 *.html text
 *.toml text
 Makefile text
