@@ -13,11 +13,17 @@ import re
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 
 
 BINARIES = ("qcoffee", "qtest", "qdocco", "qbench")
 DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
+EXAMPLE_SOURCES = (
+    "examples/pricing/rule.litcoffee",
+    "examples/pricing/demo.coffee",
+    "examples/pricing/test.coffee",
+)
 VERSION_PATTERN = re.compile(
     r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
 )
@@ -99,6 +105,13 @@ def archive_entries(repo: Path, binary_dir: Path, target: str) -> list[tuple[str
         if path.is_symlink():
             raise ReleaseError(f"release document must not be a symlink: {path}")
         entries.append((document, path, 0o644))
+    for source_name in EXAMPLE_SOURCES:
+        path = repo / source_name
+        if not path.is_file():
+            raise ReleaseError(f"missing release example source: {path}")
+        if path.is_symlink():
+            raise ReleaseError(f"release example source must not be a symlink: {path}")
+        entries.append((source_name, path, 0o644))
     return sorted(entries)
 
 
@@ -149,12 +162,13 @@ def expected_members(version: str, target: str) -> set[str]:
     executable_suffix = ".exe" if "windows" in target else ""
     names = [f"{binary}{executable_suffix}" for binary in BINARIES]
     names.extend(DOCUMENTS)
+    names.extend(EXAMPLE_SOURCES)
     return {f"{root}/{name}" for name in names}
 
 
 def safe_member(name: str) -> bool:
     path = PurePosixPath(name)
-    return not path.is_absolute() and ".." not in path.parts and len(path.parts) == 2
+    return not path.is_absolute() and ".." not in path.parts and len(path.parts) >= 2
 
 
 def verify_archive(path: Path, version: str, target: str) -> None:
@@ -281,6 +295,123 @@ def smoke(binary_dir: Path, version: str, target: str) -> None:
             )
 
 
+def extract_verified_archive(path: Path, destination: Path, version: str, target: str) -> Path:
+    """Extract an already-verified flat archive without trusting member paths."""
+    verify_archive(path, version, target)
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            entries = [
+                (info.filename, archive.read(info), (info.external_attr >> 16) & 0o777)
+                for info in archive.infolist()
+            ]
+    else:
+        entries = []
+        with tarfile.open(path, "r:gz") as archive:
+            for info in archive.getmembers():
+                source = archive.extractfile(info)
+                if source is None:
+                    raise ReleaseError(f"release archive member is unreadable: {info.name}")
+                entries.append((info.name, source.read(), info.mode & 0o777))
+    for name, data, mode in entries:
+        relative = PurePosixPath(name)
+        output = destination.joinpath(*relative.parts)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(data)
+        output.chmod(mode)
+    return destination / f"quickcoffee-{version}-{target}"
+
+
+def run_installed(
+    command: list[str], cwd: Path, expected_stdout: str = "", expected_stderr: str = ""
+) -> None:
+    """Run one extracted command and require its complete deterministic output."""
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if (
+        result.returncode != 0
+        or result.stdout != expected_stdout
+        or result.stderr != expected_stderr
+    ):
+        raise ReleaseError(
+            f"installed command failed: command={command!r}, code={result.returncode}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+
+
+def verify_install(path: Path, version: str, target: str) -> None:
+    """Exercise an archive from a temporary workspace without repository inputs."""
+    suffix = ".exe" if "windows" in target else ""
+    with tempfile.TemporaryDirectory(prefix="quickcoffee-install-") as temporary:
+        temporary_root = Path(temporary).resolve()
+        install = extract_verified_archive(path, temporary_root, version, target)
+        binaries = {
+            name: (install / f"{name}{suffix}").resolve() for name in BINARIES
+        }
+        workspace = temporary_root / "workspace"
+        workspace.mkdir()
+        for name, binary in binaries.items():
+            run_installed(
+                [os.fspath(binary), "--version"],
+                workspace,
+                f"{name} {version}\n",
+            )
+        (workspace / "plain.coffee").write_text(
+            "answer = 40\nanswer + 2\n", encoding="utf-8"
+        )
+        (workspace / "literate.litcoffee").write_text(
+            "# Installed literate smoke\n\n"
+            "Inline `qcoffee` stays Markdown on GitHub.\n\n"
+            "    answer = 40\n"
+            "    answer + 2\n",
+            encoding="utf-8",
+        )
+        (workspace / "document.litcoffee").write_text(
+            "# Installed qdocco smoke\n\n"
+            "Inline `qdocco` stays Markdown on GitHub.\n\n"
+            "    true\n",
+            encoding="utf-8",
+        )
+        run_installed(
+            [os.fspath(binaries["qcoffee"]), "plain.coffee"], workspace, "42\n"
+        )
+        run_installed(
+            [os.fspath(binaries["qcoffee"]), "literate.litcoffee"],
+            workspace,
+            "42\n",
+        )
+        run_installed(
+            [os.fspath(binaries["qdocco"]), "--check", "document.litcoffee"],
+            workspace,
+        )
+        pricing = (install / "examples" / "pricing").resolve()
+        run_installed(
+            [
+                os.fspath(binaries["qcoffee"]),
+                "--module-root",
+                os.fspath(pricing),
+                "demo",
+            ],
+            workspace,
+            "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
+            "tax: 14.04m, total: 122.04m}, rejection: pricing.ineligible}\n",
+        )
+        run_installed(
+            [
+                os.fspath(binaries["qtest"]),
+                "--module-root",
+                os.fspath(pricing),
+                "test",
+            ],
+            workspace,
+            "ok test.coffee\n",
+        )
+
+
 def parser() -> argparse.ArgumentParser:
     root = Path(__file__).resolve().parents[1]
     cli = argparse.ArgumentParser(description=__doc__)
@@ -303,6 +434,11 @@ def parser() -> argparse.ArgumentParser:
     verify.add_argument("--archive", type=Path, required=True)
     verify.add_argument("--version")
     verify.add_argument("--target", required=True)
+
+    install = commands.add_parser("verify-install")
+    install.add_argument("--archive", type=Path, required=True)
+    install.add_argument("--version")
+    install.add_argument("--target", required=True)
 
     smoke_parser = commands.add_parser("smoke")
     smoke_parser.add_argument("--binary-dir", type=Path, required=True)
@@ -333,6 +469,9 @@ def main() -> int:
         elif args.command == "verify-archive":
             version = args.version or validate_version(repo)
             verify_archive(args.archive, version, args.target)
+        elif args.command == "verify-install":
+            version = args.version or validate_version(repo)
+            verify_install(args.archive.resolve(), version, args.target)
         elif args.command == "smoke":
             version = args.version or validate_version(repo)
             smoke(args.binary_dir, version, args.target)

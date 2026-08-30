@@ -66,9 +66,14 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             python: python3
-          - os: macos-14
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             python: python3
+            runner_arch: x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            python: python3
+            runner_arch: arm64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             python: python
@@ -79,6 +84,10 @@ jobs:
         with:
           toolchain: 1.85.0
           targets: ${{ matrix.target }}
+      - name: Verify native macOS runner architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(uname -m)" = "${{ matrix.runner_arch }}"
       - name: Run release tests
         run: cargo test --locked --release --target ${{ matrix.target }}
       - name: Verify crate package
@@ -100,6 +109,10 @@ jobs:
             --output-dir dist \
             --target "${{ matrix.target }}")"
           ${{ matrix.python }} scripts/release.py verify-archive \
+            --archive "${archive}" \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target "${{ matrix.target }}"
+          ${{ matrix.python }} scripts/release.py verify-install \
             --archive "${archive}" \
             --version "${{ needs.validate.outputs.version }}" \
             --target "${{ matrix.target }}"
@@ -132,13 +145,16 @@ jobs:
             --version "${{ needs.validate.outputs.version }}" \
             --target x86_64-unknown-linux-gnu \
             --target x86_64-apple-darwin \
+            --target aarch64-apple-darwin \
             --target x86_64-pc-windows-msvc
           python3 scripts/release.py verify-checksums \
             --dist dist \
             --version "${{ needs.validate.outputs.version }}" \
             --target x86_64-unknown-linux-gnu \
             --target x86_64-apple-darwin \
+            --target aarch64-apple-darwin \
             --target x86_64-pc-windows-msvc
+          cp scripts/release.py dist/verify-release.py
       - uses: actions/upload-artifact@v7
         with:
           name: quickcoffee-${{ needs.validate.outputs.version }}-release
@@ -147,13 +163,37 @@ jobs:
             dist/*.zip
             dist/SHA256SUMS
             dist/release-notes.md
+            dist/verify-release.py
           if-no-files-found: error
           retention-days: 30
+
+  verify_distribution:
+    name: verify downloaded release bundle without checkout
+    needs: [validate, bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: quickcoffee-${{ needs.validate.outputs.version }}-release
+          path: dist
+      - name: Verify aggregate checksums and installed Linux workflow
+        run: |
+          python3 dist/verify-release.py verify-checksums \
+            --dist dist \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu \
+            --target x86_64-apple-darwin \
+            --target aarch64-apple-darwin \
+            --target x86_64-pc-windows-msvc
+          python3 dist/verify-release.py verify-install \
+            --archive "dist/quickcoffee-${{ needs.validate.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz" \
+            --version "${{ needs.validate.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu
 
   publish:
     name: publish GitHub Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: [validate, bundle]
+    needs: [validate, bundle, verify_distribution]
     runs-on: ubuntu-latest
     permissions:
       contents: write

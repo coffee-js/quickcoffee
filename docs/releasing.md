@@ -6,11 +6,22 @@
 
 - `x86_64-unknown-linux-gnu`：`.tar.gz`
 - `x86_64-apple-darwin`：`.tar.gz`
+- `aarch64-apple-darwin`：`.tar.gz`
 - `x86_64-pc-windows-msvc`：`.zip`
 
-每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志和双许可证。平台 job 会执行 release tests、crate package verification、四个 CLI 的版本 smoke check，并重新读取归档验证成员与路径。聚合 job 只接受完整且不重复的三平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。
+macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow 会在构建前校验 `uname -m`，避免 runner label 漂移后悄悄生成错误架构的制品。
 
-修改发布配置的 pull request 和在 GitHub Actions 手动运行该 workflow 都只会生成可下载的演练 artifacts，不会创建 GitHub Release。只有匹配的 tag push 且全部门禁通过时，聚合 job 才会发布 release。当前范围不包含代码签名、公证、包管理器配方、crates.io publish、macOS arm64、Linux musl 或 Windows arm64。
+每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志、双许可证，以及 `examples/pricing/` 下的规范 Decimal `.litcoffee` 规则和薄 `.coffee` demo/qtest 入口。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和四个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制和归档内源码运行：
+
+- 四个 CLI 的版本检查；
+- 一个独立 `.coffee` 脚本；
+- 一个含 Markdown 行内代码与四空格可执行块的 GitHub-compatible `.litcoffee`；
+- `qdocco --check`；
+- 归档自带的 Decimal 定价 `qcoffee --module-root` demo 与 `qtest --module-root` 用例。
+
+聚合 job 只接受完整且不重复的四平台制品，生成按文件名排序的 `SHA256SUMS`，再立即重新校验。聚合 artifact 上传完成后，另一个没有仓库 checkout、没有 Rust 工具链的 Ubuntu job 会重新下载最终 bundle，校验全部四个 checksum，并从下载的 Linux 归档完成同一 clean-install 工作流。只有这个 artifact round-trip 通过后，tag workflow 才能发布 GitHub Release。
+
+修改发布配置的 pull request 和在 GitHub Actions 手动运行该 workflow 都只会生成可下载的演练 artifacts，不会创建 GitHub Release。只有匹配的 tag push 且全部门禁通过时，聚合 job 才会发布 release。当前范围不包含代码签名、公证、包管理器配方、crates.io publish、Linux musl 或 Windows arm64。
 
 下载后可在 Unix-like 系统校验：
 
@@ -20,6 +31,50 @@ shasum -a 256 -c SHA256SUMS
 
 Windows PowerShell 可将 `Get-FileHash -Algorithm SHA256` 的结果与 `SHA256SUMS` 对照。归档是对提交内容和工具链的可验证打包，不构成代码签名或平台公证。
 
+### 无仓库 checkout 的快速验收
+
+正式 `v0.1.0` 发布后，Linux 或 macOS 用户可以只下载平台归档和 checksum：
+
+```sh
+VERSION=0.1.0
+TARGET=aarch64-apple-darwin
+ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
+BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
+curl -fLO "${BASE}/${ARCHIVE}"
+curl -fLO "${BASE}/SHA256SUMS"
+if command -v sha256sum >/dev/null; then
+  grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
+else
+  grep "  ${ARCHIVE}$" SHA256SUMS | shasum -a 256 -c -
+fi
+tar -xzf "${ARCHIVE}"
+cd "quickcoffee-${VERSION}-${TARGET}"
+./qcoffee --version
+./qcoffee --module-root examples/pricing demo
+./qtest --module-root examples/pricing test
+```
+
+Intel macOS 将 `TARGET` 改为 `x86_64-apple-darwin`，Linux 改为 `x86_64-unknown-linux-gnu`。成功时 demo 会输出精确 Decimal 报价与 `pricing.ineligible` 业务拒绝，qtest 输出 `ok test.coffee`。
+
+Windows PowerShell 使用同一 release 中的 zip：
+
+```powershell
+$Version = "0.1.0"
+$Target = "x86_64-pc-windows-msvc"
+$Archive = "quickcoffee-$Version-$Target.zip"
+$Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
+Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
+Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
+$Expected = ((Get-Content SHA256SUMS | Where-Object { $_ -match "  $([regex]::Escape($Archive))$" }) -split "  ")[0]
+$Actual = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
+Expand-Archive $Archive -DestinationPath .
+Set-Location "quickcoffee-$Version-$Target"
+.\qcoffee.exe --version
+.\qcoffee.exe --module-root examples\pricing demo
+.\qtest.exe --module-root examples\pricing test
+```
+
 维护者可以在 tag 前本地运行发布工具测试和完整门禁：
 
 ```sh
@@ -27,13 +82,34 @@ python3 scripts/test_release.py
 make check
 ```
 
+### Rust crate 分发决策
+
+0.1 将 crates.io 上的 `quickcoffee = "0.1.0"` 作为 Rust embedding 的正式入口，但发布必须由维护者从已验证的精确 release commit 手工执行。GitHub tag workflow 不保存 registry token，也不会调用不可逆的 `cargo publish`。发布前后依次确认：
+
+```sh
+cargo publish --dry-run --locked
+cargo publish --locked
+```
+
+crate 版本一经发布不能覆盖；若 registry 发布暂缓，宿主必须用完整 commit `rev` 固定 Git dependency，不使用浮动分支。
+
 ## English
 
-Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package version in `Cargo.toml` and a version heading in `CHANGELOG.md`. The release workflow uses the committed `Cargo.lock` and Rust 1.85.0 to build native `x86_64-unknown-linux-gnu` and `x86_64-apple-darwin` `.tar.gz` archives plus an `x86_64-pc-windows-msvc` `.zip` archive.
+Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package version in `Cargo.toml` and a version heading in `CHANGELOG.md`. The release workflow uses the committed `Cargo.lock` and Rust 1.85.0 to build native `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin` `.tar.gz` archives plus an `x86_64-pc-windows-msvc` `.zip` archive.
 
-Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, and dual licenses. Each platform job runs release tests, crate package verification, version smoke checks for all four CLIs, and archive member/path verification. The aggregation job accepts exactly one artifact for every required platform, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again.
+macOS Intel uses `macos-15-intel`, while Apple silicon uses `macos-15`. The workflow asserts `uname -m` before building so runner-label drift cannot silently produce an artifact for the wrong architecture.
 
-Pull requests that change release configuration and manual GitHub Actions dispatches produce downloadable rehearsal artifacts but never create a GitHub Release. Only a matching tag push publishes after every gate succeeds. Code signing, notarization, package-manager formulae, crates.io publishing, macOS arm64, Linux musl, and Windows arm64 are outside this slice.
+Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, dual licenses, and the canonical Decimal `.litcoffee` rule plus thin `.coffee` demo/qtest entries under `examples/pricing/`. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all four CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries and packaged sources to run:
+
+- version checks for all four CLIs;
+- one standalone `.coffee` script;
+- one GitHub-compatible `.litcoffee` document containing Markdown inline code and a four-space executable block;
+- `qdocco --check`; and
+- the packaged Decimal-pricing `qcoffee --module-root` demo and `qtest --module-root` case.
+
+The aggregation job accepts exactly one artifact for every one of the four required platforms, writes a filename-sorted `SHA256SUMS`, and immediately verifies it again. After uploading the aggregate artifact, a separate Ubuntu job with no repository checkout and no Rust toolchain downloads the final bundle again, verifies all four checksums, and exercises the same clean-install workflow from the downloaded Linux archive. The tag workflow cannot publish a GitHub Release until this artifact round-trip passes.
+
+Pull requests that change release configuration and manual GitHub Actions dispatches produce downloadable rehearsal artifacts but never create a GitHub Release. Only a matching tag push publishes after every gate succeeds. Code signing, notarization, package-manager formulae, crates.io publishing, Linux musl, and Windows arm64 are outside this slice.
 
 On Unix-like systems, verify downloads with:
 
@@ -43,9 +119,64 @@ shasum -a 256 -c SHA256SUMS
 
 On Windows, compare `Get-FileHash -Algorithm SHA256` output with `SHA256SUMS`. These archives are verified packaging of a revision and toolchain, not code signatures or platform notarization.
 
+### Quick acceptance without a repository checkout
+
+After the formal `v0.1.0` release, a Linux or macOS user needs only the platform archive and checksum manifest:
+
+```sh
+VERSION=0.1.0
+TARGET=aarch64-apple-darwin
+ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
+BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
+curl -fLO "${BASE}/${ARCHIVE}"
+curl -fLO "${BASE}/SHA256SUMS"
+if command -v sha256sum >/dev/null; then
+  grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
+else
+  grep "  ${ARCHIVE}$" SHA256SUMS | shasum -a 256 -c -
+fi
+tar -xzf "${ARCHIVE}"
+cd "quickcoffee-${VERSION}-${TARGET}"
+./qcoffee --version
+./qcoffee --module-root examples/pricing demo
+./qtest --module-root examples/pricing test
+```
+
+Use `x86_64-apple-darwin` for Intel macOS or `x86_64-unknown-linux-gnu` for Linux. The demo prints an exact Decimal quote and a `pricing.ineligible` business rejection; qtest prints `ok test.coffee`.
+
+On Windows PowerShell, use the zip from the same release:
+
+```powershell
+$Version = "0.1.0"
+$Target = "x86_64-pc-windows-msvc"
+$Archive = "quickcoffee-$Version-$Target.zip"
+$Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
+Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
+Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
+$Expected = ((Get-Content SHA256SUMS | Where-Object { $_ -match "  $([regex]::Escape($Archive))$" }) -split "  ")[0]
+$Actual = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
+Expand-Archive $Archive -DestinationPath .
+Set-Location "quickcoffee-$Version-$Target"
+.\qcoffee.exe --version
+.\qcoffee.exe --module-root examples\pricing demo
+.\qtest.exe --module-root examples\pricing test
+```
+
 Before tagging, maintainers can run:
 
 ```sh
 python3 scripts/test_release.py
 make check
 ```
+
+### Rust crate distribution decision
+
+For 0.1, `quickcoffee = "0.1.0"` on crates.io is the formal Rust embedding entry. A maintainer must publish it manually from the exact verified release commit. The GitHub tag workflow stores no registry token and deliberately never invokes the irreversible `cargo publish` operation. Verify and publish explicitly:
+
+```sh
+cargo publish --dry-run --locked
+cargo publish --locked
+```
+
+A published crate version cannot be overwritten. If registry publication is deferred, hosts must pin a Git dependency by a full commit `rev`, never a moving branch.
