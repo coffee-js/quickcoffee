@@ -12,6 +12,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - 提供 `qcoffee`、`qtest`、`qdocco` 与 `qbench`，支持规范 `.coffee` 和 GitHub-compatible `.litcoffee` 源码。
 - `qtest --module-root ROOT ENTRY...` 可预检并隔离运行导出 `test = true` 的静态模块用例。
 - 提供共享 `.litcoffee` 规则的 Decimal 定价与确定性 JSON 规范化业务工作流。
+- 多文件嵌入式策略包验证隔离 Context、typed host state、显式 capability、取消与资源策略。
 - 包含精确数值、不可变集合、受限 class、静态模块图、结构化诊断与显式资源治理。
 
 ### English
@@ -20,4 +21,5 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - Ships `qcoffee`, `qtest`, `qdocco`, and `qbench` with canonical `.coffee` and GitHub-compatible `.litcoffee` sources.
 - `qtest --module-root ROOT ENTRY...` preflights and runs isolated static-module cases that export `test = true`.
 - Includes Decimal pricing and deterministic JSON-normalization workflows backed by shared `.litcoffee` rules.
+- A multi-file embedded policy package validates isolated Contexts, typed host state, explicit capabilities, cancellation, and resource policy.
 - Includes exact numeric values, immutable collections, restricted classes, static module graphs, structured diagnostics, and explicit resource governance.
