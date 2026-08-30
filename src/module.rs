@@ -378,7 +378,21 @@ impl ModuleExports {
 ///
 /// A package owns only verified compilation artifacts and resolved dependency
 /// edges. It never retains a [`ModuleLoader`], evaluated exports, module
-/// globals, or execution state, so isolated [`Context`]s can reuse it safely.
+/// globals, or execution state, so isolated [`Context`]s in the same worker can
+/// reuse it safely. Its compiled Programs currently use `Rc`, so hosts prepare
+/// one package per worker instead of moving or sharing a package across threads.
+///
+/// ```compile_fail
+/// use quickcoffee::ModulePackage;
+/// fn require_send<T: Send>() {}
+/// require_send::<ModulePackage>();
+/// ```
+///
+/// ```compile_fail
+/// use quickcoffee::ModulePackage;
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<ModulePackage>();
+/// ```
 #[derive(Clone, Debug)]
 pub struct ModulePackage {
     entry: String,

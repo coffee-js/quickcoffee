@@ -5,7 +5,7 @@ use quickcoffee::{
     CancellationToken, ErrorKind, LiveMemoryObservation, LiveMemoryOutcome, ResourceLimit,
     ResourceLimits, Runtime, Value,
 };
-use std::{path::PathBuf, process::Command};
+use std::{path::PathBuf, process::Command, thread};
 use support::{AUDIT_KEY, PolicyHost, RequestState, prepare, request};
 
 fn decision_field<'a>(decision: &'a Value, field: &str) -> &'a Value {
@@ -124,6 +124,53 @@ fn policy_package_enforces_capabilities_host_errors_and_cancellation() {
         error.labels()[0].span.source_name.as_deref(),
         Some("host.coffee")
     );
+}
+
+#[test]
+fn policy_package_deploys_with_one_runtime_per_worker() {
+    let mut controls = Vec::new();
+    let mut workers = Vec::new();
+    for worker in 0..4 {
+        let control = CancellationToken::new();
+        let cancellation = control.clone();
+        controls.push(control);
+        workers.push(thread::spawn(move || -> Result<_, String> {
+            // All non-Send QuickCoffee state is created and consumed inside
+            // this closure. Only CancellationToken enters from the host.
+            let host = PolicyHost::new().map_err(|error| error.to_string())?;
+            let customer_id = format!("worker-{worker}");
+            let mut context = host.context(
+                request("120", &customer_id, "CN", "equipment"),
+                RequestState::new(&customer_id, "low"),
+                true,
+                Some(cancellation),
+            );
+            let result = host.run(&mut context).map_err(|error| error.to_string())?;
+            let code = decision_field(&result, "code")
+                .as_str()
+                .expect("decision code")
+                .to_owned();
+            let cache = host.runtime.cache_stats();
+            Ok((
+                host.package.module_count(),
+                cache.program_entries,
+                cache.module_entries,
+                code,
+            ))
+        }));
+    }
+
+    for worker in workers {
+        let (package_modules, program_entries, module_entries, code) = worker
+            .join()
+            .expect("policy worker must not panic")
+            .expect("policy worker must complete");
+        assert_eq!(package_modules, 4);
+        assert_eq!(program_entries, 0);
+        assert_eq!(module_entries, 4);
+        assert_eq!(code, "policy.approved");
+    }
+    assert!(controls.iter().all(|control| !control.is_cancelled()));
 }
 
 #[test]

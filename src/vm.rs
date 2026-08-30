@@ -2005,6 +2005,20 @@ impl std::error::Error for Error {}
 ///
 /// Clones share state. Cancelling a token causes the next VM instruction check
 /// in every context configured with it to stop with [`ResourceLimit::Cancellation`].
+/// The token is the explicit VM control handle intended to cross worker
+/// boundaries, and its `Send + Sync` contract is checked at compile time:
+///
+/// ```
+/// use quickcoffee::CancellationToken;
+///
+/// fn require_send_sync<T: Send + Sync>() {}
+/// require_send_sync::<CancellationToken>();
+///
+/// let control = CancellationToken::new();
+/// let worker = control.clone();
+/// std::thread::spawn(move || worker.cancel()).join().unwrap();
+/// assert!(control.is_cancelled());
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 impl CancellationToken {
@@ -2783,6 +2797,18 @@ impl ExecutionPolicy {
 /// fuel, cancellation, statistics, and retained-memory accounting are never
 /// stored in the Runtime. The current VM uses `Rc`, so Runtime is deliberately
 /// not `Send` or `Sync`.
+///
+/// ```compile_fail
+/// use quickcoffee::Runtime;
+/// fn require_send<T: Send>() {}
+/// require_send::<Runtime>();
+/// ```
+///
+/// ```compile_fail
+/// use quickcoffee::Runtime;
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<Runtime>();
+/// ```
 #[derive(Clone)]
 pub struct Runtime(Rc<RuntimeInner>);
 
@@ -3178,7 +3204,22 @@ impl ProgramDebugInfo {
         Some(span)
     }
 }
-/// A cheaply cloneable, verified bytecode program for repeated execution.
+/// A cheaply cloneable, same-thread verified program for repeated execution.
+///
+/// A Program may be cloned within its owning worker, but its `Rc`-backed
+/// storage deliberately keeps it from crossing or being shared across workers.
+///
+/// ```compile_fail
+/// use quickcoffee::Program;
+/// fn require_send<T: Send>() {}
+/// require_send::<Program>();
+/// ```
+///
+/// ```compile_fail
+/// use quickcoffee::Program;
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<Program>();
+/// ```
 #[derive(Clone, Debug)]
 pub struct Program(Rc<ProgramInner>);
 impl From<Chunk> for Program {
@@ -3906,7 +3947,23 @@ impl ContextBuilder {
     }
 }
 
-/// An execution context containing globals, builtins, and per-run resource limits.
+/// A same-thread execution context containing globals, builtins, and per-run
+/// resource limits.
+///
+/// Hosts create and consume a Context inside one worker. Convert its output to
+/// ordinary sendable Rust data before returning it across a thread boundary.
+///
+/// ```compile_fail
+/// use quickcoffee::Context;
+/// fn require_send<T: Send>() {}
+/// require_send::<Context>();
+/// ```
+///
+/// ```compile_fail
+/// use quickcoffee::Context;
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<Context>();
+/// ```
 pub struct Context {
     engine: Engine,
     runtime: Option<Runtime>,

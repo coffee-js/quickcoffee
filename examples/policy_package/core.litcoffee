@@ -27,9 +27,19 @@ Run genuinely untrusted policies in a separate process with operating-system res
 termination controls. `HostState` and capability implementations are trusted host code and
 must cooperate with fuel, cancellation, and allocation accounting.
 
+Run `cargo run --example per_worker` for the four-OS-worker cookbook. Each worker creates
+and consumes its own Runtime, package, Contexts, Values, and Errors; it returns only an
+ordinary Rust summary. `cargo bench --bench policy_package` reports setup latency and
+cache/package cardinality separately from logical Context memory. None of those values is
+compiled-artifact heap, allocator capacity, or process RSS.
+
 `Runtime` 与 `Context` 仍限制在同一线程；当前多 worker 基线是每个 worker 各自持有
 Runtime 与已预检 package，只有 `CancellationToken` 可跨线程。进程内资源限制是纵深
 防御，不是完整敌对代码沙箱；真正不可信策略必须配合独立进程、操作系统资源和外部终止。
+运行 `cargo run --example per_worker` 可验证 4 个 OS worker 的官方模式；每个 worker
+在内部创建并消费 Runtime、package、Context、Value 与 Error，只返回普通 Rust 摘要。
+benchmark 中的 setup、cache/package 条目数和 logical Context memory 彼此分开，均不
+冒充 compiled-artifact heap、allocator capacity 或进程 RSS。
 
     invalid_request = (field, expected) ->
       throw error('policy.invalid_request', 'invalid purchase request', {

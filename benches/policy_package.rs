@@ -3,7 +3,9 @@
 //! Measures the real multi-file purchase policy with contextual host callbacks,
 //! typed state, and an allowlisted audit sink. The per-worker section is deliberately
 //! sequential: it records the documented one-Runtime-per-worker ownership baseline
-//! without claiming that Runtime or Context is Send/Sync.
+//! without claiming that Runtime or Context is Send/Sync. Cache/package cardinality
+//! and logical Context memory are reported separately and are never treated as heap
+//! usage, allocator capacity, or process RSS.
 #[path = "../examples/policy_package/support.rs"]
 mod support;
 
@@ -127,19 +129,32 @@ fn observed_memory(host: &PolicyHost) {
 
 fn per_worker_baseline() {
     let worker_count = 4;
-    let start = Instant::now();
-    let workers = (0..worker_count)
-        .map(|_| PolicyHost::new().expect("worker policy prepares"))
-        .collect::<Vec<_>>();
-    let setup = start.elapsed();
+    let mut workers = Vec::with_capacity(worker_count);
+    let mut setup_micros = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let start = Instant::now();
+        workers.push(PolicyHost::new().expect("worker policy prepares"));
+        setup_micros.push(start.elapsed().as_secs_f64() * 1_000_000.);
+    }
+
+    let setup_total = setup_micros.iter().sum::<f64>();
+    let setup_min = setup_micros.iter().copied().fold(f64::INFINITY, f64::min);
+    let setup_max = setup_micros.iter().copied().fold(0_f64, f64::max);
+    let package_modules = workers[0].package.module_count();
+    let cache = workers[0].runtime.cache_stats();
+    assert!(workers.iter().all(|worker| {
+        worker.package.module_count() == package_modules
+            && worker.runtime.cache_stats().program_entries == cache.program_entries
+            && worker.runtime.cache_stats().module_entries == cache.module_entries
+    }));
 
     let count = 1_000;
-    let request = request("120", "worker", "CN", "equipment");
+    let request_value = request("120", "worker", "CN", "equipment");
     let start = Instant::now();
     for index in 0..count {
         let worker = &workers[index % workers.len()];
         let mut context = worker.context(
-            request.clone(),
+            request_value.clone(),
             RequestState::new("worker", "low"),
             true,
             None,
@@ -148,10 +163,35 @@ fn per_worker_baseline() {
     }
     let elapsed = start.elapsed();
     println!(
-        "policy-workers-{worker_count}: {:.3}ms setup, {:.3}ms for {count} sequentially distributed requests, {:.0} requests/s",
-        setup.as_secs_f64() * 1_000.,
+        "policy-workers-{worker_count}: {:.3}ms setup total, {:.1}us/worker average ({setup_min:.1}-{setup_max:.1}us), {package_modules} package modules/worker, {}/{} program/module cache entries per worker; {:.3}ms for {count} sequentially distributed requests, {:.0} requests/s",
+        setup_total / 1_000.,
+        setup_total / worker_count as f64,
+        cache.program_entries,
+        cache.module_entries,
         elapsed.as_secs_f64() * 1_000.,
         count as f64 / elapsed.as_secs_f64(),
+    );
+
+    let worker = &workers[0];
+    let mut context = worker.context(
+        request("120", "worker-memory", "CN", "equipment"),
+        RequestState::new("worker-memory", "low"),
+        true,
+        None,
+    );
+    context.set_live_memory_observation(LiveMemoryObservation::Checkpointed);
+    black_box(
+        worker
+            .run(&mut context)
+            .expect("worker memory policy request"),
+    );
+    let live = context
+        .last_live_memory_report()
+        .expect("worker live observation enabled");
+    let retained = context.retained_memory();
+    println!(
+        "policy-worker-context-logical: retained={} objects/{} bytes, live-high-water={} objects/{} bytes; excludes compiled package/cache heap, allocator capacity, and process RSS",
+        retained.objects, retained.bytes, live.high_water.objects, live.high_water.bytes,
     );
 }
 
