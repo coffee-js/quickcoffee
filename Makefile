@@ -1,4 +1,4 @@
-.PHONY: fmt test release-test examples package-metadata package release-tool-check qbench-check fuzz-smoke miri-smoke dependency-audit clippy api-doc docs docs-html doc-check check bench qbench
+.PHONY: fmt test release-test examples package-metadata package release-tool-check qbench-check fuzz-smoke miri-smoke dependency-audit clippy api-doc docs docs-html doc-check check-fast check-msrv check-extended check bench qbench
 
 fmt:
 	cargo fmt --check
@@ -50,7 +50,14 @@ docs-html: doc-check
 	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.latin.litcoffee -o target/manuals/manual.latin.html
 	cargo run --locked --quiet --bin qdocco -- --incremental manuals/manual.devanagari-sa.litcoffee -o target/manuals/manual.devanagari-sa.html
 
-check: fmt test release-test examples package-metadata package release-tool-check qbench-check clippy api-doc doc-check
+check-fast: fmt test examples package-metadata release-tool-check qbench-check clippy api-doc doc-check
+
+check-msrv:
+	cargo test --locked --lib --bins --tests --examples
+
+check-extended: release-test package
+
+check: check-fast check-extended
 
 bench:
 	cargo bench --locked --bench core
