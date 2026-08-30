@@ -2,12 +2,11 @@
 mod support;
 
 use quickcoffee::{
-    CancellationToken, ErrorKind, LiveMemoryOutcome, ResourceLimit, ResourceLimits, Runtime, Value,
+    CancellationToken, ErrorKind, LiveMemoryObservation, LiveMemoryOutcome, ResourceLimit,
+    ResourceLimits, Runtime, Value,
 };
 use std::{path::PathBuf, process::Command};
-use support::{
-    AUDIT_KEY, ExecutionPolicy, PolicyHost, RequestState, compile_limits, prepare, request,
-};
+use support::{AUDIT_KEY, PolicyHost, RequestState, prepare, request};
 
 fn decision_field<'a>(decision: &'a Value, field: &str) -> &'a Value {
     &decision.as_map().expect("decision Map")[field]
@@ -16,14 +15,13 @@ fn decision_field<'a>(decision: &'a Value, field: &str) -> &'a Value {
 #[test]
 fn policy_package_reuses_artifacts_and_isolates_script_and_host_state() {
     let host = PolicyHost::new().unwrap();
-    let policy = ExecutionPolicy::bounded().observed();
     let mut approved = host.context(
         request("120", "customer-low", "CN", "equipment"),
         RequestState::new("customer-low", "low"),
         true,
         None,
-        policy,
     );
+    approved.set_live_memory_observation(LiveMemoryObservation::Checkpointed);
     let retained_before = approved.retained_memory();
 
     let first = host.run(&mut approved).unwrap();
@@ -63,7 +61,6 @@ fn policy_package_reuses_artifacts_and_isolates_script_and_host_state() {
         RequestState::new("customer-high", "high"),
         true,
         None,
-        policy,
     );
     let denied_decision = host.run(&mut denied).unwrap();
     assert_eq!(
@@ -81,14 +78,12 @@ fn policy_package_reuses_artifacts_and_isolates_script_and_host_state() {
 #[test]
 fn policy_package_enforces_capabilities_host_errors_and_cancellation() {
     let host = PolicyHost::new().unwrap();
-    let policy = ExecutionPolicy::bounded();
 
     let mut denied = host.context(
         request("120", "customer", "CN", "equipment"),
         RequestState::new("customer", "low"),
         false,
         None,
-        policy,
     );
     let error = host.run(&mut denied).unwrap_err();
     assert_eq!(
@@ -105,7 +100,6 @@ fn policy_package_enforces_capabilities_host_errors_and_cancellation() {
         RequestState::new("customer", "unavailable"),
         true,
         None,
-        policy,
     );
     let error = host.run(&mut unavailable).unwrap_err();
     let script = error.script_error().unwrap();
@@ -121,7 +115,6 @@ fn policy_package_enforces_capabilities_host_errors_and_cancellation() {
         RequestState::new("customer", "cancel"),
         true,
         Some(cancellation.clone()),
-        policy,
     );
     let error = host.run(&mut cancelled).unwrap_err();
     assert!(cancellation.is_cancelled());
@@ -146,7 +139,6 @@ fn policy_package_reports_domain_compile_and_execution_resource_boundaries() {
         RequestState::new("customer", "low"),
         true,
         None,
-        ExecutionPolicy::bounded(),
     );
     let error = host.run(&mut invalid).unwrap_err();
     let script = error.script_error().unwrap();
@@ -161,49 +153,45 @@ fn policy_package_reports_domain_compile_and_execution_resource_boundaries() {
     );
     assert!(error.labels()[0].span.start.line > 1);
 
-    let mut low_fuel_policy = ExecutionPolicy::bounded();
-    low_fuel_policy.fuel = 1;
     let mut low_fuel = host.context(
         request("120", "customer", "CN", "equipment"),
         RequestState::new("customer", "low"),
         true,
         None,
-        low_fuel_policy,
     );
+    low_fuel.set_fuel(1);
     let error = host.run(&mut low_fuel).unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::Fuel));
 
-    let mut depth_policy = ExecutionPolicy::bounded();
-    depth_policy.max_call_depth = 0;
     let mut depth = host.context(
         request("120", "customer", "CN", "equipment"),
         RequestState::new("customer", "low"),
         true,
         None,
-        depth_policy,
     );
+    depth.set_max_call_depth(0);
     let error = host.run(&mut depth).unwrap_err();
     assert_eq!(error.resource_limit(), Some(ResourceLimit::CallDepth));
 
-    let mut transient_policy = ExecutionPolicy::bounded();
-    transient_policy.resource_limits = transient_policy
-        .resource_limits
+    let transient_limits = host
+        .runtime
+        .execution_policy()
+        .resource_limits()
         .with_max_transient_managed_objects(1);
     let mut transient = host.context(
         request("120", "customer", "CN", "equipment"),
         RequestState::new("customer", "low"),
         true,
         None,
-        transient_policy,
     );
+    transient.set_resource_limits(transient_limits);
     let error = host.run(&mut transient).unwrap_err();
     assert_eq!(
         error.resource_limit(),
         Some(ResourceLimit::TransientManagedObjects)
     );
 
-    let mut retained_policy = ExecutionPolicy::bounded();
-    retained_policy.resource_limits = ResourceLimits::default()
+    let retained_limits = ResourceLimits::default()
         .with_max_retained_managed_objects(1)
         .with_max_transient_managed_objects(20_000)
         .with_max_transient_managed_bytes(2_000_000);
@@ -212,8 +200,8 @@ fn policy_package_reports_domain_compile_and_execution_resource_boundaries() {
         RequestState::new("customer", "low"),
         true,
         None,
-        retained_policy,
     );
+    retained.set_resource_limits(retained_limits);
     let error = host.run(&mut retained).unwrap_err();
     assert_eq!(
         error.resource_limit(),
@@ -222,7 +210,13 @@ fn policy_package_reports_domain_compile_and_execution_resource_boundaries() {
     assert_eq!(retained.last_execution().instructions, 0);
 
     let runtime = Runtime::builder()
-        .compile_limits(compile_limits().with_max_module_graph_modules(2))
+        .execution_policy(
+            host.runtime.execution_policy().with_compile_limits(
+                host.runtime
+                    .compile_limits()
+                    .with_max_module_graph_modules(2),
+            ),
+        )
         .build();
     let error = prepare(&runtime).unwrap_err();
     assert_eq!(

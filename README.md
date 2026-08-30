@@ -115,13 +115,14 @@ REPL 不猜测多行块：每个非命令物理行是一次求值，并以稳定
 最小嵌入可以直接创建一个 `Context`；需要让多个隔离 Context 复用编译产物时，由一个 `Runtime` 统一创建：
 
 ```rust
-use quickcoffee::{Error, Runtime};
+use quickcoffee::{Error, ExecutionPolicy, Runtime};
 
 fn evaluate_rule() -> Result<(), Error> {
-    let runtime = Runtime::new();
+    let runtime = Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
+        .build();
     let value = runtime
         .context_builder()
-        .fuel(100_000)
         .build()
         .eval_named("rules/discount.coffee", "amount = 120; amount * 0.9")?;
     println!("{value}");
@@ -129,7 +130,7 @@ fn evaluate_rule() -> Result<(), Error> {
 }
 ```
 
-生产嵌入应显式设置合适的 `CompileLimits`、fuel、调用深度和 `ResourceLimits`，并按需要通过 `ContextBuilder` 提供 `CancellationToken`、global 与 native。`CompileLimits` 在预处理与 cache-key 复制前限制原始 source，在验证和执行前限制递归 bytecode，并让模块执行与图指纹共享唯一模块数及累计 source bytes 预算；模块执行会在任何脚本运行前预检完整静态图。contextual native 可通过 `NativeCallContext` 协作检查取消、扣减 fuel、记录分配遥测并访问类型化、脚本不可见的 Context-owned `HostState`。`HostCapabilities` 与 typed `CapabilityKey<T>` 进一步把 clock、random、logging、file、network 权限放进显式 allowlist；QuickCoffee 不提供这些系统能力的实现，callback 必须继续显式检查和记账。同步 callback 在调用线程内执行，panic 不会被 VM 捕获或保证回滚；Runtime/Context 因 `Rc` 保持 non-Send/non-Sync，只有 `CancellationToken` 可跨线程发出停止信号。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports、host state、capabilities 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 可分别设置 retained object/byte 的执行提交上限，以及默认关闭的每轮累计 transient managed object/byte 上限；后者也覆盖协作记账的 contextual native 和整张模块图，并在越界时保留失败统计、回滚脚本状态。累计分配预算仍不是 RSS 或逐时刻 live-memory 峰值。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离。可运行的完整示例见[嵌入示例](examples/embed.rs)；显式模块加载与图指纹见[模块示例](examples/modules.rs)。
+生产嵌入可从 `ExecutionPolicy::isolated_request()` 开始：它把三个旗舰工作流验证过的 `CompileLimits`、fuel、调用深度、`ResourceLimits` 与默认关闭的 logical live-memory observation 一次性装入 Runtime，并由每个新 Context 自动继承；`Runtime::execution_policy()` 可审计实际快照，现有 Context builder 方法仍可做单请求覆盖。`CancellationToken`、global、capability 与 native 必须按请求显式提供，不能藏进共享策略。`CompileLimits` 在预处理与 cache-key 复制前限制原始 source，在验证和执行前限制递归 bytecode，并让模块执行与图指纹共享唯一模块数及累计 source bytes 预算；模块执行会在任何脚本运行前预检完整静态图。contextual native 可通过 `NativeCallContext` 协作检查取消、扣减 fuel、记录分配遥测并访问类型化、脚本不可见的 Context-owned `HostState`。`HostCapabilities` 与 typed `CapabilityKey<T>` 进一步把 clock、random、logging、file、network 权限放进显式 allowlist；QuickCoffee 不提供这些系统能力的实现，callback 必须继续显式检查和记账。同步 callback 在调用线程内执行，panic 不会被 VM 捕获或保证回滚；Runtime/Context 因 `Rc` 保持 non-Send/non-Sync，只有 `CancellationToken` 可跨线程发出停止信号。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports、host state、capabilities 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 可分别设置 retained object/byte 的执行提交上限，以及默认关闭的每轮累计 transient managed object/byte 上限；后者也覆盖协作记账的 contextual native 和整张模块图，并在越界时保留失败统计、回滚脚本状态。累计分配预算仍不是 RSS 或逐时刻 live-memory 峰值。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离。完整契约见 [RFC 0161](RFCs/0161-scenario-execution-policy.md)，可运行示例见[嵌入示例](examples/embed.rs)和三个业务 host。
 
 完整的业务验收路径见[可执行定价规则](examples/pricing/rule.litcoffee)、[CLI 模块](examples/pricing/demo.coffee)、[`qtest` 模块用例](examples/pricing/test.coffee)与[复用模块包的 Rust 宿主](examples/pricing.rs)，四者共享同一份规则源码；运行 `qtest --module-root examples/pricing test` 即可执行隔离验收。
 
@@ -181,4 +182,4 @@ make check
 | 长期方向与 issue 入口 | [ROADMAP.md](ROADMAP.md) |
 | 可执行语言手册 | [中文](docs/manual.zh-CN.md) · [English](docs/manual.en.md) |
 
-[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。
+[RFC 0000](RFCs/0000-project-scope.md) 至 [RFC 0161](RFCs/0161-scenario-execution-policy.md) 是当前已采纳的语义、字节码、嵌入 API 和工具契约；测试是这些契约的可执行验收。

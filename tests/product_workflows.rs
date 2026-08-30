@@ -1,5 +1,5 @@
 use quickcoffee::{
-    Decimal, Error, ErrorKind, ModulePackage, ResourceLimit, ResourceLimits,
+    Decimal, Error, ErrorKind, ExecutionPolicy, ModulePackage, ResourceLimit, ResourceLimits,
     RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{path::PathBuf, process::Command};
@@ -37,18 +37,23 @@ fn pricing_package(runtime: &Runtime) -> (ModulePackage, RestrictedFileModuleLoa
     (package, loader)
 }
 
+fn isolated_runtime() -> Runtime {
+    Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
+        .build()
+}
+
 fn run(
     runtime: &Runtime,
     package: &ModulePackage,
     request: Value,
-    limits: ResourceLimits,
+    limits: Option<ResourceLimits>,
 ) -> Result<Value, Error> {
-    let mut context = runtime
-        .context_builder()
-        .fuel(100_000)
-        .resource_limits(limits)
-        .global("request", request)
-        .build();
+    let mut builder = runtime.context_builder().global("request", request);
+    if let Some(limits) = limits {
+        builder = builder.resource_limits(limits);
+    }
+    let mut context = builder.build();
     context
         .run_module_package(package)?
         .get("result")
@@ -58,18 +63,12 @@ fn run(
 
 #[test]
 fn literate_pricing_rule_produces_exact_deterministic_money() {
-    let runtime = Runtime::new();
+    let runtime = isolated_runtime();
     let (package, _) = pricing_package(&runtime);
     let request = valid_order("120");
     let before = request.to_string();
 
-    let result = run(
-        &runtime,
-        &package,
-        request.clone(),
-        ResourceLimits::default(),
-    )
-    .unwrap();
+    let result = run(&runtime, &package, request.clone(), None).unwrap();
     let quote = result.as_map().unwrap();
     assert_eq!(
         quote["subtotal"].as_decimal().unwrap().to_plain_string(),
@@ -94,29 +93,26 @@ fn literate_pricing_rule_produces_exact_deterministic_money() {
         "the input value must remain immutable"
     );
 
-    let second = run(&runtime, &package, request, ResourceLimits::default()).unwrap();
+    let second = run(&runtime, &package, request, None).unwrap();
     assert_eq!(second.to_string(), result.to_string());
 }
 
 #[test]
 fn pricing_package_is_reusable_across_isolated_requests() {
-    let runtime = Runtime::builder().module_cache_entries(8).build();
+    let runtime = Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
+        .module_cache_entries(8)
+        .build();
     let (package, _) = pricing_package(&runtime);
 
-    let member = run(
-        &runtime,
-        &package,
-        valid_order("120"),
-        ResourceLimits::default(),
-    )
-    .unwrap();
+    let member = run(&runtime, &package, valid_order("120"), None).unwrap();
     let standard = order(
         decimal("120"),
         Value::from(3_i64),
         Value::from("standard"),
         Value::from("US"),
     );
-    let standard = run(&runtime, &package, standard, ResourceLimits::default()).unwrap();
+    let standard = run(&runtime, &package, standard, None).unwrap();
 
     assert_eq!(
         member.as_map().unwrap()["total"]
@@ -136,7 +132,7 @@ fn pricing_package_is_reusable_across_isolated_requests() {
 
 #[test]
 fn pricing_rule_separates_business_rejection_from_invalid_input() {
-    let runtime = Runtime::new();
+    let runtime = isolated_runtime();
     let (package, _) = pricing_package(&runtime);
     let ineligible = order(
         decimal("5"),
@@ -144,7 +140,7 @@ fn pricing_rule_separates_business_rejection_from_invalid_input() {
         Value::from("standard"),
         Value::from("US"),
     );
-    let error = run(&runtime, &package, ineligible, ResourceLimits::default()).unwrap_err();
+    let error = run(&runtime, &package, ineligible, None).unwrap_err();
     let script = error.script_error().unwrap();
     assert_eq!(script.code(), "pricing.ineligible");
     assert_eq!(
@@ -161,7 +157,7 @@ fn pricing_rule_separates_business_rejection_from_invalid_input() {
         Value::from("member"),
         Value::from("CN"),
     );
-    let error = run(&runtime, &package, invalid, ResourceLimits::default()).unwrap_err();
+    let error = run(&runtime, &package, invalid, None).unwrap_err();
     let script = error.script_error().unwrap();
     assert_eq!(script.code(), "pricing.invalid_order");
     assert_eq!(
@@ -172,14 +168,14 @@ fn pricing_rule_separates_business_rejection_from_invalid_input() {
 
 #[test]
 fn pricing_rule_rejects_missing_fields_and_honors_resource_policy() {
-    let runtime = Runtime::new();
+    let runtime = isolated_runtime();
     let (package, _) = pricing_package(&runtime);
     let missing = Value::map([
         ("subtotal", decimal("120")),
         ("item_count", Value::from(3_i64)),
         ("customer_tier", Value::from("member")),
     ]);
-    let error = run(&runtime, &package, missing, ResourceLimits::default()).unwrap_err();
+    let error = run(&runtime, &package, missing, None).unwrap_err();
     let script = error.script_error().unwrap();
     assert_eq!(script.code(), "pricing.invalid_order");
     assert_eq!(
@@ -188,7 +184,7 @@ fn pricing_rule_rejects_missing_fields_and_honors_resource_policy() {
     );
 
     let limits = ResourceLimits::default().with_max_map_entries(3);
-    let error = run(&runtime, &package, valid_order("120"), limits).unwrap_err();
+    let error = run(&runtime, &package, valid_order("120"), Some(limits)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Resource);
     assert_eq!(error.resource_limit(), Some(ResourceLimit::MapEntries));
 }

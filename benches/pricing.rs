@@ -3,7 +3,9 @@
 //! The benchmark loads the same literate rule and host module used by the CLI,
 //! embedding example, and integration tests. It measures package preflight separately
 //! from isolated request execution and intentionally uses no external framework.
-use quickcoffee::{Decimal, ModulePackage, RestrictedFileModuleLoader, Runtime, Value};
+use quickcoffee::{
+    Decimal, ExecutionPolicy, ModulePackage, RestrictedFileModuleLoader, Runtime, Value,
+};
 use std::{hint::black_box, path::PathBuf, time::Instant};
 
 fn loader() -> RestrictedFileModuleLoader {
@@ -46,7 +48,6 @@ fn execute(runtime: &Runtime, package: &ModulePackage, count: usize) {
     for index in 0..count {
         let mut context = runtime
             .context_builder()
-            .fuel(100_000)
             .global("request", black_box(request(index)))
             .build();
         let exports = context
@@ -66,7 +67,9 @@ fn execute(runtime: &Runtime, package: &ModulePackage, count: usize) {
 fn main() {
     let start = Instant::now();
     for _ in 0..10 {
-        let cold_runtime = Runtime::new();
+        let cold_runtime = Runtime::builder()
+            .execution_policy(ExecutionPolicy::isolated_request())
+            .build();
         let cold_loader = loader();
         black_box(prepare(&cold_runtime, &cold_loader));
     }
@@ -78,6 +81,7 @@ fn main() {
     );
 
     let runtime = Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
         .program_cache_entries(16)
         .module_cache_entries(16)
         .build();

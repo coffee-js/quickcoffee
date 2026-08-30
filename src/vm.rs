@@ -2646,8 +2646,134 @@ impl<T: Clone> CompileCache<T> {
 
 struct RuntimeInner {
     engine: Engine,
+    execution_policy: ExecutionPolicy,
     programs: RefCell<CompileCache<Program>>,
     modules: RefCell<CompileCache<Module>>,
+}
+
+/// A coherent set of compile-time and per-Context execution boundaries.
+///
+/// A policy installed through [`RuntimeBuilder::execution_policy`] configures
+/// the Runtime compiler and becomes the default inherited by every new
+/// [`Context`]. Request-specific globals, capabilities, host state, and
+/// [`CancellationToken`] values remain explicit Context configuration.
+///
+/// This is deterministic defense in depth, not a bound on process RSS or a
+/// sandbox for uncooperative native callbacks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExecutionPolicy {
+    compile_limits: CompileLimits,
+    fuel: u64,
+    max_call_depth: usize,
+    resource_limits: ResourceLimits,
+    live_memory_observation: LiveMemoryObservation,
+}
+
+impl Default for ExecutionPolicy {
+    fn default() -> Self {
+        Self {
+            compile_limits: CompileLimits::default(),
+            fuel: 1_000_000,
+            max_call_depth: 1_024,
+            resource_limits: ResourceLimits::default(),
+            live_memory_observation: LiveMemoryObservation::Off,
+        }
+    }
+}
+
+impl ExecutionPolicy {
+    /// Returns a bounded policy calibrated for the repository's short-lived
+    /// pricing, JSON-normalization, and multi-file policy request workflows.
+    ///
+    /// Hosts should create one Context per request or bounded request batch and
+    /// install a fresh cancellation token when an external deadline is needed.
+    /// Truly untrusted scripts still require process isolation and OS limits.
+    pub fn isolated_request() -> Self {
+        Self {
+            compile_limits: CompileLimits::default()
+                .with_max_source_bytes(128_000)
+                .with_max_bytecode_instructions(40_000)
+                .with_max_module_graph_modules(8)
+                .with_max_module_graph_source_bytes(256_000),
+            fuel: 250_000,
+            max_call_depth: 64,
+            resource_limits: ResourceLimits::default()
+                .with_max_json_input_bytes(256_000)
+                .with_max_json_output_bytes(256_000)
+                .with_max_json_string_bytes(64_000)
+                .with_max_json_container_items(1_024)
+                .with_max_json_values(16_000)
+                .with_max_json_nesting_depth(32)
+                .with_max_integer_bits(256)
+                .with_max_decimal_coefficient_bits(256)
+                .with_max_decimal_scale(8)
+                .with_max_collection_operation_items(4_096)
+                .with_max_text_operation_bytes(64_000)
+                .with_max_string_bytes(256_000)
+                .with_max_array_items(1_024)
+                .with_max_map_entries(128)
+                .with_max_retained_managed_objects(4_096)
+                .with_max_retained_managed_bytes(512_000)
+                .with_max_transient_managed_objects(50_000)
+                .with_max_transient_managed_bytes(8_000_000),
+            live_memory_observation: LiveMemoryObservation::Off,
+        }
+    }
+
+    /// Returns this policy's raw-source, bytecode, and module-graph boundaries.
+    pub fn compile_limits(&self) -> CompileLimits {
+        self.compile_limits
+    }
+
+    /// Returns a policy with its compilation boundaries replaced.
+    pub fn with_compile_limits(mut self, limits: CompileLimits) -> Self {
+        self.compile_limits = limits;
+        self
+    }
+
+    /// Returns the initial instruction budget inherited by each new Context.
+    pub fn fuel(&self) -> u64 {
+        self.fuel
+    }
+
+    /// Returns a policy with its initial per-Context instruction budget replaced.
+    pub fn with_fuel(mut self, fuel: u64) -> Self {
+        self.fuel = fuel;
+        self
+    }
+
+    /// Returns the maximum nested QuickCoffee function-call depth.
+    pub fn max_call_depth(&self) -> usize {
+        self.max_call_depth
+    }
+
+    /// Returns a policy with its call-depth boundary replaced.
+    pub fn with_max_call_depth(mut self, max_call_depth: usize) -> Self {
+        self.max_call_depth = max_call_depth;
+        self
+    }
+
+    /// Returns this policy's deterministic data and managed-memory boundaries.
+    pub fn resource_limits(&self) -> ResourceLimits {
+        self.resource_limits
+    }
+
+    /// Returns a policy with its data and managed-memory boundaries replaced.
+    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
+        self.resource_limits = limits;
+        self
+    }
+
+    /// Returns the live managed-memory observation mode inherited by new Contexts.
+    pub fn live_memory_observation(&self) -> LiveMemoryObservation {
+        self.live_memory_observation
+    }
+
+    /// Returns a policy with its live managed-memory observation mode replaced.
+    pub fn with_live_memory_observation(mut self, observation: LiveMemoryObservation) -> Self {
+        self.live_memory_observation = observation;
+        self
+    }
 }
 
 /// A same-thread owner for shared immutable compilation artifacts.
@@ -2664,7 +2790,7 @@ pub struct Runtime(Rc<RuntimeInner>);
 pub struct RuntimeBuilder {
     program_cache_entries: usize,
     module_cache_entries: usize,
-    compile_limits: CompileLimits,
+    execution_policy: ExecutionPolicy,
 }
 
 /// A read-only cumulative snapshot of one Runtime's compilation caches.
@@ -3299,7 +3425,7 @@ impl Default for RuntimeBuilder {
         Self {
             program_cache_entries: DEFAULT_PROGRAM_CACHE_ENTRIES,
             module_cache_entries: DEFAULT_MODULE_CACHE_ENTRIES,
-            compile_limits: CompileLimits::default(),
+            execution_policy: ExecutionPolicy::default(),
         }
     }
 }
@@ -3328,14 +3454,26 @@ impl RuntimeBuilder {
 
     /// Sets the source, bytecode, and static module-graph policy.
     pub fn compile_limits(mut self, limits: CompileLimits) -> Self {
-        self.compile_limits = limits;
+        self.execution_policy = self.execution_policy.with_compile_limits(limits);
+        self
+    }
+
+    /// Sets a coherent compilation and default Context execution policy.
+    ///
+    /// Every Context subsequently created by the Runtime inherits its fuel,
+    /// call-depth, data, managed-memory, and observation settings. Per-Context
+    /// builder methods may still override individual execution settings.
+    pub fn execution_policy(mut self, policy: ExecutionPolicy) -> Self {
+        self.execution_policy = policy;
         self
     }
 
     /// Builds a Runtime with independent bounded Program and Module caches.
     pub fn build(self) -> Runtime {
+        let execution_policy = self.execution_policy;
         Runtime(Rc::new(RuntimeInner {
-            engine: Engine::new().with_compile_limits(self.compile_limits),
+            engine: Engine::new().with_compile_limits(execution_policy.compile_limits()),
+            execution_policy,
             programs: RefCell::new(CompileCache::new(self.program_cache_entries)),
             modules: RefCell::new(CompileCache::new(self.module_cache_entries)),
         }))
@@ -3430,6 +3568,11 @@ impl Runtime {
     /// Returns the Runtime-wide source, bytecode, and static module-graph policy.
     pub fn compile_limits(&self) -> CompileLimits {
         self.0.engine.compile_limits()
+    }
+
+    /// Returns the compilation and default Context execution policy.
+    pub fn execution_policy(&self) -> ExecutionPolicy {
+        self.0.execution_policy
     }
 
     /// Returns the Runtime's stateless compiler for uncached Chunk, check, and
@@ -3649,15 +3792,16 @@ pub struct ContextBuilder {
 }
 impl ContextBuilder {
     fn new(runtime: Runtime) -> Self {
+        let policy = runtime.execution_policy();
         Self {
             runtime,
-            fuel: 1_000_000,
-            max_call_depth: 1_024,
-            resource_limits: ResourceLimits::default(),
+            fuel: policy.fuel(),
+            max_call_depth: policy.max_call_depth(),
+            resource_limits: policy.resource_limits(),
             cancellation: None,
             host_bindings: HostBindings::default(),
             bindings: Vec::new(),
-            live_memory_observation: LiveMemoryObservation::Off,
+            live_memory_observation: policy.live_memory_observation(),
         }
     }
 

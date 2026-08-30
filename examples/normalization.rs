@@ -1,5 +1,5 @@
 use quickcoffee::{
-    CompileLimits, Error, ModulePackage, ResourceLimits, RestrictedFileModuleLoader, Runtime, Value,
+    Error, ExecutionPolicy, ModulePackage, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{env, fs, path::PathBuf};
 
@@ -10,26 +10,6 @@ fn normalize(
 ) -> Result<String, Error> {
     let mut context = runtime
         .context_builder()
-        .fuel(250_000)
-        .max_call_depth(64)
-        .resource_limits(
-            ResourceLimits::default()
-                .with_max_string_bytes(64_000)
-                .with_max_array_items(1_024)
-                .with_max_map_entries(128)
-                .with_max_json_input_bytes(256_000)
-                .with_max_json_output_bytes(256_000)
-                .with_max_json_string_bytes(64_000)
-                .with_max_json_container_items(1_024)
-                .with_max_json_values(16_000)
-                .with_max_json_nesting_depth(32)
-                .with_max_collection_operation_items(4_096)
-                .with_max_integer_bits(256)
-                .with_max_decimal_coefficient_bits(256)
-                .with_max_decimal_scale(8)
-                .with_max_transient_managed_objects(50_000)
-                .with_max_transient_managed_bytes(8_000_000),
-        )
         .global("input_json", Value::from(input_json))
         .build();
     let exports = context.run_module_package(package)?;
@@ -49,13 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_json = fs::read_to_string(input_path)?;
 
     let runtime = Runtime::builder()
-        .compile_limits(
-            CompileLimits::default()
-                .with_max_source_bytes(128_000)
-                .with_max_bytecode_instructions(40_000)
-                .with_max_module_graph_modules(4)
-                .with_max_module_graph_source_bytes(256_000),
-        )
+        .execution_policy(ExecutionPolicy::isolated_request())
         .program_cache_entries(16)
         .module_cache_entries(16)
         .build();

@@ -7,12 +7,11 @@
 #[path = "../examples/policy_package/support.rs"]
 mod support;
 
-use quickcoffee::Value;
+use quickcoffee::{LiveMemoryObservation, Value};
 use std::{hint::black_box, time::Instant};
-use support::{ExecutionPolicy, PolicyHost, RequestState, prepare, request, runtime};
+use support::{PolicyHost, RequestState, prepare, request, runtime};
 
 fn short_lived(host: &PolicyHost, count: usize) {
-    let policy = ExecutionPolicy::bounded();
     let request = request("120", "benchmark", "CN", "equipment");
     let mut instructions = 0_u64;
     let mut managed_objects = 0_u64;
@@ -24,7 +23,6 @@ fn short_lived(host: &PolicyHost, count: usize) {
             RequestState::new("benchmark", "low"),
             true,
             None,
-            policy,
         );
         black_box(host.run(&mut context).expect("short policy request"));
         let stats = context.last_execution();
@@ -50,7 +48,6 @@ fn long_lived(host: &PolicyHost, count: usize) {
         RequestState::new("benchmark", "low"),
         true,
         None,
-        ExecutionPolicy::bounded(),
     );
     let mut instructions = 0_u64;
     let mut managed_objects = 0_u64;
@@ -88,7 +85,6 @@ fn long_lived(host: &PolicyHost, count: usize) {
 
 fn context_cost(host: &PolicyHost) {
     let iterations = 10_000;
-    let policy = ExecutionPolicy::bounded();
     let request = request("120", "benchmark", "CN", "equipment");
     let start = Instant::now();
     for _ in 0..iterations {
@@ -97,7 +93,6 @@ fn context_cost(host: &PolicyHost) {
             RequestState::new("benchmark", "low"),
             true,
             None,
-            policy,
         ));
     }
     let elapsed = start.elapsed();
@@ -114,8 +109,8 @@ fn observed_memory(host: &PolicyHost) {
         RequestState::new("observed", "low"),
         true,
         None,
-        ExecutionPolicy::bounded().observed(),
     );
+    context.set_live_memory_observation(LiveMemoryObservation::Checkpointed);
     black_box(host.run(&mut context).expect("observed policy request"));
     let report = context
         .last_live_memory_report()
@@ -139,7 +134,6 @@ fn per_worker_baseline() {
     let setup = start.elapsed();
 
     let count = 1_000;
-    let policy = ExecutionPolicy::bounded();
     let request = request("120", "worker", "CN", "equipment");
     let start = Instant::now();
     for index in 0..count {
@@ -149,7 +143,6 @@ fn per_worker_baseline() {
             RequestState::new("worker", "low"),
             true,
             None,
-            policy,
         );
         black_box(worker.run(&mut context).expect("worker policy request"));
     }
