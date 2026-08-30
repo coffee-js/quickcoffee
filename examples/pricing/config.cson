@@ -1,0 +1,17 @@
+# Human-maintained inputs for the Decimal pricing workflow.
+# Exact money crosses the configuration boundary as strings. Bounded counts use
+# ordinary CSON numbers; the CLI module or Rust host converts both explicitly.
+
+schema: 'pricing-orders/v1'
+
+accepted:
+  subtotal: '120'
+  item_count: 3
+  customer_tier: 'member'
+  country: 'CN'
+
+rejected:
+  subtotal: '5'
+  item_count: 1
+  customer_tier: 'standard'
+  country: 'US'
