@@ -11,9 +11,10 @@
 
 macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow 会在构建前校验 `uname -m`，避免 runner label 漂移后悄悄生成错误架构的制品。
 
-每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志、双许可证，以及 `examples/pricing/` 下的规范 Decimal `.litcoffee` 规则和薄 `.coffee` demo/qtest 入口。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和四个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制和归档内源码运行：
+每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、`qcson`、README、更新日志、双许可证，以及 `examples/pricing/` 下的规范 Decimal `.litcoffee` 规则和薄 `.coffee` demo/qtest 入口。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和五个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制和归档内源码运行：
 
-- 四个 CLI 的版本检查；
+- 五个 CLI 的版本检查；
+- `qcson` 的 CSON → JSON 与 JSON → CSON canonical 转换；
 - 一个独立 `.coffee` 脚本；
 - 一个含 Markdown 行内代码与四空格可执行块的 GitHub-compatible `.litcoffee`；
 - `qdocco --check`；
@@ -99,9 +100,10 @@ Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package ver
 
 macOS Intel uses `macos-15-intel`, while Apple silicon uses `macos-15`. The workflow asserts `uname -m` before building so runner-label drift cannot silently produce an artifact for the wrong architecture.
 
-Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, dual licenses, and the canonical Decimal `.litcoffee` rule plus thin `.coffee` demo/qtest entries under `examples/pricing/`. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all four CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries and packaged sources to run:
+Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, `qcson`, the README, changelog, dual licenses, and the canonical Decimal `.litcoffee` rule plus thin `.coffee` demo/qtest entries under `examples/pricing/`. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all five CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries and packaged sources to run:
 
-- version checks for all four CLIs;
+- version checks for all five CLIs;
+- canonical CSON → JSON and JSON → CSON conversion through `qcson`;
 - one standalone `.coffee` script;
 - one GitHub-compatible `.litcoffee` document containing Markdown inline code and a four-space executable block;
 - `qdocco --check`; and

@@ -4764,7 +4764,7 @@ fn json_value_allocations(_: &[Value], value: &Value) -> ManagedAllocation {
     ManagedAllocation::legacy_deep(legacy_json_value_allocations(value), value)
 }
 
-fn json_error(code: &'static str, failure: json::JsonFailure) -> Error {
+fn json_error(code: &'static str, failure: json::JsonError) -> Error {
     let limit = failure.resource_limit();
     let message = failure.to_string();
     match limit {
@@ -4780,14 +4780,15 @@ fn parse_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, E
     let Value::String(source) = &xs[0] else {
         return Err(Error::runtime("parse_json expects a string"));
     };
-    json::parse_json(source, limits.public()).map_err(|error| json_error("json.parse", error))
+    json::parse_json_with_limits(source, limits.public())
+        .map_err(|error| json_error("json.parse", error))
 }
 
 fn encode_json_builtin(xs: &[Value], limits: VmResourceLimits) -> Result<Value, Error> {
     if xs.len() != 1 {
         return Err(Error::runtime("encode_json expects one argument"));
     }
-    json::encode_json(&xs[0], limits.public())
+    json::encode_json_with_limits(&xs[0], limits.public())
         .map(Value::from)
         .map_err(|error| json_error("json.encode", error))
 }

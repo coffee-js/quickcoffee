@@ -150,6 +150,24 @@ class ReleaseToolTests(unittest.TestCase):
                         )
                         self.assertIn("Inline `qdocco`", source)
                         stdout = ""
+                    elif name == "qcson" and arguments == (
+                        "to-json",
+                        "config.cson",
+                    ):
+                        self.assertEqual(
+                            (cwd / "config.cson").read_text(encoding="utf-8"),
+                            "enabled: true\namount: 12.30\n",
+                        )
+                        stdout = '{"amount":12.3,"enabled":true}\n'
+                    elif name == "qcson" and arguments == (
+                        "to-cson",
+                        "config.json",
+                    ):
+                        self.assertEqual(
+                            (cwd / "config.json").read_text(encoding="utf-8"),
+                            '{"enabled":true,"amount":12.30}\n',
+                        )
+                        stdout = "amount: 12.3\nenabled: true\n"
                     elif (
                         name in {"qcoffee", "qtest"}
                         and len(arguments) == 3
@@ -188,7 +206,7 @@ class ReleaseToolTests(unittest.TestCase):
                     ],
                     list(release.BINARIES),
                 )
-                self.assertEqual(len(calls), 9)
+                self.assertEqual(len(calls), 12)
 
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]

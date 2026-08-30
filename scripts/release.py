@@ -17,7 +17,7 @@ import tempfile
 import zipfile
 
 
-BINARIES = ("qcoffee", "qtest", "qdocco", "qbench")
+BINARIES = ("qcoffee", "qtest", "qdocco", "qbench", "qcson")
 DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
 EXAMPLE_SOURCES = (
     "examples/pricing/rule.litcoffee",
@@ -376,6 +376,12 @@ def verify_install(path: Path, version: str, target: str) -> None:
             "    true\n",
             encoding="utf-8",
         )
+        (workspace / "config.cson").write_text(
+            "enabled: true\namount: 12.30\n", encoding="utf-8"
+        )
+        (workspace / "config.json").write_text(
+            '{"enabled":true,"amount":12.30}\n', encoding="utf-8"
+        )
         run_installed(
             [os.fspath(binaries["qcoffee"]), "plain.coffee"], workspace, "42\n"
         )
@@ -387,6 +393,16 @@ def verify_install(path: Path, version: str, target: str) -> None:
         run_installed(
             [os.fspath(binaries["qdocco"]), "--check", "document.litcoffee"],
             workspace,
+        )
+        run_installed(
+            [os.fspath(binaries["qcson"]), "to-json", "config.cson"],
+            workspace,
+            '{"amount":12.3,"enabled":true}\n',
+        )
+        run_installed(
+            [os.fspath(binaries["qcson"]), "to-cson", "config.json"],
+            workspace,
+            "amount: 12.3\nenabled: true\n",
         )
         pricing = (install / "examples" / "pricing").resolve()
         run_installed(

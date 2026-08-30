@@ -23,7 +23,7 @@ cargo install --path .
 qcoffee --version
 ```
 
-正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS Intel、macOS Apple silicon 和 Windows x86_64 归档。每个归档包含四个 CLI、README、更新日志、双许可证与可直接运行的 Decimal `.litcoffee`/`.coffee` 场景，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；发布门禁会从解包后的干净工作区验证 `.coffee`、GitHub-compatible `.litcoffee`、`qdocco` 和 `qtest`。下载、校验、无 checkout 验收和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and clean-install verification are documented bilingually in the same guide.
+正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS Intel、macOS Apple silicon 和 Windows x86_64 归档。每个归档包含五个 CLI、README、更新日志、双许可证与可直接运行的 Decimal `.litcoffee`/`.coffee` 场景，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；发布门禁会从解包后的干净工作区验证 `.coffee`、GitHub-compatible `.litcoffee`、`qdocco`、`qtest` 和 `qcson` 双向转换。下载、校验、无 checkout 验收和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and clean-install verification are documented bilingually in the same guide.
 
 创建 `invoice.coffee`：
 
@@ -75,7 +75,7 @@ QuickCoffee 已提供：
 - 严格的 Bool 条件与数值运算；`Number`、任意精度 `Integer` 与精确 `Decimal` 彼此分型，转换必须显式。
 - 数组、无原型 Map、spread、严格递归解构、范围、切片、列表推导，以及 Unicode 标量级字符串索引和遍历。
 - 函数、默认参数、rest 参数、闭包、`try` / `catch` / `finally`、`throw`、`return`、循环与 `switch`。
-- JSON 编解码、稳定标量排序、不可变 `map_set` / `map_delete`、`trim` / `contains` / `starts_with` / `replace_all` 等确定性标准库函数；JSON 保留 Integer/Decimal 精度。
+- 资源有界的 JSON/CSON 纯数据编解码、稳定标量排序、不可变 `map_set` / `map_delete`、`trim` / `contains` / `starts_with` / `replace_all` 等确定性能力；JSON/CSON 保留 Integer/Decimal 精度，CSON 不执行表达式。
 - 受限 class：`constructor`、实例/静态方法、`new`、私有继承链、静态解析的 `super`，以及只在合法 class 成员内可用的 `this`、`@` 和 `=>`。
 - 编译检查、结构化诊断、字节码反汇编/指纹，以及带隔离 Context 和有界共享编译缓存的 `Runtime` 嵌入 API。
 
@@ -94,6 +94,8 @@ QuickCoffee 已提供：
 | 检查模块图指纹 | `qcoffee --fingerprint --module-root modules app/main` |
 | 运行隔离模块测试 | `qtest --module-root examples/pricing test` |
 | 规范化 JSON 文件 | `cargo run --example normalization -- examples/normalization/input.v1.json` |
+| CSON 转 canonical JSON | `qcson to-json config.cson` 或 `qcson to-json -` |
+| JSON 转 canonical CSON | `qcson to-cson config.json` 或 `qcson to-cson -` |
 | 持久交互会话 | `qcoffee --interactive`（逐物理行求值；`:help`、`:quit`） |
 | 只检查、不执行 | `qcoffee --check script.coffee` |
 | 稳定 JSON 输出 | `qcoffee --json script.coffee`（错误保留 legacy 字段并附带 version 1 完整 labels） |
@@ -101,6 +103,10 @@ QuickCoffee 已提供：
 | 限制源码与字节码 | `qcoffee --max-source-bytes 1000000 --max-bytecode-instructions 1000000 script.coffee` |
 | 限制模块图 | `qcoffee --max-module-graph-modules 1024 --max-module-graph-source-bytes 16000000 --module-root modules app/main` |
 | 检查编译结果 | `qcoffee --dump-bytecode script.coffee` 或 `qcoffee --fingerprint script.coffee` |
+
+`qcson` 只读取显式文件或标准输入，并把成功结果写到标准输出；它不执行 CSON/QuickCoffee，也不授予脚本文件、模块、网络、时钟或其他 capability。它刻意不提供原地覆盖或输出路径，需要保存时由用户显式重定向。`--max-input-bytes` / `--max-output-bytes` 在读取或输出增长前限制资源；`--diagnostic-format json` 把版本化 `quickcoffee.qcson-diagnostic.v1` 错误写到 stderr，不污染成功数据。
+
+`qcson` reads only an explicit file or stdin and writes successful data to stdout. It executes neither CSON nor QuickCoffee and grants no script capability. There is deliberately no in-place or output-path mode; redirection is an explicit user choice. Resource limits apply before reads or output growth, and versioned JSON diagnostics remain on stderr.
 
 `.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 使用 GitHub 原生支持的 Literate CoffeeScript 形式：Markdown 正文保持未缩进，技术标识使用反引号行内代码，可执行代码块统一缩进四个空格并与正文留出空行。`` ```coffee `` 围栏只适用于生成后的普通 Markdown，不会成为 `.litcoffee` 的可执行代码。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成带版本标记的文档，`--incremental` 会在最终产物字节不变时保留已有文件。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
 
@@ -144,7 +150,7 @@ Multi-worker hosts use one worker-owned Runtime and prepared ModulePackage per O
 
 ## 当前状态与已知缺口
 
-QuickCoffee 的核心语言、class、精确数值、确定性 JSON、Unicode 基元、CLI 诊断和基础嵌入 API 已实现，并由 RFC 与测试锁定。项目持续针对 VM 分配、调用和局部变量路径做性能优化；最近的 class 调用优化显著减少了临时绑定方法对象。
+QuickCoffee 的核心语言、class、精确数值、确定性 JSON/CSON、Unicode 基元、CLI 诊断和基础嵌入 API 已实现，并由 RFC 与测试锁定。项目持续针对 VM 分配、调用和局部变量路径做性能优化；最近的 class 调用优化显著减少了临时绑定方法对象。
 
 但它仍处于实验性 0.1：
 

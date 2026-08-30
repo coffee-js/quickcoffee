@@ -43,6 +43,10 @@ path = "src/bin/qtest.rs"
 name = "qbench"
 path = "src/bin/qbench.rs"
 
+[[bin]]
+name = "qcson"
+path = "src/bin/qcson.rs"
+
 [[bench]]
 name = "core"
 harness = false

@@ -662,7 +662,7 @@ fn qtest_executes_a_file_symlink_only_once() {
 
 #[test]
 fn every_cli_reports_the_same_package_version() {
-    for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
+    for name in ["qcoffee", "qtest", "qdocco", "qbench", "qcson"] {
         let output = Command::new(bin(name)).arg("--version").output().unwrap();
         assert!(output.status.success(), "{name} --version failed");
         assert_eq!(
@@ -674,7 +674,7 @@ fn every_cli_reports_the_same_package_version() {
 }
 #[test]
 fn every_cli_has_a_stable_help_and_unknown_option_contract() {
-    for name in ["qcoffee", "qtest", "qdocco", "qbench"] {
+    for name in ["qcoffee", "qtest", "qdocco", "qbench", "qcson"] {
         for flag in ["--help", "-h"] {
             let output = Command::new(bin(name)).arg(flag).output().unwrap();
             assert!(output.status.success(), "{name} {flag} failed");
