@@ -88,6 +88,41 @@ fn ci_runs_for_pull_requests_and_main_pushes_without_duplicate_feature_pushes() 
 }
 
 #[test]
+fn full_performance_reports_cover_measured_paths_and_remain_manually_dispatchable() {
+    let performance = repository_file(".github/workflows/performance.yml");
+    let (_, after_pull_request) = performance
+        .split_once("  pull_request:\n")
+        .expect("performance workflow runs for pull requests");
+    let (pull_request_scope, after_dispatch) = after_pull_request
+        .split_once("  workflow_dispatch:\n")
+        .expect("performance workflow remains manually dispatchable");
+
+    assert_eq!(
+        pull_request_scope,
+        "    paths:\n      - '.github/workflows/performance.yml'\n      - 'Cargo.lock'\n      - 'Cargo.toml'\n      - 'scripts/qbench_compare.py'\n      - 'scripts/test_qbench_compare.py'\n      - 'src/**'\n"
+    );
+    assert!(after_dispatch.contains("base_ref:"));
+    assert!(after_dispatch.contains("candidate_ref:"));
+    for measurement_contract in [
+        "continue-on-error: true",
+        "BENCHMARK_COMMAND: paired AB/BA",
+        "candidate-only-workloads.txt",
+        "baseline-runs.jsonl",
+        "candidate-runs.jsonl",
+        "ordered.jsonl",
+        "comparison.json",
+        "metadata.json",
+        "actions/upload-artifact@v7",
+        "retention-days: 30",
+    ] {
+        assert!(
+            performance.contains(measurement_contract),
+            "missing performance measurement contract: {measurement_contract}"
+        );
+    }
+}
+
+#[test]
 fn dependency_and_miri_workflows_keep_their_pinned_boundaries() {
     let toolchain = repository_file("fuzz/rust-toolchain.toml");
     assert!(toolchain.contains("nightly-2026-08-20"));

@@ -2,6 +2,13 @@ name: Performance report
 
 on:
   pull_request:
+    paths:
+      - '.github/workflows/performance.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'scripts/qbench_compare.py'
+      - 'scripts/test_qbench_compare.py'
+      - 'src/**'
   workflow_dispatch:
     inputs:
       base_ref:
