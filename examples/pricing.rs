@@ -1,6 +1,5 @@
 use quickcoffee::{
-    CompileLimits, Decimal, Error, ModulePackage, ResourceLimits, RestrictedFileModuleLoader,
-    Runtime, Value,
+    Decimal, Error, ExecutionPolicy, ModulePackage, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::path::PathBuf;
 
@@ -18,22 +17,7 @@ fn order(subtotal: &str, item_count: i64, customer_tier: &str, country: &str) ->
 }
 
 fn quote(runtime: &Runtime, package: &ModulePackage, request: Value) -> Result<Value, Error> {
-    let mut context = runtime
-        .context_builder()
-        .fuel(100_000)
-        .max_call_depth(64)
-        .resource_limits(
-            ResourceLimits::default()
-                .with_max_map_entries(32)
-                .with_max_array_items(32)
-                .with_max_string_bytes(4_096)
-                .with_max_decimal_coefficient_bits(256)
-                .with_max_decimal_scale(8)
-                .with_max_transient_managed_objects(10_000)
-                .with_max_transient_managed_bytes(1_000_000),
-        )
-        .global("request", request)
-        .build();
+    let mut context = runtime.context_builder().global("request", request).build();
     let exports = context.run_module_package(package)?;
     exports
         .get("result")
@@ -43,13 +27,7 @@ fn quote(runtime: &Runtime, package: &ModulePackage, request: Value) -> Result<V
 
 fn main() -> Result<(), Error> {
     let runtime = Runtime::builder()
-        .compile_limits(
-            CompileLimits::default()
-                .with_max_source_bytes(64_000)
-                .with_max_bytecode_instructions(20_000)
-                .with_max_module_graph_modules(4)
-                .with_max_module_graph_source_bytes(128_000),
-        )
+        .execution_policy(ExecutionPolicy::isolated_request())
         .program_cache_entries(16)
         .module_cache_entries(16)
         .build();

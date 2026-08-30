@@ -23,8 +23,8 @@ pub use resource::{CompileLimits, ResourceLimit, ResourceLimits};
 pub use vm::{
     CancellationToken, CapabilityKey, CapabilityKind, Context, ContextBuilder,
     ContextualNativeFunction, Decimal, DiagnosticLabel, DiagnosticLabelKind, Engine, Error,
-    ErrorKind, ExecutionStats, Function, HostCapabilities, HostState, Integer, IntoValue,
-    LiveManagedMemory, LiveMemoryCheckpoint, LiveMemoryObservation, LiveMemoryOutcome,
+    ErrorKind, ExecutionPolicy, ExecutionStats, Function, HostCapabilities, HostState, Integer,
+    IntoValue, LiveManagedMemory, LiveMemoryCheckpoint, LiveMemoryObservation, LiveMemoryOutcome,
     LiveMemoryReport, NativeCallContext, NativeFunction, Program, RetainedMemory, Runtime,
     RuntimeBuilder, RuntimeCacheStats, ScriptError, SourcePosition, SourceSpan, TryFromValue,
     Value, ValueKind,

@@ -30,6 +30,8 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `CompileLimits` separately bound raw source bytes, recursive bytecode instructions, unique modules, and cumulative module-graph source; module execution preflights the complete graph before any script runs, and `qcoffee` exposes matching `--max-*` options.
 
+`ExecutionPolicy::isolated_request()` combines compile limits, initial fuel, call depth, data/managed-memory limits, and disabled-by-default live-memory observation using values exercised by the pricing, normalization, and policy-package workflows. Install it once through `RuntimeBuilder::execution_policy`; each new Context inherits the execution settings and can override individual fields. Cancellation tokens, globals, capabilities, and native callbacks remain explicit per-request configuration. This preset is defense in depth, not an RSS bound or hostile-code sandbox.
+
 `IntoValue` and `TryFromValue` convert owned host scalars, Vec, `BTreeMap<String, T>`, and Option recursively without running a script; nil alone maps to None, and Number, Integer, Decimal, and other kinds never coerce across their boundaries.
 
 `qcoffee --check FILE` parses, compiles, and verifies without executing FILE.

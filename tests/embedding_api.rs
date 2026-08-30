@@ -1,7 +1,7 @@
 use quickcoffee::{
     CancellationToken, CapabilityKey, CapabilityKind, Chunk, CompileLimits, Constant, Context,
-    Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionStats, HostCapabilities,
-    Instruction, Integer, IntoValue, LiveMemoryCheckpoint, LiveMemoryObservation,
+    Decimal, DiagnosticLabelKind, Engine, Error, ErrorKind, ExecutionPolicy, ExecutionStats,
+    HostCapabilities, Instruction, Integer, IntoValue, LiveMemoryCheckpoint, LiveMemoryObservation,
     LiveMemoryOutcome, Program, ResourceLimit, ResourceLimits, RetainedMemory, Runtime,
     TryFromValue, Value, ValueKind,
 };
@@ -93,6 +93,101 @@ fn runtime_context_builders_share_compilation_but_isolate_execution_state() {
     assert_eq!(stats.program_hits, 1);
     assert_eq!(stats.program_misses, 2);
     assert_eq!(stats.module_entries, 0);
+}
+
+#[test]
+fn execution_policies_preserve_defaults_and_flow_from_runtime_to_contexts() {
+    let defaults = ExecutionPolicy::default();
+    assert_eq!(defaults.compile_limits(), CompileLimits::default());
+    assert_eq!(defaults.fuel(), 1_000_000);
+    assert_eq!(defaults.max_call_depth(), 1_024);
+    assert_eq!(defaults.resource_limits(), ResourceLimits::default());
+    assert_eq!(
+        defaults.live_memory_observation(),
+        LiveMemoryObservation::Off
+    );
+    assert_eq!(Runtime::new().execution_policy(), defaults);
+
+    let limits = ResourceLimits::default().with_max_string_bytes(321);
+    let compile = CompileLimits::default().with_max_source_bytes(123);
+    let policy = ExecutionPolicy::isolated_request()
+        .with_compile_limits(compile)
+        .with_fuel(456)
+        .with_max_call_depth(7)
+        .with_resource_limits(limits)
+        .with_live_memory_observation(LiveMemoryObservation::Checkpointed);
+    let runtime = Runtime::builder().execution_policy(policy).build();
+    assert_eq!(runtime.execution_policy(), policy);
+    assert_eq!(runtime.compile_limits(), compile);
+
+    let inherited = runtime.new_context();
+    assert_eq!(inherited.fuel(), 456);
+    assert_eq!(inherited.max_call_depth(), 7);
+    assert_eq!(inherited.resource_limits(), limits);
+    assert_eq!(
+        inherited.live_memory_observation(),
+        LiveMemoryObservation::Checkpointed
+    );
+
+    let overridden = runtime
+        .context_builder()
+        .fuel(9)
+        .max_call_depth(2)
+        .resource_limits(ResourceLimits::default())
+        .live_memory_observation(LiveMemoryObservation::Off)
+        .build();
+    assert_eq!(overridden.fuel(), 9);
+    assert_eq!(overridden.max_call_depth(), 2);
+    assert_eq!(overridden.resource_limits(), ResourceLimits::default());
+    assert_eq!(
+        overridden.live_memory_observation(),
+        LiveMemoryObservation::Off
+    );
+
+    let compile_override = CompileLimits::default().with_max_source_bytes(17);
+    let reordered = Runtime::builder()
+        .execution_policy(policy)
+        .compile_limits(compile_override)
+        .build();
+    assert_eq!(reordered.compile_limits(), compile_override);
+    assert_eq!(
+        reordered.execution_policy().compile_limits(),
+        compile_override
+    );
+    assert_eq!(reordered.execution_policy().fuel(), policy.fuel());
+}
+
+#[test]
+fn isolated_request_policy_values_are_explicit_and_auditable() {
+    let policy = ExecutionPolicy::isolated_request();
+    let compile = policy.compile_limits();
+    assert_eq!(compile.max_source_bytes(), 128_000);
+    assert_eq!(compile.max_bytecode_instructions(), 40_000);
+    assert_eq!(compile.max_module_graph_modules(), 8);
+    assert_eq!(compile.max_module_graph_source_bytes(), 256_000);
+    assert_eq!(policy.fuel(), 250_000);
+    assert_eq!(policy.max_call_depth(), 64);
+    assert_eq!(policy.live_memory_observation(), LiveMemoryObservation::Off);
+
+    let limits = policy.resource_limits();
+    assert_eq!(limits.max_json_input_bytes(), 256_000);
+    assert_eq!(limits.max_json_output_bytes(), 256_000);
+    assert_eq!(limits.max_json_string_bytes(), 64_000);
+    assert_eq!(limits.max_json_container_items(), 1_024);
+    assert_eq!(limits.max_json_values(), 16_000);
+    assert_eq!(limits.max_json_nesting_depth(), 32);
+    assert_eq!(limits.max_integer_bits(), 256);
+    assert_eq!(limits.max_decimal_coefficient_bits(), 256);
+    assert_eq!(limits.max_decimal_scale(), 8);
+    assert_eq!(limits.max_collection_operation_items(), 4_096);
+    assert_eq!(limits.max_text_operation_bytes(), 64_000);
+    assert_eq!(limits.max_string_bytes(), 256_000);
+    assert_eq!(limits.max_array_items(), 1_024);
+    assert_eq!(limits.max_map_entries(), 128);
+    assert_eq!(limits.max_retained_managed_objects(), 4_096);
+    assert_eq!(limits.max_retained_managed_bytes(), 512_000);
+    assert_eq!(limits.max_transient_managed_objects(), 50_000);
+    assert_eq!(limits.max_transient_managed_bytes(), 8_000_000);
 }
 
 #[test]

@@ -1,7 +1,6 @@
 use quickcoffee::{
-    CancellationToken, CapabilityKey, CapabilityKind, CompileLimits, Context, Error,
-    LiveMemoryObservation, ModulePackage, ResourceLimits, RestrictedFileModuleLoader, Runtime,
-    Value,
+    CancellationToken, CapabilityKey, CapabilityKind, Context, Error, ExecutionPolicy,
+    ModulePackage, RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -29,53 +28,9 @@ impl RequestState {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ExecutionPolicy {
-    pub fuel: u64,
-    pub max_call_depth: usize,
-    pub resource_limits: ResourceLimits,
-    pub live_memory_observation: LiveMemoryObservation,
-}
-
-impl ExecutionPolicy {
-    pub fn bounded() -> Self {
-        Self {
-            fuel: 250_000,
-            max_call_depth: 64,
-            resource_limits: ResourceLimits::default()
-                .with_max_string_bytes(8_192)
-                .with_max_array_items(128)
-                .with_max_map_entries(128)
-                .with_max_collection_operation_items(256)
-                .with_max_text_operation_bytes(16_384)
-                .with_max_integer_bits(256)
-                .with_max_decimal_coefficient_bits(256)
-                .with_max_decimal_scale(8)
-                .with_max_retained_managed_objects(2_048)
-                .with_max_retained_managed_bytes(256_000)
-                .with_max_transient_managed_objects(20_000)
-                .with_max_transient_managed_bytes(2_000_000),
-            live_memory_observation: LiveMemoryObservation::Off,
-        }
-    }
-
-    pub fn observed(mut self) -> Self {
-        self.live_memory_observation = LiveMemoryObservation::Checkpointed;
-        self
-    }
-}
-
-pub fn compile_limits() -> CompileLimits {
-    CompileLimits::default()
-        .with_max_source_bytes(128_000)
-        .with_max_bytecode_instructions(40_000)
-        .with_max_module_graph_modules(8)
-        .with_max_module_graph_source_bytes(256_000)
-}
-
 pub fn runtime() -> Runtime {
     Runtime::builder()
-        .compile_limits(compile_limits())
+        .execution_policy(ExecutionPolicy::isolated_request())
         .program_cache_entries(16)
         .module_cache_entries(16)
         .build()
@@ -112,16 +67,11 @@ impl PolicyHost {
         state: RequestState,
         allow_audit: bool,
         cancellation: Option<CancellationToken>,
-        policy: ExecutionPolicy,
     ) -> Context {
         let callback_cancellation = cancellation.clone();
         let mut builder = self
             .runtime
             .context_builder()
-            .fuel(policy.fuel)
-            .max_call_depth(policy.max_call_depth)
-            .resource_limits(policy.resource_limits)
-            .live_memory_observation(policy.live_memory_observation)
             .host_state(state)
             .global("request", request)
             .contextual_native("host_risk", move |call, args| {

@@ -24,6 +24,8 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `CompileLimits` 另行限制原始 source bytes、递归 bytecode instructions、唯一模块数和累计模块图 source；模块执行会在任何脚本运行前预检完整静态图，`qcoffee` 提供对应的 `--max-*` 选项。
 
+`ExecutionPolicy::isolated_request()` 将三个旗舰场景验证过的编译限制、初始 fuel、调用深度、数据/托管内存边界与默认关闭的 live-memory observation 组合起来。通过 `RuntimeBuilder::execution_policy` 安装一次后，每个新 Context 自动继承执行设置，并可逐项覆盖；取消 token、globals、capabilities 和 native callbacks 仍须按请求显式配置。该预设只是纵深防御，不是 RSS 上限或完整敌对代码沙箱。
+
 `IntoValue` 与 `TryFromValue` 可递归转换拥有型宿主标量、Vec、`BTreeMap<String, T>` 与 Option，不执行脚本；只有 nil 映射为 None，Number、Integer、Decimal 及其他类别之间绝不 coercion。
 
 `qcoffee --check FILE` 只解析、编译并验证 FILE，不执行它。

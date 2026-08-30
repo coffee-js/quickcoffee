@@ -2,7 +2,7 @@
 //!
 //! The benchmark parses, validates, reshapes, and canonically encodes the same
 //! versioned JSON corpus used by the example and integration tests.
-use quickcoffee::{ModulePackage, RestrictedFileModuleLoader, Runtime, Value};
+use quickcoffee::{ExecutionPolicy, ModulePackage, RestrictedFileModuleLoader, Runtime, Value};
 use std::{hint::black_box, path::PathBuf, time::Instant};
 
 const INPUT: &str = include_str!("../examples/normalization/input.v1.json");
@@ -81,7 +81,6 @@ fn measure_context_cost(runtime: &Runtime) {
         black_box(
             runtime
                 .context_builder()
-                .fuel(250_000)
                 .global("input_json", input.clone())
                 .build(),
         );
@@ -97,7 +96,9 @@ fn measure_context_cost(runtime: &Runtime) {
 fn main() {
     let start = Instant::now();
     for _ in 0..10 {
-        let cold_runtime = Runtime::new();
+        let cold_runtime = Runtime::builder()
+            .execution_policy(ExecutionPolicy::isolated_request())
+            .build();
         let cold_loader = loader();
         black_box(prepare(&cold_runtime, &cold_loader));
     }
@@ -109,6 +110,7 @@ fn main() {
     );
 
     let runtime = Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
         .program_cache_entries(16)
         .module_cache_entries(16)
         .build();
@@ -127,7 +129,6 @@ fn main() {
     let package = prepare(&runtime, &loader);
     let mut semantic_context = runtime
         .context_builder()
-        .fuel(250_000)
         .global("input_json", Value::from(INPUT))
         .build();
     let semantic = semantic_context

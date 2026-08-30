@@ -1,12 +1,11 @@
 #[path = "policy_package/support.rs"]
 mod support;
 
-use quickcoffee::{CancellationToken, LiveMemoryOutcome, ResourceLimit};
-use support::{AUDIT_KEY, ExecutionPolicy, PolicyHost, RequestState, request};
+use quickcoffee::{CancellationToken, LiveMemoryObservation, LiveMemoryOutcome, ResourceLimit};
+use support::{AUDIT_KEY, PolicyHost, RequestState, request};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host = PolicyHost::new()?;
-    let policy = ExecutionPolicy::bounded().observed();
 
     for (customer_id, risk_band) in [("customer-low", "low"), ("customer-high", "high")] {
         let mut context = host.context(
@@ -14,8 +13,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             RequestState::new(customer_id, risk_band),
             true,
             None,
-            policy,
         );
+        context.set_live_memory_observation(LiveMemoryObservation::Checkpointed);
         let result = host.run(&mut context)?;
         let audits = context.capability(AUDIT_KEY).expect("audit capability");
         let lookups = context
@@ -39,7 +38,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RequestState::new("customer-denied", "low"),
         false,
         None,
-        policy,
     );
     let error = host
         .run(&mut capability_denied)
@@ -55,7 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RequestState::new("customer-cancel", "cancel"),
         true,
         Some(cancellation),
-        policy,
     );
     let error = host
         .run(&mut cancelled)

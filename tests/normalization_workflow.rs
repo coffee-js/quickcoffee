@@ -1,6 +1,6 @@
 use quickcoffee::{
-    Error, ErrorKind, ModulePackage, ResourceLimit, ResourceLimits, RestrictedFileModuleLoader,
-    Runtime, Value,
+    Error, ErrorKind, ExecutionPolicy, ModulePackage, ResourceLimit, ResourceLimits,
+    RestrictedFileModuleLoader, Runtime, Value,
 };
 use std::{fs, path::PathBuf, process::Command};
 
@@ -26,18 +26,25 @@ fn package(runtime: &Runtime) -> (ModulePackage, RestrictedFileModuleLoader) {
     (package, loader)
 }
 
+fn isolated_runtime() -> Runtime {
+    Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
+        .build()
+}
+
 fn run(
     runtime: &Runtime,
     package: &ModulePackage,
     source: &str,
-    limits: ResourceLimits,
+    limits: Option<ResourceLimits>,
 ) -> Result<String, Error> {
-    let mut context = runtime
+    let mut builder = runtime
         .context_builder()
-        .fuel(250_000)
-        .resource_limits(limits)
-        .global("input_json", Value::from(source))
-        .build();
+        .global("input_json", Value::from(source));
+    if let Some(limits) = limits {
+        builder = builder.resource_limits(limits);
+    }
+    let mut context = builder.build();
     context
         .run_module_package(package)?
         .get("result")
@@ -48,12 +55,15 @@ fn run(
 
 #[test]
 fn normalization_is_exact_deterministic_and_context_isolated() {
-    let runtime = Runtime::builder().module_cache_entries(8).build();
+    let runtime = Runtime::builder()
+        .execution_policy(ExecutionPolicy::isolated_request())
+        .module_cache_entries(8)
+        .build();
     let (package, loader) = package(&runtime);
     let expected = SAMPLE_OUTPUT.trim_end();
 
     let corpus_package = prepare(&runtime, &loader, "corpus");
-    let mut corpus_context = runtime.context_builder().fuel(250_000).build();
+    let mut corpus_context = runtime.new_context();
     let corpus = corpus_context.run_module_package(&corpus_package).unwrap();
     assert_eq!(
         corpus.get("sample_input").unwrap().as_str().unwrap(),
@@ -64,15 +74,15 @@ fn normalization_is_exact_deterministic_and_context_isolated() {
         expected
     );
 
-    let first = run(&runtime, &package, SAMPLE_INPUT, ResourceLimits::default()).unwrap();
+    let first = run(&runtime, &package, SAMPLE_INPUT, None).unwrap();
     assert_eq!(first, expected);
-    let second = run(&runtime, &package, SAMPLE_INPUT, ResourceLimits::default()).unwrap();
+    let second = run(&runtime, &package, SAMPLE_INPUT, None).unwrap();
     assert_eq!(second, first);
 }
 
 #[test]
 fn normalization_reports_json_domain_and_resource_failures() {
-    let runtime = Runtime::new();
+    let runtime = isolated_runtime();
     let (package, _) = package(&runtime);
 
     let rule_path =
@@ -89,20 +99,14 @@ fn normalization_reports_json_domain_and_resource_failures() {
     );
     assert!(syntax.labels()[0].span.start.line > 1);
 
-    let malformed = run(
-        &runtime,
-        &package,
-        "{\"schema\":",
-        ResourceLimits::default(),
-    )
-    .unwrap_err();
+    let malformed = run(&runtime, &package, "{\"schema\":", None).unwrap_err();
     assert_eq!(malformed.script_error().unwrap().code(), "json.parse");
 
     let unsupported = run(
         &runtime,
         &package,
         r#"{"events":[],"schema":"profile-events/v2"}"#,
-        ResourceLimits::default(),
+        None,
     )
     .unwrap_err();
     assert_eq!(
@@ -118,7 +122,7 @@ fn normalization_reports_json_domain_and_resource_failures() {
         &runtime,
         &package,
         r#"{"events":[{"amount":1.0,"id":"event","metadata":{"source":"host"},"name":"name","sequence":1,"tags":[1]}],"schema":"profile-events/v1"}"#,
-        ResourceLimits::default(),
+        None,
     )
     .unwrap_err();
     let script = invalid.script_error().unwrap();
@@ -132,7 +136,7 @@ fn normalization_reports_json_domain_and_resource_failures() {
         &runtime,
         &package,
         r#"{"events":[{}],"schema":"profile-events/v1"}"#,
-        ResourceLimits::default(),
+        None,
     )
     .unwrap_err();
     let script = missing.script_error().unwrap();
@@ -147,7 +151,7 @@ fn normalization_reports_json_domain_and_resource_failures() {
     );
 
     let limits = ResourceLimits::default().with_max_json_input_bytes(32);
-    let resource = run(&runtime, &package, SAMPLE_INPUT, limits).unwrap_err();
+    let resource = run(&runtime, &package, SAMPLE_INPUT, Some(limits)).unwrap_err();
     assert_eq!(resource.kind(), ErrorKind::Resource);
     assert_eq!(
         resource.resource_limit(),
@@ -155,7 +159,7 @@ fn normalization_reports_json_domain_and_resource_failures() {
     );
 
     let limits = ResourceLimits::default().with_max_json_nesting_depth(1);
-    let resource = run(&runtime, &package, SAMPLE_INPUT, limits).unwrap_err();
+    let resource = run(&runtime, &package, SAMPLE_INPUT, Some(limits)).unwrap_err();
     assert_eq!(resource.kind(), ErrorKind::Resource);
     assert_eq!(
         resource.resource_limit(),
