@@ -16,7 +16,10 @@ mod source;
 mod vm;
 
 pub use bytecode::{Chunk, Constant, Instruction, Pattern};
-pub use cson::{CsonError, CsonErrorCode, CsonLimits, parse_cson, parse_cson_with_limits};
+pub use cson::{
+    CsonError, CsonErrorCode, CsonLimits, parse_cson, parse_cson_with_limits, to_cson,
+    to_cson_with_limits,
+};
 pub use module::{
     MODULE_GRAPH_FINGERPRINT_VERSION, MemoryModuleLoader, Module, ModuleExports, ModuleLoader,
     ModulePackage, ModuleSource, RestrictedFileModuleLoader,
