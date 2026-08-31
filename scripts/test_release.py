@@ -150,6 +150,53 @@ class ReleaseToolTests(unittest.TestCase):
                         )
                         self.assertIn("Inline `qdocco`", source)
                         stdout = ""
+                    elif name == "qcson" and arguments == (
+                        "to-json",
+                        "config.cson",
+                    ):
+                        self.assertEqual(
+                            (cwd / "config.cson").read_text(encoding="utf-8"),
+                            "enabled: true\namount: 12.30\n",
+                        )
+                        stdout = '{"amount":12.3,"enabled":true}\n'
+                    elif name == "qcson" and arguments == (
+                        "to-cson",
+                        "config.json",
+                    ):
+                        self.assertEqual(
+                            (cwd / "config.json").read_text(encoding="utf-8"),
+                            '{"enabled":true,"amount":12.30}\n',
+                        )
+                        stdout = "amount: 12.3\nenabled: true\n"
+                    elif (
+                        name == "qcson"
+                        and len(arguments) == 2
+                        and arguments[0] == "to-json"
+                        and Path(arguments[1]).name == "config.cson"
+                    ):
+                        pricing = Path(arguments[1]).parent
+                        self.assertEqual(pricing.parent.parent, binary.parent)
+                        stdout = (
+                            '{"accepted":{"country":"CN",'
+                            '"customer_tier":"member","item_count":3,'
+                            '"subtotal":"120"},"rejected":{"country":"US",'
+                            '"customer_tier":"standard","item_count":1,'
+                            '"subtotal":"5"},"schema":"pricing-orders/v1"}\n'
+                        )
+                    elif (
+                        name == "qcoffee"
+                        and len(arguments) == 5
+                        and arguments[0] == "--module-root"
+                        and arguments[2:4] == ("configured", "--")
+                    ):
+                        pricing = Path(arguments[1])
+                        self.assertEqual(pricing.parent.parent, binary.parent)
+                        self.assertIn('"schema":"pricing-orders/v1"', arguments[4])
+                        stdout = (
+                            "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
+                            "tax: 14.04m, total: 122.04m}, "
+                            "rejection: pricing.ineligible}\n"
+                        )
                     elif (
                         name in {"qcoffee", "qtest"}
                         and len(arguments) == 3
@@ -188,7 +235,7 @@ class ReleaseToolTests(unittest.TestCase):
                     ],
                     list(release.BINARIES),
                 )
-                self.assertEqual(len(calls), 9)
+                self.assertEqual(len(calls), 14)
 
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]

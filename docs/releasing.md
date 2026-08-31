@@ -11,9 +11,11 @@
 
 macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow 会在构建前校验 `uname -m`，避免 runner label 漂移后悄悄生成错误架构的制品。
 
-每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、README、更新日志、双许可证，以及 `examples/pricing/` 下的规范 Decimal `.litcoffee` 规则和薄 `.coffee` demo/qtest 入口。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和四个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制和归档内源码运行：
+每个归档包含 `qcoffee`、`qtest`、`qdocco`、`qbench`、`qcson`、README、更新日志、双许可证，以及 `examples/pricing/` 下的规范 Decimal `.litcoffee` 规则、人工维护的 `.cson` 配置和薄 `.coffee` demo/qtest/configured 入口。`qbench` 用于维护者性能观测，不是运行用户脚本所需的组件。平台 job 会执行 release tests、crate package verification 和五个 CLI 的构建目录版本 smoke；归档完成后还会先验证成员、路径和权限，再解包到临时干净工作区，仅使用解包后的二进制和归档内源码运行：
 
-- 四个 CLI 的版本检查；
+- 五个 CLI 的版本检查；
+- `qcson` 的 CSON → JSON 与 JSON → CSON canonical 转换；
+- 归档内 `.cson` 经 `qcson` 转换后通过显式 `argv` 驱动 Decimal 定价，结果与 Rust embedding 基线一致；
 - 一个独立 `.coffee` 脚本；
 - 一个含 Markdown 行内代码与四空格可执行块的 GitHub-compatible `.litcoffee`；
 - `qdocco --check`；
@@ -52,6 +54,8 @@ cd "quickcoffee-${VERSION}-${TARGET}"
 ./qcoffee --version
 ./qcoffee --module-root examples/pricing demo
 ./qtest --module-root examples/pricing test
+CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
+./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 
 Intel macOS 将 `TARGET` 改为 `x86_64-apple-darwin`，Linux 改为 `x86_64-unknown-linux-gnu`。成功时 demo 会输出精确 Decimal 报价与 `pricing.ineligible` 业务拒绝，qtest 输出 `ok test.coffee`。
@@ -73,6 +77,8 @@ Set-Location "quickcoffee-$Version-$Target"
 .\qcoffee.exe --version
 .\qcoffee.exe --module-root examples\pricing demo
 .\qtest.exe --module-root examples\pricing test
+$ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
+.\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson
 ```
 
 维护者可以在 tag 前本地运行发布工具测试和完整门禁：
@@ -99,9 +105,11 @@ Formal releases use a `vX.Y.Z` tag whose `X.Y.Z` must match both the package ver
 
 macOS Intel uses `macos-15-intel`, while Apple silicon uses `macos-15`. The workflow asserts `uname -m` before building so runner-label drift cannot silently produce an artifact for the wrong architecture.
 
-Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, the README, changelog, dual licenses, and the canonical Decimal `.litcoffee` rule plus thin `.coffee` demo/qtest entries under `examples/pricing/`. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all four CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries and packaged sources to run:
+Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, `qcson`, the README, changelog, dual licenses, and the canonical Decimal `.litcoffee` rule, human-maintained `.cson` configuration, and thin `.coffee` demo/qtest/configured entries under `examples/pricing/`. `qbench` is maintainer-facing performance observability rather than a requirement for running user scripts. Each platform job runs release tests, crate package verification, and build-directory version smoke checks for all five CLIs. It then verifies archive members, paths, and modes before extracting into a temporary clean workspace and using only the extracted binaries and packaged sources to run:
 
-- version checks for all four CLIs;
+- version checks for all five CLIs;
+- canonical CSON → JSON and JSON → CSON conversion through `qcson`;
+- the packaged `.cson` configuration through `qcson` and explicit `argv` into Decimal pricing, matching the Rust embedding baseline;
 - one standalone `.coffee` script;
 - one GitHub-compatible `.litcoffee` document containing Markdown inline code and a four-space executable block;
 - `qdocco --check`; and
@@ -140,6 +148,8 @@ cd "quickcoffee-${VERSION}-${TARGET}"
 ./qcoffee --version
 ./qcoffee --module-root examples/pricing demo
 ./qtest --module-root examples/pricing test
+CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
+./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 
 Use `x86_64-apple-darwin` for Intel macOS or `x86_64-unknown-linux-gnu` for Linux. The demo prints an exact Decimal quote and a `pricing.ineligible` business rejection; qtest prints `ok test.coffee`.
@@ -161,6 +171,8 @@ Set-Location "quickcoffee-$Version-$Target"
 .\qcoffee.exe --version
 .\qcoffee.exe --module-root examples\pricing demo
 .\qtest.exe --module-root examples\pricing test
+$ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
+.\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson
 ```
 
 Before tagging, maintainers can run:

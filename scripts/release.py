@@ -17,9 +17,11 @@ import tempfile
 import zipfile
 
 
-BINARIES = ("qcoffee", "qtest", "qdocco", "qbench")
+BINARIES = ("qcoffee", "qtest", "qdocco", "qbench", "qcson")
 DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
 EXAMPLE_SOURCES = (
+    "examples/pricing/config.cson",
+    "examples/pricing/configured.coffee",
     "examples/pricing/rule.litcoffee",
     "examples/pricing/demo.coffee",
     "examples/pricing/test.coffee",
@@ -323,7 +325,7 @@ def extract_verified_archive(path: Path, destination: Path, version: str, target
 
 def run_installed(
     command: list[str], cwd: Path, expected_stdout: str = "", expected_stderr: str = ""
-) -> None:
+) -> str:
     """Run one extracted command and require its complete deterministic output."""
     result = subprocess.run(
         command,
@@ -341,6 +343,7 @@ def run_installed(
             f"installed command failed: command={command!r}, code={result.returncode}, "
             f"stdout={result.stdout!r}, stderr={result.stderr!r}"
         )
+    return result.stdout
 
 
 def verify_install(path: Path, version: str, target: str) -> None:
@@ -376,6 +379,12 @@ def verify_install(path: Path, version: str, target: str) -> None:
             "    true\n",
             encoding="utf-8",
         )
+        (workspace / "config.cson").write_text(
+            "enabled: true\namount: 12.30\n", encoding="utf-8"
+        )
+        (workspace / "config.json").write_text(
+            '{"enabled":true,"amount":12.30}\n', encoding="utf-8"
+        )
         run_installed(
             [os.fspath(binaries["qcoffee"]), "plain.coffee"], workspace, "42\n"
         )
@@ -388,7 +397,42 @@ def verify_install(path: Path, version: str, target: str) -> None:
             [os.fspath(binaries["qdocco"]), "--check", "document.litcoffee"],
             workspace,
         )
+        run_installed(
+            [os.fspath(binaries["qcson"]), "to-json", "config.cson"],
+            workspace,
+            '{"amount":12.3,"enabled":true}\n',
+        )
+        run_installed(
+            [os.fspath(binaries["qcson"]), "to-cson", "config.json"],
+            workspace,
+            "amount: 12.3\nenabled: true\n",
+        )
         pricing = (install / "examples" / "pricing").resolve()
+        pricing_config_json = run_installed(
+            [
+                os.fspath(binaries["qcson"]),
+                "to-json",
+                os.fspath(pricing / "config.cson"),
+            ],
+            workspace,
+            '{"accepted":{"country":"CN","customer_tier":"member",'
+            '"item_count":3,"subtotal":"120"},"rejected":{"country":"US",'
+            '"customer_tier":"standard","item_count":1,"subtotal":"5"},'
+            '"schema":"pricing-orders/v1"}\n',
+        )
+        run_installed(
+            [
+                os.fspath(binaries["qcoffee"]),
+                "--module-root",
+                os.fspath(pricing),
+                "configured",
+                "--",
+                pricing_config_json.rstrip("\n"),
+            ],
+            workspace,
+            "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
+            "tax: 14.04m, total: 122.04m}, rejection: pricing.ineligible}\n",
+        )
         run_installed(
             [
                 os.fspath(binaries["qcoffee"]),
