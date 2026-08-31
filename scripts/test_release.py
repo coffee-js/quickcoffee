@@ -232,7 +232,7 @@ class ReleaseToolTests(unittest.TestCase):
                             and module_root.name == "getting-started"
                             and arguments[2] == "test"
                         ):
-                            stdout = "ok test.coffee\n"
+                            stdout = "ok test/normalize_task.coffee\n"
                         elif name == "qcoffee" and arguments[2] == "demo":
                             stdout = (
                                 "{quote: {discount: 12m, net: 108m, subtotal: 120m, "

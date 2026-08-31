@@ -20,7 +20,7 @@
 
 `qtest --timeout-ms N` 为每个选中的文件创建隔离 Context worker，在 N 个正整数毫秒后协作取消，作为普通单文件失败记录，并按确定输入顺序继续执行。它不替代 fuel 或资源限制，也不能强制停止同步且不协作的宿主 callback；qtest 默认不提供这种 callback 注入 surface。
 
-`qtest --module-root ROOT ENTRY...` 显式授予一个受限文件模块根。每个规范化的根内相对入口先预检为内存 `ModulePackage`，再在新的 Context 中执行；只有入口导出严格 Bool 的 `test = true` 才通过。模块用例复用 fuel、每 case timeout、stats、filter/list、JSON、TAP 与 JUnit 契约；普通文件模式仍无模块权限。
+`qtest --module-root ROOT ENTRY_OR_DIRECTORY...` 显式授予一个受限文件模块根。每个规范化的根内相对入口先预检为内存 `ModulePackage`，再在新的 Context 中执行；只有入口导出严格 Bool 的 `test = true` 才通过。根内测试目录会递归发现其中的 `.coffee` 与 `.litcoffee` 入口，以稳定的根相对路径排序和去重；每个用例仍使用新的 Context。模块用例复用 fuel、每 case timeout、stats、filter/list、JSON、TAP 与 JUnit 契约；普通文件模式仍无模块权限，目录外与符号链接逃逸会被拒绝。
 
 `qtest --junit FILE` 在选中文件结束后写入一份字节稳定的 UTF-8 JUnit XML 报告，可与普通、JSON 或 TAP 输出并用；它会 XML 转义 case 路径和失败详情，刻意省略测量时间。
 

@@ -50,7 +50,7 @@ Embedders may set Context `ResourceLimits` for general String UTF-8 bytes, Array
 
 `qtest --timeout-ms N` runs each file in an isolated Context worker and cooperatively cancels it after N positive milliseconds; it reports a normal per-file failure, then continues. It is not a replacement for fuel, and synchronous non-cooperative host callbacks cannot be forcibly stopped.
 
-`qtest --module-root ROOT ENTRY...` explicitly grants one restricted file-module root. Each canonical entry is preflighted into an in-memory `ModulePackage`, runs in a fresh Context, and passes only when it exports the strict Bool `test = true`. Module cases retain the existing timeout, output, filtering, listing, and statistics contracts; ordinary file tests gain no module authority.
+`qtest --module-root ROOT ENTRY_OR_DIRECTORY...` explicitly grants one restricted file-module root. Each canonical entry is preflighted into an in-memory `ModulePackage`, runs in a fresh Context, and passes only when it exports the strict Bool `test = true`. A root-relative test directory recursively discovers `.coffee` and `.litcoffee` entries with stable root-relative labels, sorting, and deduplication; every case still runs in a fresh Context. Module cases retain the existing timeout, output, filtering, listing, and statistics contracts; ordinary file tests gain no module authority, and outside-root or symlink escapes are rejected.
 
 `qtest --junit FILE` writes one deterministic UTF-8 JUnit XML report after every selected file runs. It can accompany plain, JSON, or TAP output; paths and failure detail are XML-escaped, while measured timing is deliberately omitted.
 

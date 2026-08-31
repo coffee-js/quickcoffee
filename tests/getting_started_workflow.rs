@@ -34,6 +34,9 @@ fn readme_getting_started_commands_run_and_test_the_packaged_task() {
         .output()
         .expect("qtest starts");
     assert!(test.status.success());
-    assert_eq!(String::from_utf8_lossy(&test.stdout), "ok test.coffee\n");
+    assert_eq!(
+        String::from_utf8_lossy(&test.stdout),
+        "ok test/normalize_task.coffee\n"
+    );
     assert!(test.stderr.is_empty());
 }

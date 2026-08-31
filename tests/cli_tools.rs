@@ -923,6 +923,118 @@ fn qtest_module_root_runs_canonical_isolated_cases_in_every_output_mode() {
 }
 
 #[test]
+fn qtest_module_root_discovers_a_root_relative_test_directory() {
+    let root = std::env::temp_dir().join(format!(
+        "qcoffee-qtest-module-directory-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join("test/nested")).unwrap();
+    fs::write(root.join("shared.coffee"), "export value = true\n").unwrap();
+    fs::write(
+        root.join("test/a-pass.coffee"),
+        "import { value } from '../shared'\nexport test = value\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("test/nested/b-fail.litcoffee"),
+        "# Executable module case.\n\n    export test = false\n",
+    )
+    .unwrap();
+    let root_text = root.to_str().unwrap();
+
+    let plain = Command::new(bin("qtest"))
+        .args(["--module-root", root_text, "test"])
+        .output()
+        .unwrap();
+    assert_eq!(plain.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout),
+        "ok test/a-pass.coffee\n",
+        "{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&plain.stderr)
+            .contains("not ok test/nested/b-fail.litcoffee: export test was false, expected true")
+    );
+
+    let listed = Command::new(bin("qtest"))
+        .args([
+            "--list",
+            "--filter",
+            "nested",
+            "--module-root",
+            root_text,
+            "test",
+        ])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout),
+        "test/nested/b-fail.litcoffee\n"
+    );
+
+    let json = Command::new(bin("qtest"))
+        .args(["--json", "--module-root", root_text, "test"])
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&json.stdout),
+        concat!(
+            "{\"ok\":true,\"file\":\"test/a-pass.coffee\"}\n",
+            "{\"ok\":false,\"file\":\"test/nested/b-fail.litcoffee\",",
+            "\"error\":\"export test was false, expected true\"}\n"
+        )
+    );
+
+    let report = root.join("module-directory-results.xml");
+    let junit = Command::new(bin("qtest"))
+        .args(["--module-root", root_text, "--junit"])
+        .arg(&report)
+        .arg("test")
+        .output()
+        .unwrap();
+    assert_eq!(junit.status.code(), Some(1));
+    let report = fs::read_to_string(&report).unwrap();
+    assert!(report.contains("<testcase name=\"test/a-pass.coffee\"></testcase>"));
+    assert!(report.contains("<testcase name=\"test/nested/b-fail.litcoffee\">"));
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("test"), root.join("test-link")).unwrap();
+        let duplicate = Command::new(bin("qtest"))
+            .args(["--list", "--module-root", root_text, "test", "test-link"])
+            .output()
+            .unwrap();
+        assert!(duplicate.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&duplicate.stdout),
+            "test/a-pass.coffee\ntest/nested/b-fail.litcoffee\n"
+        );
+        let outside_directory = root.with_file_name(format!(
+            "qcoffee-qtest-module-directory-outside-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&outside_directory).unwrap();
+        std::os::unix::fs::symlink(&outside_directory, root.join("outside-link")).unwrap();
+        let outside = Command::new(bin("qtest"))
+            .args(["--module-root", root_text, "outside-link"])
+            .output()
+            .unwrap();
+        assert_eq!(outside.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&outside.stderr)
+                .contains("module test directory escapes configured root: outside-link")
+        );
+        let _ = fs::remove_dir_all(outside_directory);
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn qtest_module_root_reports_contract_preflight_and_execution_failures() {
     let temp = std::env::temp_dir().join(format!(
         "qcoffee-qtest-module-errors-{}",
