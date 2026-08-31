@@ -20,6 +20,9 @@ import zipfile
 BINARIES = ("qcoffee", "qtest", "qdocco", "qbench", "qcson")
 DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
 EXAMPLE_SOURCES = (
+    "examples/getting-started/task.coffee",
+    "examples/getting-started/demo.coffee",
+    "examples/getting-started/test.coffee",
     "examples/pricing/config.cson",
     "examples/pricing/configured.coffee",
     "examples/pricing/rule.litcoffee",
@@ -406,6 +409,31 @@ def verify_install(path: Path, version: str, target: str) -> None:
             [os.fspath(binaries["qcson"]), "to-cson", "config.json"],
             workspace,
             "amount: 12.3\nenabled: true\n",
+        )
+        getting_started = (install / "examples" / "getting-started").resolve()
+        run_installed(
+            [
+                os.fspath(binaries["qcoffee"]),
+                "--json",
+                "--module-root",
+                os.fspath(getting_started),
+                "demo",
+                "--",
+                '{"name":"  Fix login  ","tags":[" bug ","urgent"]}',
+            ],
+            workspace,
+            '{"ok":true,"exports":{"result":{"name":"Fix login",'
+            '"tags":["bug","urgent"]}}}\n',
+        )
+        run_installed(
+            [
+                os.fspath(binaries["qtest"]),
+                "--module-root",
+                os.fspath(getting_started),
+                "test",
+            ],
+            workspace,
+            "ok test.coffee\n",
         )
         pricing = (install / "examples" / "pricing").resolve()
         pricing_config_json = run_installed(

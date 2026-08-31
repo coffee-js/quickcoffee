@@ -169,6 +169,23 @@ class ReleaseToolTests(unittest.TestCase):
                         )
                         stdout = "amount: 12.3\nenabled: true\n"
                     elif (
+                        name == "qcoffee"
+                        and len(arguments) == 6
+                        and arguments[0:2] == ("--json", "--module-root")
+                        and arguments[3:5] == ("demo", "--")
+                    ):
+                        getting_started = Path(arguments[2])
+                        self.assertEqual(getting_started.name, "getting-started")
+                        self.assertEqual(getting_started.parent.parent, binary.parent)
+                        self.assertEqual(
+                            arguments[5],
+                            '{"name":"  Fix login  ","tags":[" bug ","urgent"]}',
+                        )
+                        stdout = (
+                            '{"ok":true,"exports":{"result":{"name":"Fix login",'
+                            '"tags":["bug","urgent"]}}}\n'
+                        )
+                    elif (
                         name == "qcson"
                         and len(arguments) == 2
                         and arguments[0] == "to-json"
@@ -202,15 +219,21 @@ class ReleaseToolTests(unittest.TestCase):
                         and len(arguments) == 3
                         and arguments[0] == "--module-root"
                     ):
-                        pricing = Path(arguments[1])
-                        self.assertEqual(pricing.parent.parent, binary.parent)
+                        module_root = Path(arguments[1])
+                        self.assertEqual(module_root.parent.parent, binary.parent)
                         for source_name in release.EXAMPLE_SOURCES:
                             packaged = binary.parent / source_name
                             self.assertEqual(
                                 packaged.read_text(encoding="utf-8"),
                                 f"fixture:{source_name}\n",
                             )
-                        if name == "qcoffee" and arguments[2] == "demo":
+                        if (
+                            name == "qtest"
+                            and module_root.name == "getting-started"
+                            and arguments[2] == "test"
+                        ):
+                            stdout = "ok test.coffee\n"
+                        elif name == "qcoffee" and arguments[2] == "demo":
                             stdout = (
                                 "{quote: {discount: 12m, net: 108m, subtotal: 120m, "
                                 "tax: 14.04m, total: 122.04m}, "
@@ -235,7 +258,7 @@ class ReleaseToolTests(unittest.TestCase):
                     ],
                     list(release.BINARIES),
                 )
-                self.assertEqual(len(calls), 14)
+                self.assertEqual(len(calls), 16)
 
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]

@@ -23,6 +23,24 @@ cargo install --path .
 qcoffee --version
 ```
 
+### 5 分钟完成第一个日常任务
+
+仓库和正式发行归档都带有一个小型 JSON 清洗任务。它接收显式输入，校验字段，清理文本并稳定排序；这类校验、转换和规则计算正是 QuickCoffee 目前最适合的日常用途：
+
+```sh
+qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
+# {"ok":true,"exports":{"result":{"name":"Fix login","tags":["bug","urgent"]}}}
+```
+
+规则在 `examples/getting-started/task.coffee`，入口在 `demo.coffee`。修改规则后，用同目录的隔离测试立即验证：
+
+```sh
+qtest --module-root examples/getting-started test
+# ok test.coffee
+```
+
+接下来可以复制这个目录，把 `normalize_task` 换成自己的表单校验、配置整理或轻量业务规则。脚本不会隐式读取文件、访问网络或时间；需要这些能力时，由宿主显式读取数据后通过 `argv`、global 或 native callback 传入。完整语法可在需要时再查阅[中文语法索引](docs/syntax.zh-CN.md)，不必先读完整手册。
+
 正式版本也会提供不要求本地 Rust 工具链的 Linux x86_64、macOS Intel、macOS Apple silicon 和 Windows x86_64 归档。每个归档包含五个 CLI、README、更新日志、双许可证与可直接运行的 Decimal `.litcoffee`/`.coffee`/`.cson` 场景，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；发布门禁会从解包后的干净工作区验证 `.coffee`、GitHub-compatible `.litcoffee`、`qdocco`、`qtest`、`qcson` 双向转换和完整的 CSON → 定价规则链路。下载、校验、无 checkout 验收和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and clean-install verification are documented bilingually in the same guide.
 
 创建 `invoice.coffee`：
