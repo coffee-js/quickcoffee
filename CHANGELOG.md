@@ -9,6 +9,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 ### 中文
 
 - 初始实验版本：CoffeeScript 风格的严格、无原型字节码语言与可嵌入 Rust API。
+- README 和发行归档提供可在 5 分钟内运行、修改并测试的 JSON 清洗入门任务。
 - 提供 `qcoffee`、`qtest`、`qdocco`、`qbench` 与 `qcson`，支持规范 `.coffee`、GitHub-compatible `.litcoffee` 源码和纯数据 `.cson`。
 - 公开资源有界的 JSON/CSON 纯内存 Rust API；`qcson` 在不执行输入的前提下双向转换 canonical CSON/JSON，并提供版本化机器诊断。
 - Decimal 定价场景可由人工维护的 `.cson` 配置驱动；Rust 宿主和发布归档中的 `qcson -> qcoffee` 链路产生相同结果，脚本不获得隐式文件权限。
@@ -23,6 +24,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 ### English
 
 - Initial experimental release of a strict, prototype-free CoffeeScript-inspired bytecode language and embeddable Rust API.
+- The README and release archives include a JSON-cleanup starter task that users can run, modify, and test within five minutes.
 - Ships `qcoffee`, `qtest`, `qdocco`, `qbench`, and `qcson` with canonical `.coffee`, GitHub-compatible `.litcoffee`, and data-only `.cson` support.
 - Exposes resource-bounded, in-memory JSON/CSON Rust APIs. `qcson` converts canonical CSON/JSON bidirectionally without executing input and provides versioned machine diagnostics.
 - The Decimal pricing scenario accepts a human-maintained `.cson` configuration. The Rust host and archived `qcson -> qcoffee` chain agree without granting ambient file access to the script.
