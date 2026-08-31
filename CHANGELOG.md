@@ -13,7 +13,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - 提供 `qcoffee`、`qtest`、`qdocco`、`qbench` 与 `qcson`，支持规范 `.coffee`、GitHub-compatible `.litcoffee` 源码和纯数据 `.cson`。
 - 公开资源有界的 JSON/CSON 纯内存 Rust API；`qcson` 在不执行输入的前提下双向转换 canonical CSON/JSON，并提供版本化机器诊断。
 - Decimal 定价场景可由人工维护的 `.cson` 配置驱动；Rust 宿主和发布归档中的 `qcson -> qcoffee` 链路产生相同结果，脚本不获得隐式文件权限。
-- `qtest --module-root ROOT ENTRY...` 可预检并隔离运行导出 `test = true` 的静态模块用例。
+- `qtest --module-root ROOT ENTRY_OR_DIRECTORY...` 可预检并隔离运行导出 `test = true` 的静态模块用例；根内测试目录会稳定递归发现 `.coffee` 与 `.litcoffee` 入口。
 - 提供共享 `.litcoffee` 规则的 Decimal 定价与确定性 JSON 规范化业务工作流。
 - 多文件嵌入式策略包验证隔离 Context、typed host state、显式 capability、取消与资源策略。
 - 新增由三个业务工作流校准的 `ExecutionPolicy::isolated_request()`，统一 Runtime 编译边界与新 Context 的默认执行边界。
@@ -28,7 +28,7 @@ User-visible QuickCoffee changes are recorded here. Version headings stay aligne
 - Ships `qcoffee`, `qtest`, `qdocco`, `qbench`, and `qcson` with canonical `.coffee`, GitHub-compatible `.litcoffee`, and data-only `.cson` support.
 - Exposes resource-bounded, in-memory JSON/CSON Rust APIs. `qcson` converts canonical CSON/JSON bidirectionally without executing input and provides versioned machine diagnostics.
 - The Decimal pricing scenario accepts a human-maintained `.cson` configuration. The Rust host and archived `qcson -> qcoffee` chain agree without granting ambient file access to the script.
-- `qtest --module-root ROOT ENTRY...` preflights and runs isolated static-module cases that export `test = true`.
+- `qtest --module-root ROOT ENTRY_OR_DIRECTORY...` preflights and runs isolated static-module cases that export `test = true`; a test directory beneath the root is discovered recursively in stable order.
 - Includes Decimal pricing and deterministic JSON-normalization workflows backed by shared `.litcoffee` rules.
 - A multi-file embedded policy package validates isolated Contexts, typed host state, explicit capabilities, cancellation, and resource policy.
 - Adds `ExecutionPolicy::isolated_request()`, calibrated by all three business workflows, to align Runtime compilation bounds with defaults inherited by new Contexts.

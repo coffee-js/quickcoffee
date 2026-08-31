@@ -46,7 +46,7 @@ QuickCoffee 先将源码解析并编译为经验证的字节码，随后由带 f
 
 `qtest --timeout-ms N` 为每份文件创建隔离 Context worker，并在 N 个正整数毫秒后协作取消；它将超时作为该文件的普通失败报告后继续执行。它不替代 fuel；同步且不协作的宿主 callback 不能被强制停止。
 
-`qtest --module-root ROOT ENTRY...` 显式授予一个受限文件模块根。每个规范入口先预检为内存 `ModulePackage`，再在新的 Context 中运行；只有导出严格 Bool 的 `test = true` 才通过。模块用例沿用既有 timeout、输出、筛选、枚举和统计契约；普通文件测试仍无模块权限。
+`qtest --module-root ROOT ENTRY_OR_DIRECTORY...` 显式授予一个受限文件模块根。每个规范入口先预检为内存 `ModulePackage`，再在新的 Context 中运行；只有导出严格 Bool 的 `test = true` 才通过。根内测试目录会递归发现 `.coffee` 与 `.litcoffee` 入口，以稳定的根相对路径排序和去重；每个用例仍在新的 Context 中运行。模块用例沿用既有 timeout、输出、筛选、枚举和统计契约；普通文件测试仍无模块权限，目录外与符号链接逃逸会被拒绝。
 
 `qtest --junit FILE` 在所有选中文件执行完后写入一份确定性的 UTF-8 JUnit XML 报告；它可与普通、JSON 或 TAP 输出并用。路径与失败详情会 XML 转义，刻意不写入测量时间。
 

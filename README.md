@@ -36,7 +36,7 @@ qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix lo
 
 ```sh
 qtest --module-root examples/getting-started test
-# ok test.coffee
+# ok test/normalize_task.coffee
 ```
 
 接下来可以复制这个目录，把 `normalize_task` 换成自己的表单校验、配置整理或轻量业务规则。脚本不会隐式读取文件、访问网络或时间；需要这些能力时，由宿主显式读取数据后通过 `argv`、global 或 native callback 传入。完整语法可在需要时再查阅[中文语法索引](docs/syntax.zh-CN.md)，不必先读完整手册。
@@ -129,7 +129,9 @@ QuickCoffee 已提供：
 
 `.coffee` 是普通 QuickCoffee 源码的规范扩展名；`.litcoffee` 使用 GitHub 原生支持的 Literate CoffeeScript 形式：Markdown 正文保持未缩进，技术标识使用反引号行内代码，可执行代码块统一缩进四个空格并与正文留出空行。`` ```coffee `` 围栏只适用于生成后的普通 Markdown，不会成为 `.litcoffee` 的可执行代码。命名编译、执行、检查、模块加载和 `qtest` 都会自动识别 `.litcoffee`；`qdocco` 只接受 `.litcoffee` 并生成带版本标记的文档，`--incremental` 会在最终产物字节不变时保留已有文件。`qbench` 用于可重复的基准和 QuickJS 同机对照。这些都是项目工具，不是部署时的必需组件。
 
-`qtest --module-root ROOT ENTRY...` 显式授予一个受限模块根，把每个规范化入口预检为内存 `ModulePackage` 后在隔离 Context 中运行；入口必须 `export test = true`。该模式复用 fuel、每 case timeout、filter/list、stats、JSON、TAP 与 JUnit 契约，普通文件模式仍不获得模块权限。
+`qtest --module-root ROOT ENTRY_OR_DIRECTORY...` 显式授予一个受限模块根，把每个规范化入口预检为内存 `ModulePackage` 后在隔离 Context 中运行；入口必须 `export test = true`。将根内测试目录作为输入（例如 `qtest --module-root . test`）会递归发现其中的 `.coffee` 与 `.litcoffee` 入口，以稳定的根相对路径排序和去重；每个用例仍使用独立 Context。该模式复用 fuel、每 case timeout、filter/list、stats、JSON、TAP 与 JUnit 契约，普通文件模式仍不获得模块权限，目录外与符号链接逃逸也会被拒绝。
+
+`qtest --module-root ROOT ENTRY_OR_DIRECTORY...` explicitly grants one restricted module root and preflights every canonical entry into an in-memory `ModulePackage` before running it in an isolated Context; each entry must `export test = true`. Passing a test directory under that root (for example, `qtest --module-root . test`) recursively discovers its `.coffee` and `.litcoffee` entries, with stable root-relative labels, sorting, and deduplication; each case still gets its own Context. The mode retains fuel, per-case timeout, filter/list, stats, JSON, TAP, and JUnit contracts. Ordinary-file mode gains no module authority, and outside-root or symlink escapes are rejected.
 
 普通 `qcoffee`/`qtest` 脚本错误会在 legacy 错误首行后有界显示自定义领域错误的非 `nil` data，再显示 primary range、按调用顺序排列的 secondary ranges、紧凑源码片段与可操作 hint；直接 `throw` 的值仍只保留在既有首行，避免重复。`.litcoffee` 继续指向原始 Markdown 的物理行，无法可靠恢复的列不会被伪造。人类 `details:` 最多显示 160 个 Unicode 标量，超长内容以 `…` 标记；`qcoffee --json` 成功记录不变，错误记录保留完整领域 data、既有字段并增加 `diagnostic: {version: 1, labels: [...]}`。完整契约见 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md)。
 

@@ -55,6 +55,104 @@ fn collect(
     }
     Ok(())
 }
+
+fn module_directory_path(root: &Path, input: &str) -> Result<Option<PathBuf>, String> {
+    if input.is_empty()
+        || input.starts_with('/')
+        || input.contains(['\\', ':'])
+        || input
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        return Ok(None);
+    }
+    let canonical_root =
+        fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
+    let requested = root.join(input);
+    let Ok(canonical) = fs::canonicalize(&requested) else {
+        return Ok(None);
+    };
+    if !canonical.starts_with(&canonical_root) {
+        return Err(format!(
+            "module test directory escapes configured root: {input}"
+        ));
+    }
+    if canonical.is_dir() {
+        Ok(Some(canonical))
+    } else {
+        Ok(None)
+    }
+}
+
+fn collect_module_directory(
+    root: &Path,
+    directory: &Path,
+    entries: &mut Vec<String>,
+    visited_directories: &mut HashSet<PathBuf>,
+    visited_files: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
+    let canonical_directory =
+        fs::canonicalize(directory).map_err(|error| format!("{}: {error}", directory.display()))?;
+    if !canonical_directory.starts_with(root) {
+        return Err(format!(
+            "module test directory escapes configured root: {}",
+            directory.display()
+        ));
+    }
+    if !visited_directories.insert(canonical_directory.clone()) {
+        return Ok(());
+    }
+    let mut children: Vec<_> = fs::read_dir(&canonical_directory)
+        .map_err(|error| format!("{}: {error}", canonical_directory.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("{}: {error}", canonical_directory.display()))?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        let path = child.path();
+        let metadata =
+            fs::metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if metadata.is_dir() {
+            collect_module_directory(root, &path, entries, visited_directories, visited_files)?;
+        } else if metadata.is_file() && is_source_file(&path) {
+            let canonical =
+                fs::canonicalize(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            if !canonical.starts_with(root) {
+                return Err(format!(
+                    "module test file escapes configured root: {}",
+                    path.display()
+                ));
+            }
+            if visited_files.insert(canonical.clone()) {
+                let relative = canonical.strip_prefix(root).map_err(|_| {
+                    format!(
+                        "module test file escapes configured root: {}",
+                        path.display()
+                    )
+                })?;
+                entries.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn discover_module_directory(root: &Path, input: &str) -> Result<Option<Vec<String>>, String> {
+    let Some(directory) = module_directory_path(root, input)? else {
+        return Ok(None);
+    };
+    let canonical_root =
+        fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
+    let mut entries = Vec::new();
+    collect_module_directory(
+        &canonical_root,
+        &directory,
+        &mut entries,
+        &mut HashSet::new(),
+        &mut HashSet::new(),
+    )?;
+    Ok(Some(entries))
+}
+
 fn is_source_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -62,7 +160,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 fn usage() {
     eprintln!(
-        "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest [OPTIONS] --module-root ROOT ENTRY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] --module-root ROOT ENTRY...\n       qtest --version"
+        "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest [OPTIONS] --module-root ROOT ENTRY_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] --module-root ROOT ENTRY_OR_DIRECTORY...\n       qtest --version"
     );
 }
 fn json_escape(value: &str) -> String {
@@ -390,24 +488,51 @@ fn main() -> ExitCode {
         let mut cases = Vec::new();
         let mut visited_modules = HashSet::new();
         for input in inputs {
-            let source = match loader.load_entry(&input) {
-                Ok(source) => source,
-                Err(error) => {
-                    if tap {
-                        println!("TAP version 13");
-                        println!("Bail out! {input}: {error}");
-                    } else {
-                        eprintln!("not ok {input}: {error}");
+            let entries = match loader.load_entry(&input) {
+                Ok(source) => vec![source.name().to_owned()],
+                Err(file_error) => match discover_module_directory(&root, &input) {
+                    Ok(Some(entries)) => entries,
+                    Ok(None) => {
+                        let error = file_error;
+                        if tap {
+                            println!("TAP version 13");
+                            println!("Bail out! {input}: {error}");
+                        } else {
+                            eprintln!("not ok {input}: {error}");
+                        }
+                        return ExitCode::from(1);
                     }
-                    return ExitCode::from(1);
-                }
+                    Err(error) => {
+                        if tap {
+                            println!("TAP version 13");
+                            println!("Bail out! {input}: {error}");
+                        } else {
+                            eprintln!("not ok {input}: {error}");
+                        }
+                        return ExitCode::from(1);
+                    }
+                },
             };
-            let entry = source.name().to_owned();
-            if visited_modules.insert(entry.clone()) {
-                cases.push(TestCase::Module {
-                    root: root.clone(),
-                    entry,
-                });
+            for entry in entries {
+                let source = match loader.load_entry(&entry) {
+                    Ok(source) => source,
+                    Err(error) => {
+                        if tap {
+                            println!("TAP version 13");
+                            println!("Bail out! {entry}: {error}");
+                        } else {
+                            eprintln!("not ok {entry}: {error}");
+                        }
+                        return ExitCode::from(1);
+                    }
+                };
+                let entry = source.name().to_owned();
+                if visited_modules.insert(entry.clone()) {
+                    cases.push(TestCase::Module {
+                        root: root.clone(),
+                        entry,
+                    });
+                }
             }
         }
         cases

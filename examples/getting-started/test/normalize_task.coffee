@@ -1,4 +1,4 @@
-import { normalize_task } from './task'
+import { normalize_task } from '../task'
 
 normalized = normalize_task('{"name":"  Write docs  ","tags":["ux"," daily "]}')
 

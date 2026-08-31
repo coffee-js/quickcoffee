@@ -22,7 +22,7 @@ DOCUMENTS = ("README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE")
 EXAMPLE_SOURCES = (
     "examples/getting-started/task.coffee",
     "examples/getting-started/demo.coffee",
-    "examples/getting-started/test.coffee",
+    "examples/getting-started/test/normalize_task.coffee",
     "examples/pricing/config.cson",
     "examples/pricing/configured.coffee",
     "examples/pricing/rule.litcoffee",
@@ -433,7 +433,7 @@ def verify_install(path: Path, version: str, target: str) -> None:
                 "test",
             ],
             workspace,
-            "ok test.coffee\n",
+            "ok test/normalize_task.coffee\n",
         )
         pricing = (install / "examples" / "pricing").resolve()
         pricing_config_json = run_installed(
