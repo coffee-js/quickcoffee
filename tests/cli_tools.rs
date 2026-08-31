@@ -1390,6 +1390,80 @@ fn qcoffee_human_diagnostics_render_ranges_excerpts_call_sites_and_litcoffee_lin
 }
 
 #[test]
+fn human_diagnostics_show_bounded_structured_script_error_details() {
+    let structured = Command::new(bin("qcoffee"))
+        .args([
+            "-e",
+            "throw error('input.invalid', 'invalid input', {field: 'tags[0]', expected: 'string'})",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(structured.status.code(), Some(1));
+    let structured_stderr = String::from_utf8_lossy(&structured.stderr);
+    assert!(structured_stderr.contains(
+        "runtime error [input.invalid]: invalid input\n  details: {expected: string, field: tags[0]}"
+    ));
+
+    let nil = Command::new(bin("qcoffee"))
+        .args(["-e", "throw error('plain.failure', 'plain failure', nil)"])
+        .output()
+        .unwrap();
+    assert_eq!(nil.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&nil.stderr).contains("details:"));
+
+    let oversized = format!(
+        "throw error('long.failure', 'long failure', '{}')",
+        "界".repeat(200)
+    );
+    let long = Command::new(bin("qcoffee"))
+        .args(["-e", &oversized])
+        .output()
+        .unwrap();
+    assert_eq!(long.status.code(), Some(1));
+    let long_stderr = String::from_utf8_lossy(&long.stderr);
+    let detail = long_stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("  details: "))
+        .expect("bounded details line");
+    assert!(detail.ends_with('…'));
+    assert_eq!(detail.trim_end_matches('…').chars().count(), 160);
+
+    let temp = std::env::temp_dir().join(format!("qcoffee-error-details-{}", std::process::id()));
+    fs::create_dir_all(&temp).unwrap();
+    let module = temp.join("demo.coffee");
+    fs::write(
+        &module,
+        "fail = -> throw error('input.invalid', 'invalid input', {field: 'module', expected: 'string'})\nexport result = fail()\n",
+    )
+    .unwrap();
+    let module_run = Command::new(bin("qcoffee"))
+        .args(["--module-root"])
+        .arg(&temp)
+        .arg("demo")
+        .output()
+        .unwrap();
+    assert_eq!(module_run.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&module_run.stderr)
+            .contains("details: {expected: string, field: module}")
+    );
+
+    let test_file = temp.join("failure.coffee");
+    fs::write(
+        &test_file,
+        "throw error('input.invalid', 'invalid input', {field: 'name', expected: 'string'})\n",
+    )
+    .unwrap();
+    let tested = Command::new(bin("qtest")).arg(&test_file).output().unwrap();
+    assert_eq!(tested.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&tested.stderr)
+            .contains("details: {expected: string, field: name}")
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
 fn qcoffee_json_reports_values_and_structured_errors() {
     let value = Command::new(bin("qcoffee"))
         .args(["--json", "-e", "{answer: 42, ok: true}"])

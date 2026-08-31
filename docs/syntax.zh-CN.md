@@ -24,6 +24,8 @@
 
 `qtest --junit FILE` 在选中文件结束后写入一份字节稳定的 UTF-8 JUnit XML 报告，可与普通、JSON 或 TAP 输出并用；它会 XML 转义 case 路径和失败详情，刻意省略测量时间。
 
+普通 `qcoffee` 与 `qtest` 的自定义领域错误会在 legacy 首行后显示非 `nil` data；通用 `runtime` 与直接 `throw` 包装保持既有首行且不重复该值。稳定 `details:` 行最多包含 160 个 Unicode 标量，控制字符转义为单行文本，超长内容以 `…` 标记截断；源码 labels 与已有 `help:` 继续随后显示。`--json` 仍保留完整 data，不受此人类展示上限影响。
+
 独立 `qcson` 通过显式文件或 stdin 在 data-only CSON 与 canonical JSON 间双向转换；成功数据只写 stdout，版本化 `quickcoffee.qcson-diagnostic.v1` 错误只写 stderr，且该工具绝不执行输入或授予脚本 capability。Rust 嵌入方可直接调用默认或显式 `ResourceLimits` 的公开 `parse_json` / `encode_json` API，以及对应的 CSON API，全部保持纯内存和无 ambient I/O。
 
 内建 `qtest --json` 每个文件输出一行稳定 JSON，供 CI 与宿主系统使用；`qtest --tap` 输出确定性的 TAP 13 记录；`qtest --filter TEXT` 按路径筛选，`qtest --list` 只枚举最终文件而不执行；`qcoffee --json` 单次执行输出一行稳定 JSON 值或结构化错误（资源耗尽的 kind 为 `resource`），`qcoffee --fingerprint FILE` 在不执行脚本时输出已验证字节码的稳定 16 位十六进制键，`qcoffee --fingerprint --module-root ROOT ENTRY` 以同一格式输出完整受限模块图的独立版本化指纹；两者都使用规范化编码而非 Rust 调试文本；`qbench --json` 输出带语义护栏的编译、验证、执行计时记录，`qbench --list` 枚举负载而 `qbench --only NAME` 可只运行一个负载；`qdocco --markdown` 生成带稳定模板版本标记的说明、围栏源码和最终值，`--incremental` 会在最终渲染字节不变时保留已有产物，但不会跳过执行；嵌入方可用 `CompileLimits` 管理编译输入与图预算，用 `Context::set_fuel`、`set_max_call_depth`、`set_resource_limits` 与 `CancellationToken` 管理复用上下文的燃料、嵌套调用、一般 String/Array/Map 与 JSON/数值数据大小和取消，资源错误不能由脚本 `catch` 吞掉。`IntoValue` 与 `TryFromValue` 可递归转换常用的拥有型 Rust 标量、`Vec`、`BTreeMap<String, T>` 与 `Option`，不执行脚本，也不在 Number、Integer 与 Decimal 间 coercion；也可链式调用 `Context::with_global` 与 `Context::with_native`，`cargo run --example embed` 提供可编译宿主示例；`--stats` 的执行统计仍写入标准错误。

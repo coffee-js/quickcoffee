@@ -131,7 +131,7 @@ QuickCoffee 已提供：
 
 `qtest --module-root ROOT ENTRY...` 显式授予一个受限模块根，把每个规范化入口预检为内存 `ModulePackage` 后在隔离 Context 中运行；入口必须 `export test = true`。该模式复用 fuel、每 case timeout、filter/list、stats、JSON、TAP 与 JUnit 契约，普通文件模式仍不获得模块权限。
 
-普通 `qcoffee`/`qtest` 脚本错误会在 legacy 错误首行之后显示 primary range、按调用顺序排列的 secondary ranges、紧凑源码片段与可操作 hint；`.litcoffee` 继续指向原始 Markdown 的物理行，无法可靠恢复的列不会被伪造。`qcoffee --json` 成功记录不变；错误记录保留既有 `kind`、`message`、`source`、`line` 与领域字段，并增加 `diagnostic: {version: 1, labels: [...]}`。完整契约见 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md)。
+普通 `qcoffee`/`qtest` 脚本错误会在 legacy 错误首行后有界显示自定义领域错误的非 `nil` data，再显示 primary range、按调用顺序排列的 secondary ranges、紧凑源码片段与可操作 hint；直接 `throw` 的值仍只保留在既有首行，避免重复。`.litcoffee` 继续指向原始 Markdown 的物理行，无法可靠恢复的列不会被伪造。人类 `details:` 最多显示 160 个 Unicode 标量，超长内容以 `…` 标记；`qcoffee --json` 成功记录不变，错误记录保留完整领域 data、既有字段并增加 `diagnostic: {version: 1, labels: [...]}`。完整契约见 [RFC 0160](RFCs/0160-user-facing-cli-diagnostics.md)。
 
 REPL 不猜测多行块：每个非命令物理行是一次求值，并以稳定的 `<repl:N>` 来源名保留到会话结束，让跨输入调用链仍能指回定义行；多行程序请使用 `.coffee` / `.litcoffee` 文件。
 
