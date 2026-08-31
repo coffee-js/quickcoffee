@@ -2,12 +2,17 @@
 
 use quickcoffee::{
     DiagnosticLabel, DiagnosticLabelKind, Error, ModuleLoader, ModuleSource, SourcePosition,
-    SourceSpan,
+    SourceSpan, ValueKind,
 };
-use std::{cell::RefCell, collections::BTreeMap};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    fmt::{self, Write},
+};
 
 const MAX_EXCERPT_SCALARS: usize = 120;
 const CONTEXT_BEFORE_SCALARS: usize = 40;
+const MAX_DETAIL_SCALARS: usize = 160;
 
 /// Records the exact module sources returned by an already-authorized loader.
 ///
@@ -59,6 +64,11 @@ pub(crate) fn render_error(
     let mut rendered = error.to_string();
     let mut named_sources = BTreeMap::<String, Option<String>>::new();
 
+    if let Some(details) = script_error_details(error) {
+        rendered.push_str("\n  details: ");
+        rendered.push_str(&details);
+    }
+
     for label in error.labels() {
         rendered.push_str("\n  ");
         rendered.push_str(match label.kind {
@@ -89,6 +99,78 @@ pub(crate) fn render_error(
         rendered.push_str(hint);
     }
     rendered
+}
+
+fn script_error_details(error: &Error) -> Option<String> {
+    let script_error = error.script_error()?;
+    if matches!(script_error.code(), "runtime" | "throw") {
+        return None;
+    }
+    let data = script_error.data();
+    if data.kind() == ValueKind::Nil {
+        return None;
+    }
+    let mut writer = DetailWriter::default();
+    let _ = write!(&mut writer, "{data}");
+    Some(writer.finish())
+}
+
+#[derive(Default)]
+struct DetailWriter {
+    rendered: String,
+    scalars: usize,
+    truncated: bool,
+}
+
+impl DetailWriter {
+    fn push_scalar(&mut self, character: char) -> bool {
+        if self.scalars == MAX_DETAIL_SCALARS {
+            self.truncated = true;
+            return false;
+        }
+        self.rendered.push(character);
+        self.scalars += 1;
+        true
+    }
+
+    fn push_escape(&mut self, escape: &str) -> bool {
+        let length = escape.chars().count();
+        if self.scalars.saturating_add(length) > MAX_DETAIL_SCALARS {
+            self.truncated = true;
+            return false;
+        }
+        self.rendered.push_str(escape);
+        self.scalars += length;
+        true
+    }
+
+    fn finish(mut self) -> String {
+        if self.truncated {
+            self.rendered.push('…');
+        }
+        self.rendered
+    }
+}
+
+impl fmt::Write for DetailWriter {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        if self.truncated {
+            return Ok(());
+        }
+        for character in value.chars() {
+            let written = match character {
+                '\n' => self.push_escape("\\n"),
+                '\r' => self.push_escape("\\r"),
+                '\t' => self.push_escape("\\t"),
+                character if character.is_control() => self.push_scalar('�'),
+                character => self.push_scalar(character),
+            };
+            if !written {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn format_span(span: &SourceSpan) -> String {
