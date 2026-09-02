@@ -56,7 +56,7 @@ fn collect(
     Ok(())
 }
 
-fn module_directory_path(root: &Path, input: &str) -> Result<Option<PathBuf>, String> {
+fn module_directory_path(canonical_root: &Path, input: &str) -> Result<Option<PathBuf>, String> {
     if input.is_empty()
         || input.starts_with('/')
         || input.contains(['\\', ':'])
@@ -66,13 +66,11 @@ fn module_directory_path(root: &Path, input: &str) -> Result<Option<PathBuf>, St
     {
         return Ok(None);
     }
-    let canonical_root =
-        fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
-    let requested = root.join(input);
+    let requested = canonical_root.join(input);
     let Ok(canonical) = fs::canonicalize(&requested) else {
         return Ok(None);
     };
-    if !canonical.starts_with(&canonical_root) {
+    if !canonical.starts_with(canonical_root) {
         return Err(format!(
             "module test directory escapes configured root: {input}"
         ));
@@ -136,15 +134,16 @@ fn collect_module_directory(
     Ok(())
 }
 
-fn discover_module_directory(root: &Path, input: &str) -> Result<Option<Vec<String>>, String> {
-    let Some(directory) = module_directory_path(root, input)? else {
+fn discover_module_directory(
+    canonical_root: &Path,
+    input: &str,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(directory) = module_directory_path(canonical_root, input)? else {
         return Ok(None);
     };
-    let canonical_root =
-        fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
     let mut entries = Vec::new();
     collect_module_directory(
-        &canonical_root,
+        canonical_root,
         &directory,
         &mut entries,
         &mut HashSet::new(),
@@ -473,6 +472,18 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let mut cases = if let Some(root) = module_root {
+        let root = match fs::canonicalize(&root) {
+            Ok(root) => root,
+            Err(error) => {
+                if tap {
+                    println!("TAP version 13");
+                    println!("Bail out! {}: {error}", root.display());
+                } else {
+                    eprintln!("not ok {}: {error}", root.display());
+                }
+                return ExitCode::from(1);
+            }
+        };
         let loader = match RestrictedFileModuleLoader::new(&root) {
             Ok(loader) => loader,
             Err(error) => {
@@ -488,20 +499,10 @@ fn main() -> ExitCode {
         let mut cases = Vec::new();
         let mut visited_modules = HashSet::new();
         for input in inputs {
-            let entries = match loader.load_entry(&input) {
-                Ok(source) => vec![source.name().to_owned()],
-                Err(file_error) => match discover_module_directory(&root, &input) {
-                    Ok(Some(entries)) => entries,
-                    Ok(None) => {
-                        let error = file_error;
-                        if tap {
-                            println!("TAP version 13");
-                            println!("Bail out! {input}: {error}");
-                        } else {
-                            eprintln!("not ok {input}: {error}");
-                        }
-                        return ExitCode::from(1);
-                    }
+            let entries = match discover_module_directory(&root, &input) {
+                Ok(Some(entries)) => entries,
+                Ok(None) => match loader.load_entry(&input) {
+                    Ok(source) => vec![source.name().to_owned()],
                     Err(error) => {
                         if tap {
                             println!("TAP version 13");
@@ -512,6 +513,15 @@ fn main() -> ExitCode {
                         return ExitCode::from(1);
                     }
                 },
+                Err(error) => {
+                    if tap {
+                        println!("TAP version 13");
+                        println!("Bail out! {input}: {error}");
+                    } else {
+                        eprintln!("not ok {input}: {error}");
+                    }
+                    return ExitCode::from(1);
+                }
             };
             for entry in entries {
                 let source = match loader.load_entry(&entry) {
