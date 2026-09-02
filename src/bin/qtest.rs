@@ -70,7 +70,7 @@ fn module_directory_path(canonical_root: &Path, input: &str) -> Result<Option<Pa
     let Ok(canonical) = fs::canonicalize(&requested) else {
         return Ok(None);
     };
-    if !canonical.starts_with(&canonical_root) {
+    if !canonical.starts_with(canonical_root) {
         return Err(format!(
             "module test directory escapes configured root: {input}"
         ));
