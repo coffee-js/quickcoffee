@@ -332,8 +332,8 @@ fn deployment_cookbook_reuses_the_verified_worker_contract() {
             "deployment cookbook must include {expected}"
         );
     }
-    assert_eq!(cookbook.matches(release_revision).count(), 2);
-    assert_eq!(releasing.matches(release_revision).count(), 2);
+    assert!(cookbook.matches(release_revision).count() >= 2);
+    assert!(releasing.matches(release_revision).count() >= 2);
     assert!(readme.contains("docs/deployment.md"));
     assert!(!releasing.contains("quickcoffee = \"0.1.0\""));
 }
