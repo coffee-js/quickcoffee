@@ -310,3 +310,30 @@ fn policy_core_is_qtestable_without_granting_cli_host_authority() {
     assert!(!ambient.status.success());
     assert!(String::from_utf8_lossy(&ambient.stderr).contains("unknown name 'host_risk'"));
 }
+
+#[test]
+fn deployment_cookbook_reuses_the_verified_worker_contract() {
+    let cookbook = include_str!("../docs/deployment.md");
+    let readme = include_str!("../README.md");
+    let releasing = include_str!("../docs/releasing.md");
+    let release_revision = "b3d27d24d15d76786baa21614b9cc2a97b28579e";
+
+    for expected in [
+        "ExecutionPolicy::isolated_request()",
+        "cargo run --example policy_package",
+        "cargo run --example per_worker",
+        "cargo test --test thread_ownership",
+        "one `Runtime` per OS worker",
+        "not a complete hostile-code sandbox",
+        "external wall-clock deadline",
+    ] {
+        assert!(
+            cookbook.contains(expected),
+            "deployment cookbook must include {expected}"
+        );
+    }
+    assert_eq!(cookbook.matches(release_revision).count(), 2);
+    assert_eq!(releasing.matches(release_revision).count(), 2);
+    assert!(readme.contains("docs/deployment.md"));
+    assert!(!releasing.contains("quickcoffee = \"0.1.0\""));
+}
