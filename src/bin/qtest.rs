@@ -488,20 +488,10 @@ fn main() -> ExitCode {
         let mut cases = Vec::new();
         let mut visited_modules = HashSet::new();
         for input in inputs {
-            let entries = match loader.load_entry(&input) {
-                Ok(source) => vec![source.name().to_owned()],
-                Err(file_error) => match discover_module_directory(&root, &input) {
-                    Ok(Some(entries)) => entries,
-                    Ok(None) => {
-                        let error = file_error;
-                        if tap {
-                            println!("TAP version 13");
-                            println!("Bail out! {input}: {error}");
-                        } else {
-                            eprintln!("not ok {input}: {error}");
-                        }
-                        return ExitCode::from(1);
-                    }
+            let entries = match discover_module_directory(&root, &input) {
+                Ok(Some(entries)) => entries,
+                Ok(None) => match loader.load_entry(&input) {
+                    Ok(source) => vec![source.name().to_owned()],
                     Err(error) => {
                         if tap {
                             println!("TAP version 13");
@@ -512,6 +502,15 @@ fn main() -> ExitCode {
                         return ExitCode::from(1);
                     }
                 },
+                Err(error) => {
+                    if tap {
+                        println!("TAP version 13");
+                        println!("Bail out! {input}: {error}");
+                    } else {
+                        eprintln!("not ok {input}: {error}");
+                    }
+                    return ExitCode::from(1);
+                }
             };
             for entry in entries {
                 let source = match loader.load_entry(&entry) {

@@ -53,13 +53,15 @@ fi
 tar -xzf "${ARCHIVE}"
 cd "quickcoffee-${VERSION}-${TARGET}"
 ./qcoffee --version
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
+./qtest --module-root examples/getting-started test
 ./qcoffee --module-root examples/pricing demo
 ./qtest --module-root examples/pricing test
 CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
 ./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 
-Intel macOS 将 `TARGET` 改为 `x86_64-apple-darwin`，Linux 改为 `x86_64-unknown-linux-gnu`。成功时 demo 会输出精确 Decimal 报价与 `pricing.ineligible` 业务拒绝，qtest 输出 `ok test.coffee`。
+Intel macOS 将 `TARGET` 改为 `x86_64-apple-darwin`，Linux 改为 `x86_64-unknown-linux-gnu`。成功时入门任务会输出清洗后的 JSON，入门 qtest 输出 `ok test/normalize_task.coffee`；定价 demo 会输出精确 Decimal 报价与 `pricing.ineligible` 业务拒绝，定价 qtest 输出 `ok test.coffee`。
 
 Windows PowerShell 使用同一 release 中的 zip：
 
@@ -76,6 +78,8 @@ if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
 Expand-Archive $Archive -DestinationPath .
 Set-Location "quickcoffee-$Version-$Target"
 .\qcoffee.exe --version
+.\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
+.\qtest.exe --module-root examples\getting-started test
 .\qcoffee.exe --module-root examples\pricing demo
 .\qtest.exe --module-root examples\pricing test
 $ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
@@ -148,13 +152,15 @@ fi
 tar -xzf "${ARCHIVE}"
 cd "quickcoffee-${VERSION}-${TARGET}"
 ./qcoffee --version
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
+./qtest --module-root examples/getting-started test
 ./qcoffee --module-root examples/pricing demo
 ./qtest --module-root examples/pricing test
 CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
 ./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 
-Use `x86_64-apple-darwin` for Intel macOS or `x86_64-unknown-linux-gnu` for Linux. The demo prints an exact Decimal quote and a `pricing.ineligible` business rejection; qtest prints `ok test.coffee`.
+Use `x86_64-apple-darwin` for Intel macOS or `x86_64-unknown-linux-gnu` for Linux. The getting-started task prints normalized JSON and its qtest prints `ok test/normalize_task.coffee`; the pricing demo prints an exact Decimal quote and a `pricing.ineligible` business rejection, and its qtest prints `ok test.coffee`.
 
 On Windows PowerShell, use the zip from the same release:
 
@@ -171,6 +177,8 @@ if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
 Expand-Archive $Archive -DestinationPath .
 Set-Location "quickcoffee-$Version-$Target"
 .\qcoffee.exe --version
+.\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
+.\qtest.exe --module-root examples\getting-started test
 .\qcoffee.exe --module-root examples\pricing demo
 .\qtest.exe --module-root examples\pricing test
 $ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()

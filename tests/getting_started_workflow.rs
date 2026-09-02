@@ -40,3 +40,27 @@ fn readme_getting_started_commands_run_and_test_the_packaged_task() {
     );
     assert!(test.stderr.is_empty());
 }
+
+#[test]
+fn readme_leads_first_use_to_a_verified_release_archive() {
+    let readme = std::fs::read_to_string(repository("README.md")).expect("README is readable");
+
+    for expected in [
+        "https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}",
+        "SHA256SUMS",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc.zip",
+        "./qcoffee --json --module-root examples/getting-started demo",
+        "./qtest --module-root examples/getting-started test",
+        "从源码构建 / Build from source",
+    ] {
+        assert!(readme.contains(expected), "README must include {expected}");
+    }
+
+    assert!(
+        !readme.contains("cargo install --path ."),
+        "a local source install must not be the first-use path"
+    );
+}
