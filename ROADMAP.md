@@ -11,30 +11,17 @@
 
 ## 当前规划入口
 
-### 0.2 语言与业务就绪
+### 0.2 产品收口
 
 总入口：[#65](https://github.com/coffee-js/quickcoffee/issues/65)
 
-| 工作流 | Issue |
+| 状态 | Issue |
 |---|---|
-| CoffeeScript 2016 特性矩阵与源码范围诊断 | [#74](https://github.com/coffee-js/quickcoffee/issues/74) |
-| 模块包、预编译 manifest 与模块生命周期 | [#75](https://github.com/coffee-js/quickcoffee/issues/75) |
-| 内存预算与运行时隔离 | [#76](https://github.com/coffee-js/quickcoffee/issues/76) |
-| 嵌入 API 0.2 与显式宿主能力 | [#77](https://github.com/coffee-js/quickcoffee/issues/77) |
-| 确定性的业务数据与文本基元 | [#78](https://github.com/coffee-js/quickcoffee/issues/78) |
+| 活跃：只使用现有 API 的生产部署 cookbook | [#77](https://github.com/coffee-js/quickcoffee/issues/77) |
+| 活跃：一次统一业务性能基线，完成即关闭 | [#66](https://github.com/coffee-js/quickcoffee/issues/66) |
+| 冻结：只由真实外部任务触发的能力候选 | [#78](https://github.com/coffee-js/quickcoffee/issues/78) |
 
-### VM 性能收敛
-
-总入口：[#66](https://github.com/coffee-js/quickcoffee/issues/66)
-
-| 工作流 | Issue |
-|---|---|
-| 数组、映射与字符串跨运行时负载 | [#79](https://github.com/coffee-js/quickcoffee/issues/79) |
-| 局部槽位、符号 intern 与差分执行 | [#80](https://github.com/coffee-js/quickcoffee/issues/80) |
-
-### 持续工程
-
-CLI 契约、fuzz、发布制品和性能回归门禁由 [#81](https://github.com/coffee-js/quickcoffee/issues/81) 跟踪。它是所有版本的横向工作流，不集中到版本末尾补做。
+没有可复现用户阻塞时，不启动新的语言、标准库、运行时架构或性能优化工作。
 
 ## 不变方向
 
@@ -45,9 +32,9 @@ CLI 契约、fuzz、发布制品和性能回归门禁由 [#81](https://github.co
 
 ## 拆分与治理规则
 
-- 大需求先建立 tracking issue；正文维护依赖、ordered work、验收状态和相关 PR。
+- 先用聚焦 issue 验证用户问题；只有确实跨越多个独立交付时才建立 tracking issue。
 - 每个 PR 只完成一个可验证切片，处理完 review comments 并通过本地门禁与 Actions 后合并。
-- 新语言特性同时更新 RFC、中文/英文语法索引、正反例测试和适用的可执行手册。
+- 只有公开语义或兼容性变化才新增 RFC；新语言特性还必须更新中英文语法索引、正反例测试和适用的可执行手册。
 - 新字节码同时更新验证器、反汇编、指纹/版本规则、恶意输入测试和性能报告。
 - 新公开 API 同时更新 Rust 示例、外部集成测试、API 文档和迁移说明。
 - 优先级与完成状态只在对应 issue 更新；本文件不复制动态清单。

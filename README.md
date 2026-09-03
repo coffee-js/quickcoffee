@@ -179,33 +179,25 @@ fn evaluate_rule() -> Result<(), Error> {
 }
 ```
 
-多 worker 宿主采用明确的 **one-Runtime-per-worker** 模式：在每个 OS worker 内创建 `Runtime`、准备 `ModulePackage` 并创建短生命周期 `Context`；线程边界只传普通 Rust 配置/请求、`CancellationToken`，以及已经从 QuickCoffee `Value` / `Error` 转换出的 Rust 结果。运行 `cargo run --example per_worker` 可执行 4-worker cookbook，`cargo bench --bench policy_package` 会另行报告每 worker setup latency、package/cache cardinality 与 Context logical memory。后两者都不是 compiled-artifact heap、allocator capacity 或进程 RSS；若这些真实宿主指标违反明确预算，再用单独 RFC 评估跨线程共享 compiled artifacts。
+生产宿主默认采用每个 worker 一个 `Runtime`、每个请求一个隔离 `Context`，并从 `ExecutionPolicy::isolated_request()` 开始。`Runtime`、模块包和 VM 值留在创建它们的 worker；线程间只传普通 Rust 数据和 `CancellationToken`。真正不可信的脚本还需要进程隔离、OS 限额与外部超时。
 
-Multi-worker hosts use one worker-owned Runtime and prepared ModulePackage per OS worker. Only ordinary Rust inputs, `CancellationToken`, and converted Rust outputs cross thread boundaries; cache cardinality and logical Context memory must not be presented as process RSS.
+完整选择表、固定源码依赖和可运行命令见[生产嵌入指南](docs/deployment.md)。现有[多 worker 示例](examples/per_worker.rs)、[策略包宿主](examples/policy_package.rs)、[定价宿主](examples/pricing.rs)和[JSON 规范化宿主](examples/normalization.rs)覆盖这些用法，无需新增运行时抽象。
 
-生产嵌入可从 `ExecutionPolicy::isolated_request()` 开始：它把三个旗舰工作流验证过的 `CompileLimits`、fuel、调用深度、`ResourceLimits` 与默认关闭的 logical live-memory observation 一次性装入 Runtime，并由每个新 Context 自动继承；`Runtime::execution_policy()` 可审计实际快照，现有 Context builder 方法仍可做单请求覆盖。`CancellationToken`、global、capability 与 native 必须按请求显式提供，不能藏进共享策略。`CompileLimits` 在预处理与 cache-key 复制前限制原始 source，在验证和执行前限制递归 bytecode，并让模块执行与图指纹共享唯一模块数及累计 source bytes 预算；模块执行会在任何脚本运行前预检完整静态图。contextual native 可通过 `NativeCallContext` 协作检查取消、扣减 fuel、记录分配遥测并访问类型化、脚本不可见的 Context-owned `HostState`。`HostCapabilities` 与 typed `CapabilityKey<T>` 进一步把 clock、random、logging、file、network 权限放进显式 allowlist；QuickCoffee 不提供这些系统能力的实现，callback 必须继续显式检查和记账。同步 callback 在调用线程内执行，panic 不会被 VM 捕获或保证回滚；Runtime/Context 因 `Rc` 保持 non-Send/non-Sync，只有 `CancellationToken` 可跨线程发出停止信号。`RuntimeBuilder` 分别限制共享 Program/Module 编译缓存条目；缓存只保存已验证编译产物，不共享 globals、模块 exports、host state、capabilities 或任何执行账本，且可用 `cache_stats()` 审计、用 `clear_compile_caches()` 清空。`IntoValue` / `TryFromValue` 可在不执行脚本且不做 Number/Integer/Decimal coercion 的前提下递归转换常用 Rust 标量、`Vec`、`BTreeMap` 与 `Option`。`Engine::fingerprint_module_graph` 只通过宿主 loader 加载并验证静态依赖图，不执行模块，可作为依赖敏感的缓存失效键；`MODULE_GRAPH_FINGERPRINT_VERSION` 标识其 canonical encoding 版本。`Context::retained_memory()` 可读取当前 Context global 可达托管图的确定性 logical object/byte 快照；它去重共享值和循环，但不是 RSS、峰值或硬内存限制。宿主若要保留可重复的观测高水位，应在业务边界显式调用 `sample_retained_memory()`，再读取 `retained_memory_high_water()`；该记录不扫描 VM 指令，且只代表已采样的逐项最大值。`ResourceLimits` 可分别设置 retained object/byte 的执行提交上限，以及默认关闭的每轮累计 transient managed object/byte 上限；后者也覆盖协作记账的 contextual native 和整张模块图，并在越界时保留失败统计、回滚脚本状态。累计分配预算仍不是 RSS 或逐时刻 live-memory 峰值。当前资源限制覆盖多项计算与数据边界，但**尚不是完整的总内存预算或隔离沙箱**；不可信代码仍需要由宿主承担进程隔离。完整契约见 [RFC 0161](RFCs/0161-scenario-execution-policy.md)，可运行示例见[嵌入示例](examples/embed.rs)和三个业务 host。
-
-完整的业务验收路径见[可执行定价规则](examples/pricing/rule.litcoffee)、[人工维护的 CSON 配置](examples/pricing/config.cson)、[配置驱动的 CLI 模块](examples/pricing/configured.coffee)、[`qtest` 模块用例](examples/pricing/test.coffee)与[复用模块包的 Rust 宿主](examples/pricing.rs)。金额以字符串跨越 CSON 边界后显式转换为 Decimal，计数使用 CSON Integer；脚本只接收 `argv` 中由 `qcson` 产生的 canonical JSON，不获得文件权限。运行 `cargo run --example pricing` 可验证显式宿主读取路径，或运行 `CONFIG_JSON="$(cargo run --quiet --bin qcson -- to-json examples/pricing/config.cson)"; cargo run --quiet --bin qcoffee -- --module-root examples/pricing configured -- "$CONFIG_JSON"` 验证与发布制品相同的 CLI 链路。两条路径输出相同的报价与 `pricing.ineligible` 业务拒绝。
-
-The pricing workflow also ships its human-maintained [CSON configuration](examples/pricing/config.cson) and [argv-only CLI entry](examples/pricing/configured.coffee). Money crosses the data boundary as strings and is explicitly converted to Decimal, while counts remain CSON Integer values. The Rust example performs the explicit host read; the CLI chain grants the script no file capability, and both paths produce the same quote and `pricing.ineligible` rejection.
-
-[JSON 规范化规则](examples/normalization/rule.litcoffee)同样由[固定 corpus](examples/normalization/input.v1.json)、[CLI 模块](examples/normalization/demo.coffee)、[`qtest` 用例](examples/normalization/test.coffee)和[显式文件 I/O 的 Rust 宿主](examples/normalization.rs)共享。它验证精确 Integer/Decimal、固定 Unicode trim、scalar sort、不可变 Map 更新、规范 JSON、结构化业务错误及 JSON/资源失败；运行 `qtest --module-root examples/normalization test` 可执行隔离验收。
-
-`Context::with_live_memory_observation(LiveMemoryObservation::Checkpointed)` 允许宿主额外记录顶层、调用、迭代、异常处理与 contextual native 边界的 logical live managed-memory；报告给出最后快照、逐项高水位、相应检查点、样本数与成功/错误/资源/取消结果。它默认关闭，不扫描 VM roots，不改变资源限制或脚本语义，也不是 RSS、GC 或任意 instruction 间的峰值。
+Production hosts default to one worker-owned `Runtime` and one isolated `Context` per request, starting from `ExecutionPolicy::isolated_request()`. VM values stay inside their worker; only ordinary Rust data and `CancellationToken` cross threads. See the bilingual [production embedding cookbook](docs/deployment.md). Truly untrusted scripts also require process isolation, OS limits, and external deadlines.
 
 ## 当前状态与已知缺口
 
-QuickCoffee 的核心语言、class、精确数值、确定性 JSON/CSON、Unicode 基元、CLI 诊断和基础嵌入 API 已实现，并由 RFC 与测试锁定。项目持续针对 VM 分配、调用和局部变量路径做性能优化；最近的 class 调用优化显著减少了临时绑定方法对象。
+QuickCoffee 的核心语言、class、精确数值、确定性 JSON/CSON、Unicode 基元、CLI 诊断和基础嵌入 API 已实现，并由 RFC 与测试锁定。当前冻结没有真实使用证据的语言、标准库和运行时扩张；性能工作只处理影响实际任务且超过测量噪声的回归。
 
 但它仍处于实验性 0.1：
 
 - CLI 已支持显式根目录的受限模块加载和非执行模块图指纹；嵌入宿主可显式构建内存模块包，但没有持久化 manifest。普通文件、stdin、`-e` 和 REPL 不会隐式获得模块/文件权限。
-- 原始 source、递归 bytecode、静态模块数、累计模块 source 与每轮累计 transient managed allocation 已有独立上限，但尚无逐时刻 live managed-memory、cycle 回收或跨 Context 生命周期隔离；剩余工作由 [#76](https://github.com/coffee-js/quickcoffee/issues/76) 跟踪。capability allowlist 已可显式配置，但具体系统能力仍必须由宿主实现并授权。
+- 原始 source、递归 bytecode、静态模块数、累计模块 source 与每轮累计 transient managed allocation 已有独立上限，但 logical memory 不等于进程 RSS 或完整沙箱；部署边界由 [#77](https://github.com/coffee-js/quickcoffee/issues/77) 跟踪。capability allowlist 已可显式配置，但具体系统能力仍必须由宿主实现并授权。
 - 没有异步/并发、正则、日期时间、字节与流 API、网络或文件标准库；I/O 类能力保持为宿主显式责任。
 - 性能已建立可重复的本地与 Linux 配对报告，但尚不能宣称达到 QuickJS 的整体量级；结果会随负载、平台和宿主交互而变化。
-- 语言和嵌入 API 会继续通过 RFC 演进；需要长期稳定接口的项目应先锁定版本并运行自己的语义与资源测试。
+- 只有真实需求导致公开语义或兼容性变化时才新增 RFC；需要长期稳定接口的项目应先锁定版本并运行自己的语义与资源测试。
 
-动态优先级与完成状态在 [路线图](ROADMAP.md)和 GitHub tracking issues 中维护：[#65](https://github.com/coffee-js/quickcoffee/issues/65)（业务语言就绪）、[#66](https://github.com/coffee-js/quickcoffee/issues/66)（VM 性能）、[#81](https://github.com/coffee-js/quickcoffee/issues/81)（CLI、发布和性能门禁）。
+动态优先级与完成状态在[路线图](ROADMAP.md)和 GitHub tracking issues 中维护：[#65](https://github.com/coffee-js/quickcoffee/issues/65)（产品入口）、[#77](https://github.com/coffee-js/quickcoffee/issues/77)（部署指南）、[#66](https://github.com/coffee-js/quickcoffee/issues/66)（统一性能基线）与 [#78](https://github.com/coffee-js/quickcoffee/issues/78)（冻结 backlog）。
 
 ## 性能与质量
 
@@ -229,6 +221,7 @@ make check
 |---|---|
 | 当前语法、标准库和 CLI 边界 | [中文语法索引](docs/syntax.zh-CN.md) · [English syntax index](docs/syntax.en.md) |
 | 平台归档、校验和与发布门禁 | [发布与平台归档 / Releases](docs/releasing.md) |
+| Rust 宿主生命周期、线程与隔离 | [生产嵌入指南 / Production embedding](docs/deployment.md) |
 | 业务适用范围、性能判断和未完成能力 | [业务就绪度评估](docs/readiness.zh-CN.md) |
 | CoffeeScript 兼容性差异 | [特性矩阵](docs/coffeescript-2016-matrix.md) |
 | class / `this` / `new` / `extends` / `super` 的安全边界 | [RFC 0134](RFCs/0134-class-receivers-and-inheritance.md) |

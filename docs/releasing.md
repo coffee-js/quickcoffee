@@ -95,14 +95,14 @@ make check
 
 ### Rust crate 分发决策
 
-0.1 将 crates.io 上的 `quickcoffee = "0.1.0"` 作为 Rust embedding 的正式入口，但发布必须由维护者从已验证的精确 release commit 手工执行。GitHub tag workflow 不保存 registry token，也不会调用不可逆的 `cargo publish`。发布前后依次确认：
+0.1 暂缓 crates.io 发布。CLI 用户使用上述正式 Release；Rust embedding 用户固定经过验证的 `v0.1.0` 完整 commit，不使用浮动分支：
 
-```sh
-cargo publish --dry-run --locked
-cargo publish --locked
+```toml
+[dependencies]
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
 ```
 
-crate 版本一经发布不能覆盖；若 registry 发布暂缓，宿主必须用完整 commit `rev` 固定 Git dependency，不使用浮动分支。
+只有真实分发需求出现时才建立独立 crates.io 发布 issue。完整宿主选择见[生产嵌入指南](deployment.md)。
 
 ## English
 
@@ -194,11 +194,11 @@ make check
 
 ### Rust crate distribution decision
 
-For 0.1, `quickcoffee = "0.1.0"` on crates.io is the formal Rust embedding entry. A maintainer must publish it manually from the exact verified release commit. The GitHub tag workflow stores no registry token and deliberately never invokes the irreversible `cargo publish` operation. Verify and publish explicitly:
+crates.io publication is deferred for 0.1. CLI users use the formal Release above; Rust embedders pin the complete verified `v0.1.0` commit rather than a moving branch:
 
-```sh
-cargo publish --dry-run --locked
-cargo publish --locked
+```toml
+[dependencies]
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
 ```
 
-A published crate version cannot be overwritten. If registry publication is deferred, hosts must pin a Git dependency by a full commit `rev`, never a moving branch.
+Open a focused crates.io publication issue only when real distribution demand appears. See the [production embedding cookbook](deployment.md) for the complete host choices.
