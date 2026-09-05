@@ -45,6 +45,7 @@ ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
 curl -fLO "${BASE}/${ARCHIVE}" &&
 curl -fLO "${BASE}/SHA256SUMS" &&
+grep -q "  ${ARCHIVE}$" SHA256SUMS &&
 if command -v sha256sum >/dev/null; then
   grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 else
@@ -144,6 +145,7 @@ ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
 curl -fLO "${BASE}/${ARCHIVE}" &&
 curl -fLO "${BASE}/SHA256SUMS" &&
+grep -q "  ${ARCHIVE}$" SHA256SUMS &&
 if command -v sha256sum >/dev/null; then
   grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 else
