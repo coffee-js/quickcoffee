@@ -735,6 +735,57 @@ fn qtest_json_output_is_one_stable_record_per_file() {
     assert!(bad_stdout.contains("\"ok\":false"));
     assert!(bad_stdout.contains("\"error\":\""));
 }
+
+#[test]
+fn cli_help_examples_execute_successfully() {
+    let cases: &[(&str, &[&str], &str)] = &[
+        ("qcoffee", &["-e", "print(1 + 2)"], "3\n"),
+        (
+            "qcoffee",
+            &["-e", "print(argv[0])", "--", "hello"],
+            "hello\n",
+        ),
+        (
+            "qtest",
+            &["--module-root", "examples/getting-started", "test"],
+            "ok test/normalize_task.coffee\n",
+        ),
+        (
+            "qtest",
+            &[
+                "--list",
+                "--module-root",
+                "examples/getting-started",
+                "test",
+            ],
+            "test/normalize_task.coffee\n",
+        ),
+        (
+            "qtest",
+            &[
+                "--filter",
+                "normalize",
+                "--module-root",
+                "examples/getting-started",
+                "test",
+            ],
+            "ok test/normalize_task.coffee\n",
+        ),
+    ];
+    for (name, args, expected) in cases {
+        let output = Command::new(bin(name))
+            .args(*args)
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name} {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), *expected);
+    }
+}
 #[test]
 fn qtest_tap_output_is_deterministic_and_describes_failures() {
     let temp = std::env::temp_dir().join(format!("qcoffee-qtest-tap-{}", std::process::id()));
