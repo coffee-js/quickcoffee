@@ -36,28 +36,28 @@ Windows PowerShell 可将 `Get-FileHash -Algorithm SHA256` 的结果与 `SHA256S
 
 ### 无仓库 checkout 的快速验收
 
-正式 `v0.1.0` 发布后，Linux 或 macOS 用户可以只下载平台归档和 checksum：
+正式 `v0.1.0` 发布后，Linux 或 macOS 用户可以只下载平台归档和 checksum。请整段执行；`&&` 让任一步失败后停止后续命令。遇到错误时先解决对应问题再重试，不要跳过校验或继续运行残留文件：
 
 ```sh
 VERSION=0.1.0
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
-curl -fLO "${BASE}/${ARCHIVE}"
-curl -fLO "${BASE}/SHA256SUMS"
+curl -fLO "${BASE}/${ARCHIVE}" &&
+curl -fLO "${BASE}/SHA256SUMS" &&
 if command -v sha256sum >/dev/null; then
   grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 else
   grep "  ${ARCHIVE}$" SHA256SUMS | shasum -a 256 -c -
-fi
-tar -xzf "${ARCHIVE}"
-cd "quickcoffee-${VERSION}-${TARGET}"
-./qcoffee --version
-./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
-./qtest --module-root examples/getting-started test
-./qcoffee --module-root examples/pricing demo
-./qtest --module-root examples/pricing test
-CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
+fi &&
+tar -xzf "${ARCHIVE}" &&
+cd "quickcoffee-${VERSION}-${TARGET}" &&
+./qcoffee --version &&
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' &&
+./qtest --module-root examples/getting-started test &&
+./qcoffee --module-root examples/pricing demo &&
+./qtest --module-root examples/pricing test &&
+CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)" &&
 ./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 
@@ -135,28 +135,28 @@ On Windows, compare `Get-FileHash -Algorithm SHA256` output with `SHA256SUMS`. T
 
 ### Quick acceptance without a repository checkout
 
-After the formal `v0.1.0` release, a Linux or macOS user needs only the platform archive and checksum manifest:
+After the formal `v0.1.0` release, a Linux or macOS user needs only the platform archive and checksum manifest. Run the entire block; `&&` stops subsequent commands if any step fails. Fix the reported problem before retrying; do not skip verification or continue running leftover files:
 
 ```sh
 VERSION=0.1.0
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
-curl -fLO "${BASE}/${ARCHIVE}"
-curl -fLO "${BASE}/SHA256SUMS"
+curl -fLO "${BASE}/${ARCHIVE}" &&
+curl -fLO "${BASE}/SHA256SUMS" &&
 if command -v sha256sum >/dev/null; then
   grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 else
   grep "  ${ARCHIVE}$" SHA256SUMS | shasum -a 256 -c -
-fi
-tar -xzf "${ARCHIVE}"
-cd "quickcoffee-${VERSION}-${TARGET}"
-./qcoffee --version
-./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
-./qtest --module-root examples/getting-started test
-./qcoffee --module-root examples/pricing demo
-./qtest --module-root examples/pricing test
-CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)"
+fi &&
+tar -xzf "${ARCHIVE}" &&
+cd "quickcoffee-${VERSION}-${TARGET}" &&
+./qcoffee --version &&
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' &&
+./qtest --module-root examples/getting-started test &&
+./qcoffee --module-root examples/pricing demo &&
+./qtest --module-root examples/pricing test &&
+CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)" &&
 ./qcoffee --module-root examples/pricing configured -- "$CONFIG_JSON"
 ```
 

@@ -14,22 +14,22 @@ QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的紧凑字节码
 - Intel Mac：`x86_64-apple-darwin`
 - Linux x86_64：`x86_64-unknown-linux-gnu`
 
-下载归档和同一 Release 的 checksum，再校验、解包并确认版本：
+下载归档和同一 Release 的 checksum，再校验、解包并确认版本。请整段执行；`&&` 确保任一步失败后不再继续解包或运行。若有错误，先解决下载、校验或目录问题，再重试，不要跳过校验：
 
 ```sh
 VERSION=0.1.0
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
-curl -fLO "${BASE}/${ARCHIVE}"
-curl -fLO "${BASE}/SHA256SUMS"
+curl -fLO "${BASE}/${ARCHIVE}" &&
+curl -fLO "${BASE}/SHA256SUMS" &&
 if command -v sha256sum >/dev/null; then
   grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 else
   grep "  ${ARCHIVE}$" SHA256SUMS | shasum -a 256 -c -
-fi
-tar -xzf "${ARCHIVE}"
-cd "quickcoffee-${VERSION}-${TARGET}"
+fi &&
+tar -xzf "${ARCHIVE}" &&
+cd "quickcoffee-${VERSION}-${TARGET}" &&
 ./qcoffee --version
 ```
 
@@ -60,9 +60,9 @@ Windows x86_64 请使用同一 Release 的 `quickcoffee-0.1.0-x86_64-pc-windows-
 贡献 QuickCoffee、开发 Rust 嵌入程序，或需要跟随未发布改动时，使用 Rust 1.85 或更新版本从源码构建：
 
 ```sh
-git clone https://github.com/coffee-js/quickcoffee.git
-cd quickcoffee
-cargo run -- -e "print(range(1, 4))"
+git clone https://github.com/coffee-js/quickcoffee.git &&
+cd quickcoffee &&
+cargo run --bin qcoffee -- -e "print(range(1, 4))"
 ```
 
 创建 `invoice.coffee`：
@@ -74,10 +74,10 @@ discount = (amount) ->
 print discount(120)
 ```
 
-运行它：
+在仓库目录中运行它。`cargo run` 不会把二进制安装到 `PATH`，因此源码示例继续通过 Cargo 调用：
 
 ```sh
-qcoffee invoice.coffee
+cargo run --bin qcoffee -- invoice.coffee
 # 108
 ```
 
