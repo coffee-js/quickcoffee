@@ -21,6 +21,12 @@ fn usage() {
 fn help() {
     eprintln!(
         r#"Usage: qcoffee [OPTIONS] FILE [-- ARG...]
+       qcoffee [OPTIONS] - [-- ARG...]
+       qcoffee [OPTIONS] -e SOURCE [-- ARG...]
+       qcoffee [OPTIONS] --check FILE
+       qcoffee [OPTIONS] --module-root ROOT ENTRY [-- ARG...]
+       qcoffee --interactive
+       qcoffee --help | --version | --quit
 
 Run and check / 运行与检查:
   FILE                    Run a .coffee or .litcoffee file / 执行文件
