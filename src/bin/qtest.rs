@@ -162,6 +162,39 @@ fn usage() {
         "Usage: qtest [--fuel N] [--timeout-ms N] [--junit FILE] [--stats] [--json|--tap] [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest [OPTIONS] --module-root ROOT ENTRY_OR_DIRECTORY...\n       qtest --list [--filter TEXT] FILE_OR_DIRECTORY...\n       qtest --list [--filter TEXT] --module-root ROOT ENTRY_OR_DIRECTORY...\n       qtest --version"
     );
 }
+fn help() {
+    usage();
+    eprintln!(
+        r#"
+Test discovery / 测试发现:
+  FILE_OR_DIRECTORY       Find .coffee/.litcoffee tests recursively / 递归找测试
+  --module-root ROOT      Allow modules only under ROOT / 仅允许根内模块
+  --list                  List selected tests without executing / 列出但不执行
+  --filter TEXT           Select labels containing TEXT / 按名称片段筛选
+  Each case uses an isolated Context. Ordinary tests must return true;
+  module entries must export test = true.
+  每个用例独立执行；普通测试返回 true，模块入口导出 test = true。
+
+Limits and reports / 限制与报告:
+  --fuel N                Instruction budget per case / 每用例指令预算
+  --timeout-ms N          Cooperative timeout per case / 每用例协作超时
+  --stats                 Execution statistics / 执行统计
+  --json                  JSON result records / JSON 结果记录
+  --tap                   TAP report (exclusive with --json) / TAP 报告
+  --junit FILE            Write a JUnit report / 写入 JUnit 报告
+
+Examples / 示例:
+  qtest --module-root examples/getting-started test
+  qtest --list --module-root examples/getting-started test
+  qtest --filter normalize --module-root examples/getting-started test
+
+Examples use the repository or extracted release directory.
+示例在仓库或解包后的发行目录运行；未加入 PATH 时使用 ./qtest。
+  -h, --help              Show this help / 显示帮助
+"#
+    );
+}
+
 fn json_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     for character in value.chars() {
@@ -410,7 +443,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--help" | "-h" => {
-                usage();
+                help();
                 return ExitCode::SUCCESS;
             }
             "--fuel" => match args.next().and_then(|value| value.parse().ok()) {

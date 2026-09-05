@@ -18,6 +18,52 @@ fn usage() {
     );
 }
 
+fn help() {
+    eprintln!(
+        r#"Usage: qcoffee [OPTIONS] FILE [-- ARG...]
+
+Run and check / 运行与检查:
+  FILE                    Run a .coffee or .litcoffee file / 执行文件
+  -                       Read source from stdin / 从标准输入读取源码
+  -e SOURCE               Evaluate an expression / 执行表达式
+  --check FILE            Check a standalone script / 只检查独立脚本
+  -i, --interactive       Persistent line-by-line REPL; :quit exits / 逐行交互
+  --module-root ROOT ENTRY Run a module under an explicit root / 运行根内模块
+  -- ARG...               Pass strings through argv / 将字符串传给 argv
+
+Output / 输出:
+  --json                  Machine-readable result or error / JSON 结果或错误
+  --stats                 Execution statistics on stderr / stderr 执行统计
+  --dump-bytecode FILE    Show compiled instructions / 查看编译指令
+  --fingerprint           Fingerprint a file or module graph without running
+                          不执行，计算文件或模块图指纹
+
+Limits / 资源限制:
+  --fuel N                Instruction budget / 指令预算
+  --max-source-bytes N     Source byte limit / 源码字节上限
+  --max-bytecode-instructions N  Compiled instruction limit / 编译指令上限
+  --max-module-graph-modules N   Module count limit / 模块数量上限
+  --max-module-graph-source-bytes N  Total module source limit / 模块源码总上限
+
+Examples / 示例:
+  qcoffee -e "print(1 + 2)"
+  qcoffee -e "print(argv[0])" -- hello
+  qcoffee --fingerprint --module-root examples/getting-started demo
+  qcoffee --module-root examples/pricing demo
+  qtest --module-root examples/getting-started test
+
+Examples use the repository or extracted release directory.
+For import/export modules, use --fingerprint --module-root ROOT ENTRY to check
+the graph without execution. --check accepts standalone scripts only.
+含 import/export 的模块用 --fingerprint --module-root 检查依赖图；--check 仅用于独立脚本。
+示例在仓库或解包后的发行目录运行；未加入 PATH 时使用 ./qcoffee、./qtest。
+  -h, --help              Show this help / 显示帮助
+  --version               Show version / 显示版本
+  --quit                  Exit immediately (startup measurement) / 立即退出
+"#
+    );
+}
+
 enum ReadSourceError {
     Io(String),
     SourceBytes(usize),
@@ -373,7 +419,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--help" | "-h" => {
-                usage();
+                help();
                 return ExitCode::SUCCESS;
             }
             "--interactive" | "-i" => interactive = true,
