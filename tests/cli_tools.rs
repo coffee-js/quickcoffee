@@ -1892,6 +1892,68 @@ fn qcoffee_fingerprints_restricted_module_graphs_without_execution() {
 }
 
 #[test]
+fn qcoffee_stdin_checks_byte_limit_before_utf8_decoding() {
+    for json in [false, true] {
+        for (source, limit, expected_kind) in [
+            ("\"中\"".as_bytes(), "2", "resource"),
+            ("\"☕\"".as_bytes(), "0", "resource"),
+            ("\"😀\"".as_bytes(), "3", "resource"),
+            (b"\xff\xff".as_slice(), "1", "resource"),
+            (b"\xff".as_slice(), "1", "io"),
+            (b"\xe4\xb8".as_slice(), "2", "io"),
+            ("\"中\"".as_bytes(), "5", "success"),
+        ] {
+            let mut command = Command::new(bin("qcoffee"));
+            if json {
+                command.arg("--json");
+            }
+            let mut child = command
+                .args(["--max-source-bytes", limit, "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(source).unwrap();
+            let output = child.wait_with_output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                output.status.code(),
+                Some(if expected_kind == "success" { 0 } else { 1 }),
+                "json={json}, limit={limit}: {stdout} {stderr}"
+            );
+            if json {
+                assert!(stderr.is_empty());
+                if expected_kind == "success" {
+                    assert!(stdout.contains("\"ok\":true"));
+                } else {
+                    assert!(stdout.contains(&format!("\"kind\":\"{expected_kind}\"")));
+                    assert!(stdout.contains("\"stage\":\"read\""));
+                    if expected_kind == "resource" {
+                        assert!(stdout.contains("\"limit\":\"source_bytes\""));
+                    }
+                }
+            } else if expected_kind == "success" {
+                assert!(stdout.contains('中'));
+                assert!(stderr.is_empty());
+            } else {
+                assert!(stdout.is_empty());
+                let expected = if expected_kind == "resource" {
+                    "source exceeds configured UTF-8 byte limit"
+                } else {
+                    "read error:"
+                };
+                assert!(
+                    stderr.contains(expected),
+                    "source={source:?}, limit={limit}: {stderr}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn qcoffee_compile_limit_flags_bound_reads_bytecode_and_module_graphs() {
     let boundary = Command::new(bin("qcoffee"))
         .args(["--max-source-bytes", "4", "-e", "true"])
