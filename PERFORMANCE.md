@@ -1,6 +1,156 @@
 # QuickCoffee 0.1 性能报告
 
-## 口径
+## 2026-09-08：三个业务工作流统一基线（#66）
+
+这份 current-main 报告是内部回归起点，不是用户 SLO、跨机器性能承诺或新的优化清单。此前各轮 microbench 和 QuickJS 数据保留为历史证据，不用来推导当前业务阻塞。
+
+### 环境与测量边界
+
+- 源码：`4c86dad40cda52b3d45d444f423d5c2b7d8148f3`（#281 合并后的 main）；仅本报告在此基础上修改。
+- Apple M1 Pro、16 GiB RAM、Darwin 25.6.0 arm64；`rustc 1.94.0 (4a4ef493e 2026-03-02)`，LLVM 21.1.8，`aarch64-apple-darwin`；Cargo 默认 optimized bench/release profile、已提交的 Cargo.lock。
+- 每项 11 轮，以中位数与 MAD 报告。完成构建、业务测试和预热后独立采样，没有同时启动仓库测试或构建；未隔离 CPU、锁频或控制其他桌面负载。首次探索轮不纳入下表。
+- cold prepare 是新 Runtime/loader 下的完整包准备，**不表示冷磁盘缓存**；cached prepare 的 100 次包含首次填充缓存，不能用两者相减推导精确编译成本。
+- 定价、JSON 和 policy-short 热执行均含 Context 构建及执行；policy-long 复用 Context。各 benchmark 的请求构造与观测开销不完全相同，不作场景间引擎优劣比较。
+- 进程总时长包含启动、模块读取/编译、执行及 stdout/stderr 管道收集，不含 Cargo 构建；不能与进程内热执行直接相减。
+
+### 输入和输出口径
+
+| 场景 | 固定输入与规模 | 输出/限制 |
+|---|---|---|
+| Decimal 定价 | `benches/pricing.rs` 的四字段 Value map；subtotal 在 `120m` 与 `250.50m` 间交替；10/100/1000 个独立请求 | 读取导出的 `result`；Value map 不是 JSON 字节流。CLI `demo` 另含一次业务拒绝，stdout 112 bytes |
+| JSON 规范化 | `SCALE_EVENT` 的 7 字段事件；每请求 10/100/1000 条，UTF-8 输入分别 1,981/19,441/194,041 bytes；每轮总计 10,000 条事件 | 包含解析、校验、转换及 canonical JSON 编码；固定语义 corpus 文件为 605 bytes，expected 文件 351 bytes（均含末尾换行）；CLI 使用 `corpus.coffee`，stdout 365 bytes，不是 1000 条规模输入 |
+| 多文件策略包 | 四字段 Value map：`120m`、`benchmark`、`CN`、`equipment`，风险为 low；10/100/1000 请求 | 真实宿主回调、typed state 与审计 capability；端到端 Rust 示例另覆盖低/高风险、拒绝 capability 和取消，stdout 453 / stderr 161 bytes，不能当成单次请求延迟 |
+
+所有输入均来自上述固定 revision 的现有 examples/benches；定价和策略的宿主值没有人为转换成 JSON 来制造可比的字节大小。
+
+### 准备、Context 与进程总时长
+
+括号内为 MAD；准备单位 µs/package，Context 为 ns/context，进程总时长为 ms/invocation。
+
+| 场景 | cold prepare（10 次/轮） | cached prepare（100 次/轮） | Context（10,000 次/轮） | CLI / host 总时长 |
+|---|---:|---:|---:|---:|
+| Decimal 定价 | 221.3 (10.4) | 74.57 (2.00) | 未单独测量；包含在热执行中 | 3.750 (0.140) |
+| JSON 规范化 | 339.8 (9.8) | 92.48 (2.24) | 198.2 (5.8) | 4.204 (0.200) |
+| 多文件策略包 | 403.6 (38.3) | 161.25 (4.46) | 621.2 (10.6) | 4.410 (0.197)，Rust 示例总时长 |
+
+没有为填满表格新增 instrumentation；特别是定价未单独输出 Context、instructions 或 managed allocation，不借用其他场景的数字。
+
+### 热执行规模
+
+时长均为 benchmark 计时区间的总 ms（MAD）；吞吐由中位数总时长计算并四舍五入，不是单个样本打印的吞吐。
+
+| 场景 | 规模 | 总时长 ms（MAD） | 吞吐 |
+|---|---:|---:|---:|
+| 定价 | 10 请求 | 0.222 (0.006) | 45,045 requests/s |
+| 定价 | 100 请求 | 1.423 (0.051) | 70,274 requests/s |
+| 定价 | 1000 请求 | 14.442 (0.162) | 69,242 requests/s |
+| JSON | 10 条/请求 × 1000 请求 | 283.268 (4.746) | 35,302 events/s |
+| JSON | 100 条/请求 × 100 请求 | 268.074 (3.381) | 37,303 events/s |
+| JSON | 1000 条/请求 × 10 请求 | 268.417 (3.706) | 37,255 events/s |
+| policy-short | 10 / 100 / 1000 请求 | 0.346 (0.006) / 3.283 (0.168) / 33.063 (0.580) | 28,902 / 30,460 / 30,245 requests/s |
+| policy-long | 10 / 100 / 1000 请求 | 0.319 (0.014) / 3.235 (0.093) / 32.209 (0.454) | 31,348 / 30,912 / 31,047 requests/s |
+
+四个独立 Runtime **顺序**分发 1000 请求为 32.631 ms（MAD 0.834），约 30,646 requests/s；不是并行扩展结果。四 worker 总 setup 为 1.654 ms（0.109），每个 worker 有 4 个 package modules、0/4 个 program/module cache entries。
+
+JSON 每事件 instructions 在三个规模分别为 427/416/415，logical managed objects 为 48.2/46.2/46.0，logical managed bytes 为 985.0/964.3/962.2。策略每请求为 456 instructions、35 managed objects、533 managed bytes；long-lived retained 为 8 objects / 136 bytes。单独开启 checkpointed observation 的 `observed` 请求 high-water 为 36 objects / 837 bytes，worker-memory 用例为 36 / 842；两者输入不同。这些是逻辑记账，不包含编译缓存堆、allocator capacity 或进程 RSS。
+
+### 内部回归预算与结论
+
+三个目标工作流均可通过现有 CLI/宿主入口执行；这份单机数据没有基线/候选配对，不能证明“没有回归”，也不支持启动新的 VM 微优化。14 项既有业务集成测试通过；性能数字不能代替业务正确性或真实用户试用。
+
+后续采用**人工复测触发预算**，不新增 CI 硬门禁：同机、同工具链、相同输入上，候选中位耗时增量同时超过基线的 20% 和两组较大 MAD 的 3 倍，才进入调查；这不是置信区间或用户 SLO。再用既有 A/A 与配对方法复测，确认超过噪声且影响真实日常任务，才开聚焦缺陷 issue。先检查输入、宿主、工具链与测量环境，不依据历史 QuickJS 比值立项。跨机器结果必须重新建立基线。
+
+### 复现
+
+在上述 revision 的 checkout 根目录运行，先完成构建/测试，不要同时运行测试或其他基准：
+
+```sh
+cargo build --locked --release --bin qcoffee --example policy_package
+cargo test --locked --test cson_pricing_workflow --test normalization_workflow --test policy_workflow
+cargo bench --locked --bench pricing --bench normalization --bench policy_package
+```
+
+然后使用 Python 标准库重复现有 benchmark；不需要新的 benchmark framework。各行首个数字为总 ms，除以对应操作数即可得到上表每次成本。`policy-workers-4` 首数字是 setup，分发执行时长在分号后，需单独取出。
+
+```python
+import collections
+import re
+import statistics
+import subprocess
+import time
+
+samples = collections.defaultdict(list)
+for _ in range(11):
+    output = subprocess.run(
+        ["cargo", "bench", "--locked", "--bench", "pricing",
+         "--bench", "normalization", "--bench", "policy_package"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    for line in output.splitlines():
+        match = re.match(r"([\w-]+): ([0-9.]+)ms", line)
+        if match:
+            samples[match[1]].append(float(match[2]))
+        if line.startswith("policy-workers-4:"):
+            samples["policy-workers-execute"].append(
+                float(re.search(r"; ([0-9.]+)ms", line)[1]))
+
+commands = {
+    "pricing-cli": ["target/release/qcoffee", "--module-root", "examples/pricing", "demo"],
+    "normalization-cli": ["target/release/qcoffee", "--module-root", "examples/normalization", "demo"],
+    "policy-host-total": ["target/release/examples/policy_package"],
+}
+for label, command in commands.items():
+    subprocess.run(command, check=True, capture_output=True)  # warm-up
+    for _ in range(11):
+        start = time.perf_counter_ns()
+        subprocess.run(command, check=True, capture_output=True)
+        samples[label].append((time.perf_counter_ns() - start) / 1e6)
+for label, values in samples.items():
+    median = statistics.median(values)
+    mad = statistics.median(abs(value - median) for value in values)
+    print(label, median, mad, values)
+```
+
+<details>
+<summary>本轮原始总时长样本（ms，每行 11 轮；policy-workers-4 为 setup）</summary>
+
+```csv
+policy-workers-execute,30.748,34.428,31.877,32.552,32.631,33.465,36.324,32.441,32.235,35.070,33.598
+normalization-cold-prepare-10,4.154,3.398,3.656,3.330,3.470,3.317,3.383,5.249,3.284,3.300,3.618
+normalization-cached-prepare-100,12.703,8.931,9.472,9.254,9.248,9.175,9.312,10.820,9.111,8.863,9.024
+normalization-context-10000,2.699,1.937,1.901,2.040,1.946,1.960,2.071,3.060,1.917,2.000,1.982
+normalization-scale-10,282.297,290.285,274.808,279.731,274.146,283.740,295.320,319.845,283.268,278.522,287.915
+normalization-scale-100,267.859,260.986,262.448,264.815,264.693,399.057,279.722,282.107,268.784,268.074,270.026
+normalization-scale-1000,268.126,272.123,268.417,264.308,261.600,274.798,286.512,271.590,265.051,266.071,272.973
+policy-cold-prepare-10,4.046,4.934,4.122,3.647,4.036,3.972,4.484,3.652,3.653,3.720,4.910
+policy-cached-prepare-100,15.489,16.919,16.125,15.710,16.463,16.008,17.387,16.184,15.345,15.679,16.657
+policy-context-10000,5.964,6.557,6.211,6.212,6.300,6.161,6.620,6.463,6.118,6.106,6.648
+policy-short-10,0.342,0.344,0.346,0.340,0.357,0.350,0.606,0.364,0.343,0.333,0.527
+policy-long-10,0.319,0.306,0.370,0.307,0.307,0.333,0.348,0.362,0.302,0.302,0.324
+policy-short-100,3.166,3.552,3.168,3.602,3.150,3.655,3.283,3.325,3.112,3.115,3.771
+policy-long-100,2.969,3.211,3.136,3.046,3.253,3.073,3.235,3.251,3.328,3.246,3.559
+policy-short-1000,31.240,33.063,32.518,31.633,31.929,33.643,33.457,33.178,33.248,31.887,34.357
+policy-long-1000,30.404,31.281,31.755,32.865,32.331,32.209,35.484,31.114,32.138,32.419,32.365
+policy-workers-4,1.526,1.891,1.654,1.637,1.839,1.763,1.954,1.607,1.895,1.625,1.583
+pricing-cold-prepare-10,2.213,2.308,2.057,2.109,2.148,2.399,2.179,2.303,2.035,2.732,2.355
+pricing-cached-prepare-100,7.390,7.721,7.257,7.310,7.599,7.702,7.169,7.761,7.457,7.213,7.637
+pricing-execute-10,0.222,0.246,0.218,0.216,0.214,0.236,0.224,0.222,0.290,0.222,0.242
+pricing-execute-100,1.579,1.568,1.423,1.372,1.372,1.379,1.495,1.387,1.523,1.390,1.455
+pricing-execute-1000,14.668,14.442,14.249,14.071,14.484,14.422,15.032,14.456,14.280,14.321,16.093
+pricing-cli,3.890417,3.818458,3.736417,3.547834,3.418584,3.750042,3.648125,4.035417,4.138708,3.697333,3.996416
+normalization-cli,4.445833,4.162459,4.404042,4.312500,4.001542,3.902875,4.212167,4.144834,3.836250,5.184875,4.203750
+policy-host-total,4.032167,4.136333,4.364250,4.586583,4.618666,4.212625,4.366708,5.057041,4.409708,4.571334,4.994042
+```
+
+</details>
+
+### English summary
+
+This is a pinned, single-machine internal baseline for pricing, JSON normalization, and the host-backed policy package, not a user SLO or a cross-engine claim. Eleven post-build samples report median/MAD and retain raw totals above. Cold preparation does not imply cold filesystem caches; cached preparation includes the first cache fill. Context and allocation metrics are reported only where existing benchmarks expose them. CLI and host-example totals include process startup and output collection and use different inputs from hot execution.
+
+Use a 20% slowdown **and** three times the larger MAD as a manual investigation trigger, not a statistical confidence interval or blocking CI gate. Confirm with existing A/A and paired measurements and a real workload impact before opening an optimization issue. No runtime, benchmark framework, or telemetry API is added.
+
+## 历史微基准口径
 
 此报告测量的是当前 RFC 0001 核心实现，不代表 CoffeeScript、QuickJS 或 JavaScript 引擎之间的比较。所有测量都避开标准输出、文件 I/O 和调试构建；结果只能用来跟踪本仓库的回归。基准分别记录普通编译、含源码映射与私有执行 sidecar 的 `Program` 准备、字节码验证和执行；编译路径同时维护词法 token 的一基源码行，以支持 RFC 0047 诊断。
 
