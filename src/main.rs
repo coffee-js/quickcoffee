@@ -86,15 +86,18 @@ impl fmt::Display for ReadSourceError {
     }
 }
 fn read_limited(reader: impl Read, limit: usize) -> Result<String, ReadSourceError> {
-    let mut source = String::new();
+    let mut source = Vec::new();
     reader
         .take((limit as u64).saturating_add(1))
-        .read_to_string(&mut source)
+        .read_to_end(&mut source)
         .map_err(|error| ReadSourceError::Io(error.to_string()))?;
+    // The bounded read may end inside a valid UTF-8 character. Report the
+    // byte limit first, then validate only inputs that fit within it.
     if source.len() > limit {
         Err(ReadSourceError::SourceBytes(limit))
     } else {
-        Ok(source)
+        String::from_utf8(source)
+            .map_err(|_| ReadSourceError::Io("stream did not contain valid UTF-8".to_owned()))
     }
 }
 fn read_source(path: &str, limit: usize) -> Result<String, ReadSourceError> {
