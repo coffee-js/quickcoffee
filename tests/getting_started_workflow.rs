@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::{fs, path::PathBuf, process::Command};
 
 fn repository(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
@@ -39,6 +39,101 @@ fn readme_getting_started_commands_run_and_test_the_packaged_task() {
         "ok test/normalize_task.coffee\n"
     );
     assert!(test.stderr.is_empty());
+}
+
+#[test]
+fn starter_rule_regression_can_be_diagnosed_and_repaired() {
+    let root = std::env::temp_dir().join(format!(
+        "quickcoffee-starter-recovery-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(root.join("test")).unwrap();
+    for file in ["demo.coffee", "task.coffee", "test/normalize_task.coffee"] {
+        fs::copy(
+            repository(&format!("examples/getting-started/{file}")),
+            root.join(file),
+        )
+        .unwrap();
+    }
+    let run_tests = || {
+        Command::new(env!("CARGO_BIN_EXE_qtest"))
+            .arg("--module-root")
+            .arg(&root)
+            .arg("test")
+            .output()
+            .unwrap()
+    };
+    assert!(run_tests().status.success());
+    let rule_path = root.join("task.coffee");
+    let original = fs::read_to_string(&rule_path).unwrap();
+    assert!(original.contains("tags: sort(tags)"));
+    fs::write(
+        &rule_path,
+        original.replace("tags: sort(tags)", "tags: tags"),
+    )
+    .unwrap();
+    let failed = run_tests();
+    assert_eq!(failed.status.code(), Some(1));
+    let failure = format!(
+        "{}{}",
+        String::from_utf8_lossy(&failed.stdout),
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    assert!(
+        failure.contains("not ok test/normalize_task.coffee"),
+        "{failure}"
+    );
+    assert!(failure.contains("export test was false, expected true"));
+
+    // Inspect the same input as the test to explain the false result.
+    let input = r#"{"name":"  Write docs  ","tags":["ux"," daily "]}"#;
+    let run_demo = || {
+        Command::new(env!("CARGO_BIN_EXE_qcoffee"))
+            .args(["--json", "--module-root"])
+            .arg(&root)
+            .args(["demo", "--", input])
+            .output()
+            .unwrap()
+    };
+    let broken = run_demo();
+    assert!(broken.status.success());
+    assert!(String::from_utf8_lossy(&broken.stdout).contains(r#""tags":["ux","daily"]"#));
+    fs::write(&rule_path, original).unwrap();
+    assert!(run_tests().status.success());
+    let repaired = run_demo();
+    assert!(repaired.status.success());
+    assert!(String::from_utf8_lossy(&repaired.stdout).contains(r#""tags":["daily","ux"]"#));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn starter_invalid_input_has_actionable_json_errors() {
+    for (input, expected) in [
+        ("{", "json.parse"),
+        (r#"{"name":"Write docs","tags":[1]}"#, "tags[0]"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_qcoffee"))
+            .args(["--json", "--module-root"])
+            .arg(repository("examples/getting-started"))
+            .args(["demo", "--", input])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let error = String::from_utf8_lossy(&output.stdout);
+        assert!(error.contains(r#""ok":false"#), "{error}");
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains(r#""source":"task.coffee""#), "{error}");
+        if expected == "tags[0]" {
+            assert!(error.contains("input.invalid"), "{error}");
+            assert!(error.contains(r#""expected":"string""#), "{error}");
+        }
+    }
 }
 
 #[test]

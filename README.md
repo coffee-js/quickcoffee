@@ -54,6 +54,28 @@ Windows x86_64 请使用同一 Release 的 `quickcoffee-0.1.0-x86_64-pc-windows-
 
 接下来可以复制这个目录，把 `normalize_task` 换成自己的表单校验、配置整理或轻量业务规则。脚本不会隐式读取文件、访问网络或时间；需要这些能力时，由宿主显式读取数据后通过 `argv`、global 或 native callback 传入。完整语法可在需要时再查阅[中文语法索引](docs/syntax.zh-CN.md)，不必先读完整手册。
 
+### 修改后出错，怎样恢复？
+
+下面是可撤销的示例练习；如已修改入门规则，先保存自己的改动。命令仍在解包目录执行，Windows 使用对应的 `.exe` 文件。
+
+1. 把 `examples/getting-started/task.coffee` 末尾的 `tags: sort(tags)` 临时改为 `tags: tags`，再运行上面的 qtest 命令。
+2. 此时会出现 `not ok test/normalize_task.coffee: export test was false, expected true`，退出码为 1。这表示测试导出的布尔值为 false，不是语法错误，也不会自动指出哪个比较失败。打开该测试文件，查看对名称、标签顺序和非法输入的检查。
+3. 用测试中的同一输入运行 demo，直接观察规则输出：
+
+```sh
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"  Write docs  ","tags":["ux"," daily "]}'
+```
+
+此时标签为 `["ux","daily"]`，而测试预期 `["daily","ux"]`。恢复 `tags: sort(tags)`，重新运行 qtest；应再次显示 `ok test/normalize_task.coffee`，退出码为 0。不要仅为了让测试通过而改掉预期顺序。
+
+若是输入数据错误，可以先看结构化错误的 `code` 和 `data`：
+
+```sh
+./qcoffee --json --module-root examples/getting-started demo -- '{"name":"Write docs","tags":[1]}'
+```
+
+该命令预期失败：`code` 为 `input.invalid`，`data.field` 为 `tags[0]`，`data.expected` 为 `string`；把 `1` 改成字符串再运行。若 JSON 本身不完整（例如输入只有 `{`），则是 `json.parse`，先修正 JSON 格式。去掉 `--json` 可看面向人的源码片段与调用位置；这些位置是执行错误发生处，不一定是输入数据中的位置。
+
 每个归档包含五个 CLI、README、更新日志、双许可证与可直接运行的 Decimal `.litcoffee`/`.coffee`/`.cson` 场景，并与按文件名稳定排序的 `SHA256SUMS` 一起发布；发布门禁会从解包后的干净工作区验证 `.coffee`、GitHub-compatible `.litcoffee`、`qdocco`、`qtest`、`qcson` 双向转换和完整的 CSON → 定价规则链路。下载、校验、无 checkout 验收和维护者发布流程见[发布与平台归档](docs/releasing.md)。Release archives and clean-install verification are documented bilingually in the same guide.
 
 ### 从源码构建 / Build from source
