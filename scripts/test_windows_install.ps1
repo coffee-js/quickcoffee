@@ -2,6 +2,10 @@ param([Parameter(Mandatory = $true)][string]$ArchivePath)
 
 $archiveFile = (Resolve-Path -LiteralPath $ArchivePath -ErrorAction Stop).Path
 $archiveName = Split-Path -Leaf $archiveFile
+if ($archiveName -notmatch '^quickcoffee-(\d+\.\d+\.\d+)-x86_64-pc-windows-msvc\.zip$') {
+    throw "unexpected Windows archive name: $archiveName"
+}
+$archiveVersion = $Matches[1]
 $document = Get-Content -LiteralPath 'docs/releasing.md' -Raw -ErrorAction Stop
 $blocks = [regex]::Matches($document, '(?ms)^```powershell\r?\n(.*?)^```')
 if ($blocks.Count -ne 2 -or $blocks[0].Groups[1].Value -cne $blocks[1].Groups[1].Value) {
@@ -11,6 +15,8 @@ $code = $blocks[0].Groups[1].Value
 if (-not $code.Contains('$Archive = "quickcoffee-$Version-$Target.zip"')) {
     throw 'Windows install block no longer has the expected archive name'
 }
+$versionLine = [regex]::Match($code, '(?m)^  \$Version = "[^"]+"$')
+if (-not $versionLine.Success) { throw 'Windows install block has no version line' }
 
 $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("quickcoffee-windows-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $scratch -ErrorAction Stop | Out-Null
@@ -20,8 +26,8 @@ try {
     $realHash = (Get-FileHash -LiteralPath $archiveFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $badHash = (Get-FileHash -LiteralPath $badZip -Algorithm SHA256).Hash.ToLowerInvariant()
 
-    # The documentation is executed unchanged except where a native command
-    # must be forced to fail. Downloads use local files, not the network.
+    # Run the documented block with only the archive version and selected
+    # failure commands substituted. Downloads use local files, not the network.
     function Invoke-WebRequest {
         param([string]$Uri, [string]$OutFile, [string]$ErrorAction)
         if ($script:Failure -eq 'archive-download' -and $Uri.EndsWith('.zip')) {
@@ -52,7 +58,9 @@ try {
         $entry = if ($failure -eq 'missing-entry') { "$hash  other.zip" } else { "$hash  $archiveName" }
         $script:ManifestFile = Join-Path $work 'fixture-SHA256SUMS'
         Set-Content -LiteralPath $script:ManifestFile -Value $entry
-        $runCode = $code
+        # Public download instructions still use the existing release. Only
+        # this local rehearsal points the same documented code at the new archive.
+        $runCode = $code.Replace($versionLine.Value, ('  $Version = "' + $archiveVersion + '"'))
         if ($failure -eq 'native') {
             $runCode = $runCode.Replace('Invoke-Checked { .\qcoffee.exe --version }',
                 'Invoke-Checked { .\qcoffee.exe --unknown-install-test-option }')
