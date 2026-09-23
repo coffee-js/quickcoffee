@@ -54,6 +54,8 @@ Windows x86_64 请使用同一 Release 的 `quickcoffee-0.1.0-x86_64-pc-windows-
 
 接下来可以复制这个目录，把 `normalize_task` 换成自己的表单校验、配置整理或轻量业务规则。脚本不会隐式读取文件、访问网络或时间；需要这些能力时，由宿主显式读取数据后通过 `argv`、global 或 native callback 传入。完整语法可在需要时再查阅[中文语法索引](docs/syntax.zh-CN.md)，不必先读完整手册。
 
+要用自己的小型 JSON 文件输入并只保存业务结果，可按[文件试用流程](docs/file-workflow.md)运行；其中也说明了失败时如何保留已有结果。The [small-file trial](docs/file-workflow.md) covers explicit file I/O and safe output replacement.
+
 ### 修改后出错，怎样恢复？
 
 下面是可撤销的示例练习；如已修改入门规则，先保存自己的改动。命令仍在解包目录执行，Windows 使用对应的 `.exe` 文件。
