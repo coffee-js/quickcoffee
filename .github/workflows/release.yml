@@ -116,6 +116,10 @@ jobs:
             --archive "${archive}" \
             --version "${{ needs.validate.outputs.version }}" \
             --target "${{ matrix.target }}"
+      - name: Exercise documented Windows install failures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\test_windows_install.ps1 -ArchivePath "dist\quickcoffee-${{ needs.validate.outputs.version }}-x86_64-pc-windows-msvc.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: quickcoffee-${{ needs.validate.outputs.version }}-${{ matrix.target }}

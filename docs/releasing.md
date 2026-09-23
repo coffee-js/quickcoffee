@@ -64,27 +64,41 @@ CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)" &&
 
 Intel macOS 将 `TARGET` 改为 `x86_64-apple-darwin`，Linux 改为 `x86_64-unknown-linux-gnu`。成功时入门任务会输出清洗后的 JSON，入门 qtest 输出 `ok test/normalize_task.coffee`；定价 demo 会输出精确 Decimal 报价与 `pricing.ineligible` 业务拒绝，定价 qtest 输出 `ok test.coffee`。
 
-Windows PowerShell 使用同一 release 中的 zip：
+Windows PowerShell 使用同一 release 中的 zip。请整段执行；下载、校验、解包、切换目录或任一原生命令失败都会停止后续步骤，不继续运行残留文件：
 
 ```powershell
-$Version = "0.1.0"
-$Target = "x86_64-pc-windows-msvc"
-$Archive = "quickcoffee-$Version-$Target.zip"
-$Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
-Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
-Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
-$Expected = ((Get-Content SHA256SUMS | Where-Object { $_ -match "  $([regex]::Escape($Archive))$" }) -split "  ")[0]
-$Actual = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
-if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
-Expand-Archive $Archive -DestinationPath .
-Set-Location "quickcoffee-$Version-$Target"
-.\qcoffee.exe --version
-.\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
-.\qtest.exe --module-root examples\getting-started test
-.\qcoffee.exe --module-root examples\pricing demo
-.\qtest.exe --module-root examples\pricing test
-$ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
-.\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson
+& {
+  $Version = "0.1.0"
+  $Target = "x86_64-pc-windows-msvc"
+  $Archive = "quickcoffee-$Version-$Target.zip"
+  $Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
+  Invoke-WebRequest -Uri "$Base/$Archive" -OutFile $Archive -ErrorAction Stop
+  Invoke-WebRequest -Uri "$Base/SHA256SUMS" -OutFile SHA256SUMS -ErrorAction Stop
+  $ChecksumLines = @(Get-Content -LiteralPath SHA256SUMS -ErrorAction Stop |
+    Where-Object { $_ -cmatch "^[0-9a-fA-F]{64}  $([regex]::Escape($Archive))$" })
+  if ($ChecksumLines.Count -ne 1) { throw "expected one checksum entry: $Archive" }
+  $Expected = ($ChecksumLines[0] -split "  ", 2)[0].ToLowerInvariant()
+  $Actual = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+  if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
+  Expand-Archive -LiteralPath $Archive -DestinationPath . -ErrorAction Stop
+  Set-Location -LiteralPath "quickcoffee-$Version-$Target" -ErrorAction Stop
+  function Invoke-Checked {
+    param([scriptblock]$Command)
+    & $Command
+    $Succeeded = $?
+    if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
+  }
+  Invoke-Checked { .\qcoffee.exe --version }
+  Invoke-Checked { .\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' }
+  Invoke-Checked { .\qtest.exe --module-root examples\getting-started test }
+  Invoke-Checked { .\qcoffee.exe --module-root examples\pricing demo }
+  Invoke-Checked { .\qtest.exe --module-root examples\pricing test }
+  $ConfigJson = .\qcson.exe to-json examples\pricing\config.cson
+  $Succeeded = $?
+  if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = ($ConfigJson | Out-String).TrimEnd()
+  Invoke-Checked { .\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson }
+}
 ```
 
 维护者可以在 tag 前本地运行发布工具测试和完整门禁：
@@ -164,27 +178,41 @@ CONFIG_JSON="$(./qcson to-json examples/pricing/config.cson)" &&
 
 Use `x86_64-apple-darwin` for Intel macOS or `x86_64-unknown-linux-gnu` for Linux. The getting-started task prints normalized JSON and its qtest prints `ok test/normalize_task.coffee`; the pricing demo prints an exact Decimal quote and a `pricing.ineligible` business rejection, and its qtest prints `ok test.coffee`.
 
-On Windows PowerShell, use the zip from the same release:
+On Windows PowerShell, use the zip from the same release. Run the entire block; failed downloads, checksum verification, extraction, directory changes, or native commands stop all later steps instead of running leftover files:
 
 ```powershell
-$Version = "0.1.0"
-$Target = "x86_64-pc-windows-msvc"
-$Archive = "quickcoffee-$Version-$Target.zip"
-$Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
-Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
-Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
-$Expected = ((Get-Content SHA256SUMS | Where-Object { $_ -match "  $([regex]::Escape($Archive))$" }) -split "  ")[0]
-$Actual = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
-if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
-Expand-Archive $Archive -DestinationPath .
-Set-Location "quickcoffee-$Version-$Target"
-.\qcoffee.exe --version
-.\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}'
-.\qtest.exe --module-root examples\getting-started test
-.\qcoffee.exe --module-root examples\pricing demo
-.\qtest.exe --module-root examples\pricing test
-$ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
-.\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson
+& {
+  $Version = "0.1.0"
+  $Target = "x86_64-pc-windows-msvc"
+  $Archive = "quickcoffee-$Version-$Target.zip"
+  $Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
+  Invoke-WebRequest -Uri "$Base/$Archive" -OutFile $Archive -ErrorAction Stop
+  Invoke-WebRequest -Uri "$Base/SHA256SUMS" -OutFile SHA256SUMS -ErrorAction Stop
+  $ChecksumLines = @(Get-Content -LiteralPath SHA256SUMS -ErrorAction Stop |
+    Where-Object { $_ -cmatch "^[0-9a-fA-F]{64}  $([regex]::Escape($Archive))$" })
+  if ($ChecksumLines.Count -ne 1) { throw "expected one checksum entry: $Archive" }
+  $Expected = ($ChecksumLines[0] -split "  ", 2)[0].ToLowerInvariant()
+  $Actual = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+  if ($Actual -ne $Expected) { throw "checksum mismatch: $Archive" }
+  Expand-Archive -LiteralPath $Archive -DestinationPath . -ErrorAction Stop
+  Set-Location -LiteralPath "quickcoffee-$Version-$Target" -ErrorAction Stop
+  function Invoke-Checked {
+    param([scriptblock]$Command)
+    & $Command
+    $Succeeded = $?
+    if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
+  }
+  Invoke-Checked { .\qcoffee.exe --version }
+  Invoke-Checked { .\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' }
+  Invoke-Checked { .\qtest.exe --module-root examples\getting-started test }
+  Invoke-Checked { .\qcoffee.exe --module-root examples\pricing demo }
+  Invoke-Checked { .\qtest.exe --module-root examples\pricing test }
+  $ConfigJson = .\qcson.exe to-json examples\pricing\config.cson
+  $Succeeded = $?
+  if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = ($ConfigJson | Out-String).TrimEnd()
+  Invoke-Checked { .\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson }
+}
 ```
 
 Before tagging, maintainers can run:
