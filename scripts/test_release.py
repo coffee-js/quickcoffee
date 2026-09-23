@@ -39,7 +39,12 @@ class ReleaseToolTests(unittest.TestCase):
         for source_name in release.EXAMPLE_SOURCES:
             source = self.repo / source_name
             source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_text(f"fixture:{source_name}\n", encoding="utf-8")
+            content = (
+                "tags: sort(tags)\n"
+                if source_name == "examples/getting-started/task.coffee"
+                else f"fixture:{source_name}\n"
+            )
+            source.write_text(content, encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -186,6 +191,25 @@ class ReleaseToolTests(unittest.TestCase):
                             '"tags":["bug","urgent"]}}}\n'
                         )
                     elif (
+                        name == "qtest"
+                        and len(arguments) == 3
+                        and arguments[0] == "--module-root"
+                        and Path(arguments[1]).parent == cwd
+                        and arguments[2] == "test"
+                    ):
+                        trial_task = Path(arguments[1]) / "task.coffee"
+                        self.assertEqual(Path(arguments[1]).name, "getting-started")
+                        if "tags: tags" in trial_task.read_text(encoding="utf-8"):
+                            return subprocess.CompletedProcess(
+                                command,
+                                1,
+                                "",
+                                "not ok test/normalize_task.coffee: "
+                                "export test was false, expected true\n"
+                                "1 test file(s) failed\n",
+                            )
+                        stdout = "ok test/normalize_task.coffee\n"
+                    elif (
                         name == "qcson"
                         and len(arguments) == 2
                         and arguments[0] == "to-json"
@@ -223,9 +247,14 @@ class ReleaseToolTests(unittest.TestCase):
                         self.assertEqual(module_root.parent.parent, binary.parent)
                         for source_name in release.EXAMPLE_SOURCES:
                             packaged = binary.parent / source_name
+                            expected = (
+                                "tags: sort(tags)\n"
+                                if source_name == "examples/getting-started/task.coffee"
+                                else f"fixture:{source_name}\n"
+                            )
                             self.assertEqual(
                                 packaged.read_text(encoding="utf-8"),
-                                f"fixture:{source_name}\n",
+                                expected,
                             )
                         if (
                             name == "qtest"
@@ -258,7 +287,7 @@ class ReleaseToolTests(unittest.TestCase):
                     ],
                     list(release.BINARIES),
                 )
-                self.assertEqual(len(calls), 16)
+                self.assertEqual(len(calls), 18)
 
     def test_repository_workflow_keeps_manual_runs_non_publishing(self) -> None:
         repository = SCRIPT.resolve().parents[1]

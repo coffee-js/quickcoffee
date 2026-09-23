@@ -4,6 +4,24 @@ QuickCoffee 的用户可见变化记录在此。版本标题与 `Cargo.toml` 以
 
 User-visible QuickCoffee changes are recorded here. Version headings stay aligned with `Cargo.toml` and `vX.Y.Z` release tags.
 
+## [0.1.1]
+
+### 中文
+
+- `qcoffee`、`qtest` 的中英帮助更明确，按用途展示选项和可运行示例，解释普通测试与模块测试的通过条件。
+- 首次使用优先引导至已验证的发行归档；新增入门任务的测试失败与修复练习，以及显式小型 JSON 文件输入和安全保存结果的流程。
+- Unix 与 Windows 下载示例在下载、校验、解包或运行失败时停止后续步骤，避免运行残留文件；Windows 路径已在原生 runner 上验证成功与注入失败场景。
+- 从标准输入读取过大的源码时，先报告字节限制错误，而非被 UTF-8 解码错误掩盖。
+- 修正 tag 发行工作流的 checkout 步骤，确保发布的是已通过门禁的归档。
+
+### English
+
+- Clearer bilingual `qcoffee` and `qtest` help groups options, provides runnable examples, and explains success conditions for standalone and module tests.
+- First use now leads with verified release archives; the starter adds a test-failure-and-recovery exercise plus an explicit small-JSON-file workflow with safe result saving.
+- Unix and Windows download examples stop after download, checksum, extraction, or command failures rather than running stale files. Native Windows runners verify success and injected failures.
+- Oversized stdin source now reports the byte-limit error before UTF-8 decoding can mask it.
+- Fixes checkout in the tag release workflow so publishing uses the archives that passed the release gates.
+
 ## [0.1.0]
 
 ### 中文

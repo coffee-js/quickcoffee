@@ -10,6 +10,7 @@ import io
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -435,6 +436,34 @@ def verify_install(path: Path, version: str, target: str) -> None:
             workspace,
             "ok test/normalize_task.coffee\n",
         )
+        # Rehearse the documented edit/failure/recovery path using a copy, so
+        # the packaged example remains unchanged for the remaining checks.
+        trial = workspace / "getting-started"
+        shutil.copytree(getting_started, trial)
+        task = trial / "task.coffee"
+        original = task.read_text(encoding="utf-8")
+        marker = "tags: sort(tags)"
+        if original.count(marker) != 1:
+            raise ReleaseError("starter recovery rule was not found exactly once")
+        task.write_text(original.replace(marker, "tags: tags"), encoding="utf-8")
+        trial_command = [
+            os.fspath(binaries["qtest"]), "--module-root", os.fspath(trial), "test"
+        ]
+        failed = subprocess.run(
+            trial_command, cwd=workspace, check=False, capture_output=True, text=True
+        )
+        if (
+            failed.returncode != 1
+            or failed.stdout
+            or "not ok test/normalize_task.coffee" not in failed.stderr
+            or "export test was false, expected true" not in failed.stderr
+        ):
+            raise ReleaseError(
+                f"starter failure was not diagnosed: code={failed.returncode}, "
+                f"stdout={failed.stdout!r}, stderr={failed.stderr!r}"
+            )
+        task.write_text(original, encoding="utf-8")
+        run_installed(trial_command, workspace, "ok test/normalize_task.coffee\n")
         pricing = (install / "examples" / "pricing").resolve()
         pricing_config_json = run_installed(
             [
