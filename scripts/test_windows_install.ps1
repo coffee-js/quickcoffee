@@ -97,3 +97,7 @@ try {
 } finally {
     Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop
 }
+
+# The final scenario deliberately runs a failing native executable. PowerShell
+# otherwise passes its stale exit code to the hosting CI step after all assertions pass.
+$global:LASTEXITCODE = 0
