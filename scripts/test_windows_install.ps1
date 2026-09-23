@@ -2,10 +2,11 @@ param([Parameter(Mandatory = $true)][string]$ArchivePath)
 
 $archiveFile = (Resolve-Path -LiteralPath $ArchivePath -ErrorAction Stop).Path
 $archiveName = Split-Path -Leaf $archiveFile
-if ($archiveName -notmatch '^quickcoffee-(\d+\.\d+\.\d+)-x86_64-pc-windows-msvc\.zip$') {
+$archiveMatch = [regex]::Match($archiveName, '^quickcoffee-(\d+\.\d+\.\d+)-x86_64-pc-windows-msvc\.zip$')
+if (-not $archiveMatch.Success) {
     throw "unexpected Windows archive name: $archiveName"
 }
-$archiveVersion = $Matches[1]
+$archiveVersion = $archiveMatch.Groups[1].Value
 $document = Get-Content -LiteralPath 'docs/releasing.md' -Raw -ErrorAction Stop
 $blocks = [regex]::Matches($document, '(?ms)^```powershell\r?\n(.*?)^```')
 if ($blocks.Count -ne 2 -or $blocks[0].Groups[1].Value -cne $blocks[1].Groups[1].Value) {
