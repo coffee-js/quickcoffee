@@ -316,7 +316,7 @@ fn deployment_cookbook_reuses_the_verified_worker_contract() {
     let cookbook = include_str!("../docs/deployment.md");
     let readme = include_str!("../README.md");
     let releasing = include_str!("../docs/releasing.md");
-    let release_revision = "b3d27d24d15d76786baa21614b9cc2a97b28579e";
+    let release_revision = "95c4866a14647b48c12d5de67b48b2ddc15a287f";
 
     for expected in [
         "ExecutionPolicy::isolated_request()",
@@ -335,5 +335,5 @@ fn deployment_cookbook_reuses_the_verified_worker_contract() {
     assert!(cookbook.matches(release_revision).count() >= 2);
     assert!(releasing.matches(release_revision).count() >= 2);
     assert!(readme.contains("docs/deployment.md"));
-    assert!(!releasing.contains("quickcoffee = \"0.1.0\""));
+    assert!(!releasing.contains("quickcoffee = \"0.1.1\""));
 }

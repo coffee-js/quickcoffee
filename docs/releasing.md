@@ -37,10 +37,10 @@ Windows PowerShell 可将 `Get-FileHash -Algorithm SHA256` 的结果与 `SHA256S
 
 ### 无仓库 checkout 的快速验收
 
-正式 `v0.1.0` 发布后，Linux 或 macOS 用户可以只下载平台归档和 checksum。请整段执行；`&&` 让任一步失败后停止后续命令。遇到错误时先解决对应问题再重试，不要跳过校验或继续运行残留文件：
+正式 `v0.1.1` 发布后，Linux 或 macOS 用户可以只下载平台归档和 checksum。请整段执行；`&&` 让任一步失败后停止后续命令。遇到错误时先解决对应问题再重试，不要跳过校验或继续运行残留文件：
 
 ```sh
-VERSION=0.1.0
+VERSION=0.1.1
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
@@ -69,7 +69,7 @@ Windows PowerShell 使用同一 release 中的 zip。请整段执行；下载、
 
 ```powershell
 & {
-  $Version = "0.1.0"
+  $Version = "0.1.1"
   $Target = "x86_64-pc-windows-msvc"
   $Archive = "quickcoffee-$Version-$Target.zip"
   $Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
@@ -111,11 +111,11 @@ make check
 
 ### Rust crate 分发决策
 
-0.1 暂缓 crates.io 发布。CLI 用户使用上述正式 Release；Rust embedding 用户固定经过验证的 `v0.1.0` 完整 commit，不使用浮动分支：
+0.1 暂缓 crates.io 发布。CLI 用户使用上述正式 Release；Rust embedding 用户固定经过验证的 `v0.1.1` 完整 commit，不使用浮动分支：
 
 ```toml
 [dependencies]
-quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "95c4866a14647b48c12d5de67b48b2ddc15a287f" }
 ```
 
 只有真实分发需求出现时才建立独立 crates.io 发布 issue。完整宿主选择见[生产嵌入指南](deployment.md)。
@@ -152,10 +152,10 @@ On Windows, compare `Get-FileHash -Algorithm SHA256` output with `SHA256SUMS`. T
 
 ### Quick acceptance without a repository checkout
 
-After the formal `v0.1.0` release, a Linux or macOS user needs only the platform archive and checksum manifest. Run the entire block; `&&` stops subsequent commands if any step fails. Fix the reported problem before retrying; do not skip verification or continue running leftover files:
+After the formal `v0.1.1` release, a Linux or macOS user needs only the platform archive and checksum manifest. Run the entire block; `&&` stops subsequent commands if any step fails. Fix the reported problem before retrying; do not skip verification or continue running leftover files:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.1.1
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
@@ -184,7 +184,7 @@ On Windows PowerShell, use the zip from the same release. Run the entire block; 
 
 ```powershell
 & {
-  $Version = "0.1.0"
+  $Version = "0.1.1"
   $Target = "x86_64-pc-windows-msvc"
   $Archive = "quickcoffee-$Version-$Target.zip"
   $Base = "https://github.com/coffee-js/quickcoffee/releases/download/v$Version"
@@ -226,11 +226,11 @@ make check
 
 ### Rust crate distribution decision
 
-crates.io publication is deferred for 0.1. CLI users use the formal Release above; Rust embedders pin the complete verified `v0.1.0` commit rather than a moving branch:
+crates.io publication is deferred for 0.1. CLI users use the formal Release above; Rust embedders pin the complete verified `v0.1.1` commit rather than a moving branch:
 
 ```toml
 [dependencies]
-quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "95c4866a14647b48c12d5de67b48b2ddc15a287f" }
 ```
 
 Open a focused crates.io publication issue only when real distribution demand appears. See the [production embedding cookbook](deployment.md) for the complete host choices.
