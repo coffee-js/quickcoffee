@@ -88,9 +88,9 @@ try {
             'checksum' { 'checksum mismatch' }
             'directory' { 'simulated directory failure' }
             'native' { 'native command failed with exit code' }
-            'missing-binary' { 'native command failed with exit code' }
+            'missing-binary' { 'missing-qcoffee.exe' }
             'qcson' { 'qcson failed with exit code' }
-            'missing-qcson' { 'qcson failed with exit code' }
+            'missing-qcson' { 'missing-qcson.exe' }
             default { '' }
         }
         if ($expectedMessage -and -not $message.Contains($expectedMessage)) {
