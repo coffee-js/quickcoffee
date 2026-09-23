@@ -16,6 +16,7 @@ macOS Intel 使用 `macos-15-intel`，Apple silicon 使用 `macos-15`；workflow
 - 五个 CLI 的版本检查；
 - `qcson` 的 CSON → JSON 与 JSON → CSON canonical 转换；
 - README 入门任务的 JSON 输入、稳定输出与隔离 `qtest`；
+- 在解包示例的临时副本中改坏排序规则，确认 `qtest` 失败，再恢复规则并确认通过；
 - 归档内 `.cson` 经 `qcson` 转换后通过显式 `argv` 驱动 Decimal 定价，结果与 Rust embedding 基线一致；
 - 一个独立 `.coffee` 脚本；
 - 一个含 Markdown 行内代码与四空格可执行块的 GitHub-compatible `.litcoffee`；
@@ -130,6 +131,7 @@ Every archive contains `qcoffee`, `qtest`, `qdocco`, `qbench`, `qcson`, the READ
 - version checks for all five CLIs;
 - canonical CSON → JSON and JSON → CSON conversion through `qcson`;
 - the README starter task with JSON input, stable output, and isolated `qtest`;
+- a temporary copy of that starter with a broken sorting rule, failing `qtest`, then a restored rule and passing `qtest`;
 - the packaged `.cson` configuration through `qcson` and explicit `argv` into Decimal pricing, matching the Rust embedding baseline;
 - one standalone `.coffee` script;
 - one GitHub-compatible `.litcoffee` document containing Markdown inline code and a four-space executable block;
