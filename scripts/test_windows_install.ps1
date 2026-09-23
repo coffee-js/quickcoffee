@@ -42,7 +42,7 @@ try {
     }
 
     foreach ($failure in @('success', 'archive-download', 'manifest-download', 'missing-entry',
-            'checksum', 'extract', 'directory', 'native', 'qcson')) {
+            'checksum', 'extract', 'directory', 'native', 'missing-binary', 'qcson', 'missing-qcson')) {
         $work = Join-Path $scratch $failure
         New-Item -ItemType Directory -Path $work -ErrorAction Stop | Out-Null
         $script:Failure = $failure
@@ -57,8 +57,15 @@ try {
             $runCode = $runCode.Replace('Invoke-Checked { .\qcoffee.exe --version }',
                 'Invoke-Checked { .\qcoffee.exe --unknown-install-test-option }')
         }
+        if ($failure -eq 'missing-binary') {
+            $runCode = $runCode.Replace('Invoke-Checked { .\qcoffee.exe --version }',
+                'Invoke-Checked { .\missing-qcoffee.exe --version }')
+        }
         if ($failure -eq 'qcson') {
             $runCode = $runCode.Replace('examples\pricing\config.cson', 'examples\pricing\missing.cson')
+        }
+        if ($failure -eq 'missing-qcson') {
+            $runCode = $runCode.Replace('.\qcson.exe to-json', '.\missing-qcson.exe to-json')
         }
         $failed = $false
         $message = ''
@@ -81,7 +88,9 @@ try {
             'checksum' { 'checksum mismatch' }
             'directory' { 'simulated directory failure' }
             'native' { 'native command failed with exit code' }
+            'missing-binary' { 'native command failed with exit code' }
             'qcson' { 'qcson failed with exit code' }
+            'missing-qcson' { 'qcson failed with exit code' }
             default { '' }
         }
         if ($expectedMessage -and -not $message.Contains($expectedMessage)) {

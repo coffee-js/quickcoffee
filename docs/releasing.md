@@ -85,15 +85,18 @@ Windows PowerShell 使用同一 release 中的 zip。请整段执行；下载、
   function Invoke-Checked {
     param([scriptblock]$Command)
     & $Command
-    if ($LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
+    $Succeeded = $?
+    if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
   }
   Invoke-Checked { .\qcoffee.exe --version }
   Invoke-Checked { .\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' }
   Invoke-Checked { .\qtest.exe --module-root examples\getting-started test }
   Invoke-Checked { .\qcoffee.exe --module-root examples\pricing demo }
   Invoke-Checked { .\qtest.exe --module-root examples\pricing test }
-  $ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
-  if ($LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = .\qcson.exe to-json examples\pricing\config.cson
+  $Succeeded = $?
+  if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = ($ConfigJson | Out-String).TrimEnd()
   Invoke-Checked { .\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson }
 }
 ```
@@ -196,15 +199,18 @@ On Windows PowerShell, use the zip from the same release. Run the entire block; 
   function Invoke-Checked {
     param([scriptblock]$Command)
     & $Command
-    if ($LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
+    $Succeeded = $?
+    if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "native command failed with exit code $LASTEXITCODE" }
   }
   Invoke-Checked { .\qcoffee.exe --version }
   Invoke-Checked { .\qcoffee.exe --json --module-root examples\getting-started demo -- '{"name":"  Fix login  ","tags":[" bug ","urgent"]}' }
   Invoke-Checked { .\qtest.exe --module-root examples\getting-started test }
   Invoke-Checked { .\qcoffee.exe --module-root examples\pricing demo }
   Invoke-Checked { .\qtest.exe --module-root examples\pricing test }
-  $ConfigJson = (.\qcson.exe to-json examples\pricing\config.cson | Out-String).TrimEnd()
-  if ($LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = .\qcson.exe to-json examples\pricing\config.cson
+  $Succeeded = $?
+  if (-not $Succeeded -or $LASTEXITCODE -ne 0) { throw "qcson failed with exit code $LASTEXITCODE" }
+  $ConfigJson = ($ConfigJson | Out-String).TrimEnd()
   Invoke-Checked { .\qcoffee.exe --module-root examples\pricing configured -- $ConfigJson }
 }
 ```
