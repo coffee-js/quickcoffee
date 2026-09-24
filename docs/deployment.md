@@ -4,11 +4,11 @@
 
 ### 固定依赖
 
-QuickCoffee 0.1 暂未发布到 crates.io。Rust 宿主应固定经过验证的 `v0.1.0` 完整 commit，而不是跟随浮动分支：
+QuickCoffee 0.1 暂未发布到 crates.io。Rust 宿主应固定经过验证的 `v0.1.1` 完整 commit，而不是跟随浮动分支：
 
 ```toml
 [dependencies]
-quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "95c4866a14647b48c12d5de67b48b2ddc15a287f" }
 ```
 
 升级时只把 `rev` 替换为已经审阅和测试的新完整 commit。
@@ -67,11 +67,11 @@ QuickCoffee 不内建进程管理器或系统 capability adapter；这些边界�
 
 ### Pin the dependency
 
-QuickCoffee 0.1 is not published on crates.io. Rust hosts should pin the complete verified `v0.1.0` commit rather than follow a moving branch:
+QuickCoffee 0.1 is not published on crates.io. Rust hosts should pin the complete verified `v0.1.1` commit rather than follow a moving branch:
 
 ```toml
 [dependencies]
-quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "b3d27d24d15d76786baa21614b9cc2a97b28579e" }
+quickcoffee = { git = "https://github.com/coffee-js/quickcoffee.git", rev = "95c4866a14647b48c12d5de67b48b2ddc15a287f" }
 ```
 
 To upgrade, replace `rev` only with another complete commit that you have reviewed and tested.

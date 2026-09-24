@@ -17,7 +17,7 @@ QuickCoffee 是一台以 Rust 编写、受 CoffeeScript 启发的紧凑字节码
 下载归档和同一 Release 的 checksum，再校验、解包并确认版本。请整段执行；`&&` 确保任一步失败后不再继续解包或运行。若有错误，先解决下载、校验或目录问题，再重试，不要跳过校验：
 
 ```sh
-VERSION=0.1.0
+VERSION=0.1.1
 TARGET=aarch64-apple-darwin
 ARCHIVE="quickcoffee-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/coffee-js/quickcoffee/releases/download/v${VERSION}"
@@ -34,7 +34,7 @@ cd "quickcoffee-${VERSION}-${TARGET}" &&
 ./qcoffee --version
 ```
 
-Windows x86_64 请使用同一 Release 的 `quickcoffee-0.1.0-x86_64-pc-windows-msvc.zip`；可复制的 PowerShell 下载、校验和解包命令见[发布与平台归档](docs/releasing.md)。归档不会自动修改 `PATH`，因此以下命令使用 `./`（Windows 使用 `./qcoffee.exe` 和 `./qtest.exe`）。
+Windows x86_64 请使用同一 Release 的 `quickcoffee-0.1.1-x86_64-pc-windows-msvc.zip`；可复制的 PowerShell 下载、校验和解包命令见[发布与平台归档](docs/releasing.md)。归档不会自动修改 `PATH`，因此以下命令使用 `./`（Windows 使用 `./qcoffee.exe` 和 `./qtest.exe`）。
 
 ### 5 分钟完成第一个日常任务
 
